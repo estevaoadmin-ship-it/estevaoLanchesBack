@@ -1,5 +1,7 @@
 package com.paullomaggio.estevaoLanches.services;
 
+import com.paullomaggio.estevaoLanches.dtos.AdicionalRequestDTO;
+import com.paullomaggio.estevaoLanches.dtos.AdicionalResponseDTO;
 import com.paullomaggio.estevaoLanches.entities.Adicional;
 import com.paullomaggio.estevaoLanches.repositories.AdicionalRepository;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -7,7 +9,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.util.List;
-import java.util.UUID;
+import java.util.stream.Collectors;
 
 @Service
 public class AdicionalService {
@@ -15,29 +17,20 @@ public class AdicionalService {
     @Autowired
     private AdicionalRepository adicionalRepository;
 
-    @Transactional(readOnly = true)
-    public List<Adicional> listarTodos() {
-        return adicionalRepository.findAll();
-    }
-
-    @Transactional(readOnly = true)
-    public Adicional buscarPorId(UUID id) {
-        return adicionalRepository.findById(id)
-                .orElseThrow(() -> new RuntimeException("Adicional não encontrado com o ID: " + id));
+    public List<AdicionalResponseDTO> listarTodos() {
+        return adicionalRepository.findAll().stream()
+                .map(AdicionalResponseDTO::new)
+                .collect(Collectors.toList());
     }
 
     @Transactional
-    public Adicional salvar(Adicional adicional) {
-        // Regra de negócio simples: impede adicionais com preço negativo
-        if (adicional.getPreco() == null || adicional.getPreco().doubleValue() < 0) {
-            throw new IllegalArgumentException("O preço do adicional não pode ser negativo ou nulo.");
-        }
-        return adicionalRepository.save(adicional);
-    }
+    public AdicionalResponseDTO salvar(AdicionalRequestDTO dto) {
+        Adicional adicional = new Adicional();
+        adicional.setNome(dto.nome());
+        adicional.setPreco(dto.preco());
 
-    @Transactional
-    public void deletar(UUID id) {
-        Adicional adicional = buscarPorId(id);
-        adicionalRepository.delete(adicional);
+        Adicional adicionalSalvo = adicionalRepository.save(adicional);
+
+        return new AdicionalResponseDTO(adicionalSalvo);
     }
 }

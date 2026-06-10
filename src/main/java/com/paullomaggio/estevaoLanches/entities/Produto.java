@@ -41,7 +41,16 @@ public class Produto {
     @Column(nullable = false)
     private Boolean isCombo = false;
 
+    // =========================================================
+    // NOVO RELACIONAMENTO: Muitos Produtos para Uma Categoria
+    // =========================================================
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "categoria_id", nullable = false)
+    private Categoria categoria;
+
+    // =========================================================
     // Relacionamento de Muitos para Muitos com Adicionais
+    // =========================================================
     @ManyToMany
     @JoinTable(
             name = "produto_adicional",
@@ -50,7 +59,9 @@ public class Produto {
     )
     private List<Adicional> adicionais = new ArrayList<>(); // Inicializado para evitar NullPointerException
 
-    // Relacionamento com os itens do combo (explicado abaixo)
+    // =========================================================
+    // Relacionamento com os itens do combo
+    // =========================================================
     @OneToMany(mappedBy = "combo", cascade = CascadeType.ALL, orphanRemoval = true)
     private List<ComboProduto> itensDoCombo = new ArrayList<>();
 }

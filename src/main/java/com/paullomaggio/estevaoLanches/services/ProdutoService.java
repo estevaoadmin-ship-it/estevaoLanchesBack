@@ -1,14 +1,19 @@
 package com.paullomaggio.estevaoLanches.services;
 
+import com.paullomaggio.estevaoLanches.dtos.ProdutoRequestDTO;
+import com.paullomaggio.estevaoLanches.dtos.ProdutoResponseDTO;
+import com.paullomaggio.estevaoLanches.entities.Adicional;
+import com.paullomaggio.estevaoLanches.entities.Categoria;
 import com.paullomaggio.estevaoLanches.entities.Produto;
-import com.paullomaggio.estevaoLanches.enums.StatusProduto;
+import com.paullomaggio.estevaoLanches.repositories.AdicionalRepository;
+import com.paullomaggio.estevaoLanches.repositories.CategoriaRepository;
 import com.paullomaggio.estevaoLanches.repositories.ProdutoRepository;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.util.List;
-import java.util.UUID;
+import java.util.stream.Collectors;
 
 @Service
 public class ProdutoService {
@@ -16,47 +21,44 @@ public class ProdutoService {
     @Autowired
     private ProdutoRepository produtoRepository;
 
-    @Transactional(readOnly = true)
-    public List<Produto> listarTodos() {
-        return produtoRepository.findAll();
-    }
+    @Autowired
+    private CategoriaRepository categoriaRepository;
 
-    @Transactional(readOnly = true)
-    public List<Produto> listarDisponiveis() {
-        return produtoRepository.findByStatus(StatusProduto.DISPONIVEL);
-    }
+    @Autowired
+    private AdicionalRepository adicionalRepository;
 
-    @Transactional(readOnly = true)
-    public Produto buscarPorId(UUID id) {
-        return produtoRepository.findById(id)
-                .orElseThrow(() -> new RuntimeException("Produto não encontrado com o ID: " + id));
+    public List<ProdutoResponseDTO> listarTodos() {
+        // Vai buscar todos os produtos à base de dados e converte cada um num ProdutoResponseDTO
+        return produtoRepository.findAll().stream()
+                .map(ProdutoResponseDTO::new)
+                .collect(Collectors.toList());
     }
 
     @Transactional
-    public Produto salvar(Produto produto) {
-        // Regra de Negócio: Validação básica de preço
-        if (produto.getPreco() == null || produto.getPreco().doubleValue() <= 0) {
-            throw new IllegalArgumentException("O produto deve ter um preço maior que zero.");
+    public ProdutoResponseDTO salvar(ProdutoRequestDTO dto) {
+        Produto produto = new Produto();
+        produto.setNome(dto.nome());
+        produto.setDescricao(dto.descricao());
+        produto.setPreco(dto.preco());
+        produto.setUrlImagem(dto.urlImagem());
+        produto.setStatus(dto.status());
+        produto.setIsCombo(dto.isCombo());
+
+        // 1. Vai buscar a Categoria através do ID enviado no DTO
+        Categoria categoria = categoriaRepository.findById(dto.categoriaId())
+                .orElseThrow(() -> new RuntimeException("Categoria não encontrada!"));
+        produto.setCategoria(categoria);
+
+        // 2. Se vierem IDs de adicionais, vai buscá-los à base de dados
+        if (dto.adicionaisIds() != null && !dto.adicionaisIds().isEmpty()) {
+            List<Adicional> adicionais = adicionalRepository.findAllById(dto.adicionaisIds());
+            produto.setAdicionais(adicionais);
         }
 
-        // Se for um novo produto e o status não foi definido, vira DISPONIVEL por padrão
-        if (produto.getStatus() == null) {
-            produto.setStatus(StatusProduto.DISPONIVEL);
-        }
+        // 3. Guarda a Entidade na base de dados
+        Produto produtoGuardado = produtoRepository.save(produto);
 
-        return produtoRepository.save(produto);
-    }
-
-    @Transactional
-    public void alterarStatus(UUID id, StatusProduto novoStatus) {
-        Produto produto = buscarPorId(id);
-        produto.setStatus(novoStatus);
-        produtoRepository.save(produto); // O JPA atualiza automaticamente por estar na mesma transação
-    }
-
-    @Transactional
-    public void deletar(UUID id) {
-        Produto produto = buscarPorId(id);
-        produtoRepository.delete(produto);
+        // 4. Converte a Entidade guardada num DTO e devolve
+        return new ProdutoResponseDTO(produtoGuardado);
     }
 }

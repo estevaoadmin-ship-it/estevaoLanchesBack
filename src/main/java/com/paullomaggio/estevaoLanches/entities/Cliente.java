@@ -1,0 +1,35 @@
+package com.paullomaggio.estevaoLanches.entities;
+
+import jakarta.persistence.*;
+import lombok.*;
+import java.time.LocalDate;
+import java.util.UUID;
+
+@Entity
+@Table(name = "cliente")
+@Getter
+@Setter
+@NoArgsConstructor
+@AllArgsConstructor
+@EqualsAndHashCode(onlyExplicitlyIncluded = true)
+public class Cliente {
+
+    @Id
+    @GeneratedValue(strategy = GenerationType.UUID)
+    @EqualsAndHashCode.Include
+    private UUID id;
+
+    @Column(nullable = false, length = 150)
+    private String nome;
+
+    @Column(unique = true, length = 14)
+    private String cpf;
+
+    @Column(nullable = false, unique = true, length = 100)
+    private String email;
+
+    @Column(length = 20)
+    private String numero; // Telefone/WhatsApp
+
+    private LocalDate dataNascimento;
+}
