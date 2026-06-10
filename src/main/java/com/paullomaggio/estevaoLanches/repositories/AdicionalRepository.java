@@ -1,0 +1,12 @@
+package com.paullomaggio.estevaoLanches.repositories;
+
+import com.paullomaggio.estevaoLanches.entities.Adicional;
+import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.stereotype.Repository;
+
+import java.util.UUID;
+
+@Repository
+public interface AdicionalRepository extends JpaRepository<Adicional, UUID> {
+    // O JpaRepository já nos dá métodos como save(), findById(), findAll(), deleteById()
+}
