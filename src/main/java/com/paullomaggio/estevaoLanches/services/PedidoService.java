@@ -6,7 +6,9 @@ import com.paullomaggio.estevaoLanches.entities.Carrinho;
 import com.paullomaggio.estevaoLanches.entities.ItemCarrinho;
 import com.paullomaggio.estevaoLanches.entities.ItemPedido;
 import com.paullomaggio.estevaoLanches.entities.Pedido;
+import com.paullomaggio.estevaoLanches.enums.StatusCaixa;
 import com.paullomaggio.estevaoLanches.enums.StatusPedido;
+import com.paullomaggio.estevaoLanches.repositories.CaixaRepository;
 import com.paullomaggio.estevaoLanches.repositories.CarrinhoRepository;
 import com.paullomaggio.estevaoLanches.repositories.PedidoRepository;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -25,8 +27,17 @@ public class PedidoService {
     @Autowired
     private PedidoRepository pedidoRepository;
 
+    @Autowired
+    private CaixaRepository caixaRepository; // <-- Injeção do controle de abertura do dia
+
     @Transactional
     public PedidoResponseDTO finalizarPedido(CheckoutRequestDTO dto) {
+        // 0. TRAVA DE SEGURANÇA: Bloqueia as vendas se o estabelecimento estiver fechado
+        if (!caixaRepository.existsByStatus(StatusCaixa.ABERTO)) {
+            throw new RuntimeException("O estabelecimento está fechado no momento. Abra o caixa no painel para iniciar as vendas!");
+        }
+
+        // 1. Busca o Carrinho
         Carrinho carrinho = carrinhoRepository.findByClienteId(dto.clienteId())
                 .orElseThrow(() -> new RuntimeException("Carrinho não encontrado para este cliente!"));
 
@@ -34,7 +45,7 @@ public class PedidoService {
             throw new RuntimeException("O carrinho está vazio!");
         }
 
-        // 1. Cria o Pedido Base
+        // 2. Cria o Pedido Base
         Pedido pedido = new Pedido();
         pedido.setCliente(carrinho.getCliente());
         pedido.setStatus(StatusPedido.RECEBIDO);
@@ -46,7 +57,7 @@ public class PedidoService {
 
         BigDecimal totalPedido = BigDecimal.ZERO;
 
-        // 2. Transforma ItemCarrinho em ItemPedido
+        // 3. Transforma ItemCarrinho em ItemPedido (Mantendo preço histórico)
         for (ItemCarrinho itemCarrinho : carrinho.getItens()) {
             ItemPedido itemPedido = new ItemPedido();
             itemPedido.setPedido(pedido);
@@ -66,7 +77,7 @@ public class PedidoService {
         pedido.setTotal(totalPedido);
         Pedido pedidoSalvo = pedidoRepository.save(pedido);
 
-        // 3. Limpa o carrinho
+        // 4. Limpa o carrinho do cliente
         carrinho.getItens().clear();
         carrinhoRepository.save(carrinho);
 
