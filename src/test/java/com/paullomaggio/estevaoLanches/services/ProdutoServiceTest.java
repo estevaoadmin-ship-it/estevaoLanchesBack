@@ -6,6 +6,8 @@ import com.paullomaggio.estevaoLanches.entities.Adicional;
 import com.paullomaggio.estevaoLanches.entities.Categoria;
 import com.paullomaggio.estevaoLanches.entities.Produto;
 import com.paullomaggio.estevaoLanches.enums.StatusProduto;
+import com.paullomaggio.estevaoLanches.exceptions.BusinessRuleException;
+import com.paullomaggio.estevaoLanches.exceptions.ResourceNotFoundException;
 import com.paullomaggio.estevaoLanches.repositories.AdicionalRepository;
 import com.paullomaggio.estevaoLanches.repositories.CategoriaRepository;
 import com.paullomaggio.estevaoLanches.repositories.ProdutoRepository;
@@ -86,14 +88,15 @@ class ProdutoServiceTest {
     }
 
     @Test
-    @DisplayName("Deve lançar exceção ao tentar salvar produto com categoria inexistente")
+    @DisplayName("Deve lançar exceção de negócio ao tentar salvar produto com categoria inexistente")
     void deveLancarExcecaoCategoriaInexistente() {
         requestDTOMock = new ProdutoRequestDTO("Erro", "Erro", BigDecimal.TEN, "", StatusProduto.DISPONIVEL, false, UUID.randomUUID(), null);
 
         when(categoriaRepository.findById(any())).thenReturn(Optional.empty());
 
-        RuntimeException exception = assertThrows(RuntimeException.class, () -> produtoService.salvar(requestDTOMock));
-        assertEquals("Categoria informada não existe!", exception.getMessage());
+        // Agora espera uma BusinessRuleException
+        BusinessRuleException exception = assertThrows(BusinessRuleException.class, () -> produtoService.salvar(requestDTOMock));
+        assertEquals("A Categoria informada para o produto não existe!", exception.getMessage());
     }
 
     @Test
@@ -138,11 +141,12 @@ class ProdutoServiceTest {
     }
 
     @Test
-    @DisplayName("Deve lançar exceção ao buscar ID que não existe")
+    @DisplayName("Deve lançar ResourceNotFoundException ao buscar ID que não existe")
     void deveLancarExcecaoIdInexistente() {
         when(produtoRepository.findById(any())).thenReturn(Optional.empty());
 
-        RuntimeException exception = assertThrows(RuntimeException.class, () -> produtoService.buscarPorId(UUID.randomUUID()));
+        // Agora espera uma ResourceNotFoundException
+        ResourceNotFoundException exception = assertThrows(ResourceNotFoundException.class, () -> produtoService.buscarPorId(UUID.randomUUID()));
         assertEquals("Produto não encontrado com o ID informado.", exception.getMessage());
     }
 
@@ -179,11 +183,12 @@ class ProdutoServiceTest {
     }
 
     @Test
-    @DisplayName("Deve lançar exceção ao tentar deletar produto que não existe")
+    @DisplayName("Deve lançar ResourceNotFoundException ao tentar deletar produto que não existe")
     void deveLancarExcecaoDeletarInexistente() {
         when(produtoRepository.existsById(produtoId)).thenReturn(false);
 
-        RuntimeException exception = assertThrows(RuntimeException.class, () -> produtoService.deletar(produtoId));
+        // Agora espera uma ResourceNotFoundException
+        ResourceNotFoundException exception = assertThrows(ResourceNotFoundException.class, () -> produtoService.deletar(produtoId));
         assertEquals("Não é possível excluir. Produto não encontrado!", exception.getMessage());
         verify(produtoRepository, never()).deleteById(any());
     }

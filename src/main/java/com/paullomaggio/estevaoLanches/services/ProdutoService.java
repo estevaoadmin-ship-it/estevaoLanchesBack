@@ -5,6 +5,8 @@ import com.paullomaggio.estevaoLanches.dtos.ProdutoResponseDTO;
 import com.paullomaggio.estevaoLanches.entities.Adicional;
 import com.paullomaggio.estevaoLanches.entities.Categoria;
 import com.paullomaggio.estevaoLanches.entities.Produto;
+import com.paullomaggio.estevaoLanches.exceptions.BusinessRuleException;
+import com.paullomaggio.estevaoLanches.exceptions.ResourceNotFoundException;
 import com.paullomaggio.estevaoLanches.repositories.AdicionalRepository;
 import com.paullomaggio.estevaoLanches.repositories.CategoriaRepository;
 import com.paullomaggio.estevaoLanches.repositories.ProdutoRepository;
@@ -35,9 +37,6 @@ public class ProdutoService {
                 .collect(Collectors.toList());
     }
 
-    // =========================================================================
-    // 1. BUSCAR POR TERMO (Lupinha integrada ao banco de dados)
-    // =========================================================================
     @Transactional(readOnly = true)
     public List<ProdutoResponseDTO> buscarPorTermo(String termo) {
         return produtoRepository.buscarPorTermo(termo).stream()
@@ -45,13 +44,10 @@ public class ProdutoService {
                 .collect(Collectors.toList());
     }
 
-    // =========================================================================
-    // 2. BUSCAR POR ID (Útil para carregar dados antes de uma edição)
-    // =========================================================================
     @Transactional(readOnly = true)
     public ProdutoResponseDTO buscarPorId(UUID id) {
         Produto produto = produtoRepository.findById(id)
-                .orElseThrow(() -> new RuntimeException("Produto não encontrado com o ID informado."));
+                .orElseThrow(() -> new ResourceNotFoundException("Produto não encontrado com o ID informado."));
         return new ProdutoResponseDTO(produto);
     }
 
@@ -64,35 +60,25 @@ public class ProdutoService {
         return new ProdutoResponseDTO(produtoGuardado);
     }
 
-    // =========================================================================
-    // 3. EDITAR / ATUALIZAR PRODUTO EXISTENTE
-    // =========================================================================
     @Transactional
     public ProdutoResponseDTO atualizar(UUID id, ProdutoRequestDTO dto) {
-        // Busca o registro atual na base de dados
         Produto produto = produtoRepository.findById(id)
-                .orElseThrow(() -> new RuntimeException("Não é possível editar. Produto não encontrado!"));
+                .orElseThrow(() -> new ResourceNotFoundException("Não é possível editar. Produto não encontrado!"));
 
-        // Atualiza os dados da entidade com as novas informações vindas do DTO
         copiarDtoParaEntidade(dto, produto);
 
-        // Salva as alterações mescladas
         Produto produtoAtualizado = produtoRepository.save(produto);
         return new ProdutoResponseDTO(produtoAtualizado);
     }
 
-    // =========================================================================
-    // 4. EXCLUIR PRODUTO DEFINITIVAMENTE
-    // =========================================================================
     @Transactional
     public void deletar(UUID id) {
         if (!produtoRepository.existsById(id)) {
-            throw new RuntimeException("Não é possível excluir. Produto não encontrado!");
+            throw new ResourceNotFoundException("Não é possível excluir. Produto não encontrado!");
         }
         produtoRepository.deleteById(id);
     }
 
-    // Métodozinho privado auxiliar para reaproveitar código e não repetir set's no Salvar e Editar
     private void copiarDtoParaEntidade(ProdutoRequestDTO dto, Produto produto) {
         produto.setNome(dto.nome());
         produto.setDescricao(dto.descricao());
@@ -101,12 +87,12 @@ public class ProdutoService {
         produto.setStatus(dto.status());
         produto.setIsCombo(dto.isCombo());
 
-        // Vincula a Categoria
+        // Vincula a Categoria - Caso não ache, lança exceção de Regra de Negócio (400)
         Categoria categoria = categoriaRepository.findById(dto.categoriaId())
-                .orElseThrow(() -> new RuntimeException("Categoria informada não existe!"));
+                .orElseThrow(() -> new BusinessRuleException("A Categoria informada para o produto não existe!"));
         produto.setCategoria(categoria);
 
-        // Vincula os Adicionais (Limpa os antigos e adiciona os novos se houver)
+        // Vincula os Adicionais
         if (dto.adicionaisIds() != null && !dto.adicionaisIds().isEmpty()) {
             List<Adicional> adicionais = adicionalRepository.findAllById(dto.adicionaisIds());
             produto.setAdicionais(adicionais);

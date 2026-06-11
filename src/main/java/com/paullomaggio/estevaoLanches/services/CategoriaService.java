@@ -3,6 +3,7 @@ package com.paullomaggio.estevaoLanches.services;
 import com.paullomaggio.estevaoLanches.dtos.CategoriaRequestDTO;
 import com.paullomaggio.estevaoLanches.dtos.CategoriaResponseDTO;
 import com.paullomaggio.estevaoLanches.entities.Categoria;
+import com.paullomaggio.estevaoLanches.exceptions.ResourceNotFoundException;
 import com.paullomaggio.estevaoLanches.repositories.CategoriaRepository;
 import com.paullomaggio.estevaoLanches.repositories.ProdutoRepository;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -19,7 +20,6 @@ public class CategoriaService {
     @Autowired
     private CategoriaRepository categoriaRepository;
 
-    // Injetamos o repositório de produtos para podermos manipular os lanches daqui
     @Autowired
     private ProdutoRepository produtoRepository;
 
@@ -40,7 +40,7 @@ public class CategoriaService {
     @Transactional(readOnly = true)
     public CategoriaResponseDTO buscarPorId(UUID id) {
         Categoria categoria = categoriaRepository.findById(id)
-                .orElseThrow(() -> new RuntimeException("Categoria não encontrada com o ID informado."));
+                .orElseThrow(() -> new ResourceNotFoundException("Categoria não encontrada com o ID informado."));
         return new CategoriaResponseDTO(categoria);
     }
 
@@ -55,25 +55,21 @@ public class CategoriaService {
     @Transactional
     public CategoriaResponseDTO atualizar(UUID id, CategoriaRequestDTO dto) {
         Categoria categoria = categoriaRepository.findById(id)
-                .orElseThrow(() -> new RuntimeException("Não é possível editar. Categoria não encontrada!"));
+                .orElseThrow(() -> new ResourceNotFoundException("Não é possível editar. Categoria não encontrada!"));
         copiarDtoParaEntidade(dto, categoria);
         Categoria categoriaAtualizada = categoriaRepository.save(categoria);
         return new CategoriaResponseDTO(categoriaAtualizada);
     }
 
-    // =========================================================================
-    // EXCLUIR CATEGORIA COM CASCADE MANUAL SEGURO
-    // =========================================================================
     @Transactional
     public void deletar(UUID id) {
         if (!categoriaRepository.existsById(id)) {
-            throw new RuntimeException("Não é possível excluir. Categoria não encontrada!");
+            throw new ResourceNotFoundException("Não é possível excluir. Categoria não encontrada!");
         }
 
-        // 1. Deleta todos os lanches que pertencem a essa categoria primeiro
+        // Deleta todos os lanches que pertencem a essa categoria primeiro (Cascade manual)
         produtoRepository.deletarPorCategoriaId(id);
 
-        // 2. Agora sim, deleta a categoria com o caminho livre no banco
         categoriaRepository.deleteById(id);
     }
 
