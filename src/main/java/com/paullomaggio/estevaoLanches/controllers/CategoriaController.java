@@ -14,7 +14,6 @@ import java.util.UUID;
 
 @RestController
 @RequestMapping("/api/categorias")
-// Liberado para aceitar requisições de qualquer origem no deploy (evita bloqueio de CORS)
 @CrossOrigin(origins = "*", allowedHeaders = "*", methods = {
         RequestMethod.GET, RequestMethod.POST, RequestMethod.PUT, RequestMethod.DELETE
 })
@@ -23,33 +22,27 @@ public class CategoriaController {
     @Autowired
     private CategoriaService categoriaService;
 
-    // 1. LISTAR TODAS (Ordenadas por ordem de exibição)
+    // PADRÃO REST: Unifica a listagem e a busca usando parâmetros opcionais.
+    // Se passar ?nome=X ele filtra, se não, traz a listagem padrão.
     @GetMapping
-    public ResponseEntity<List<CategoriaResponseDTO>> listar() {
+    public ResponseEntity<List<CategoriaResponseDTO>> listar(@RequestParam(required = false) String nome) {
+        if (nome != null && !nome.isBlank()) {
+            return ResponseEntity.ok(categoriaService.buscarPorNome(nome));
+        }
         return ResponseEntity.ok(categoriaService.listarTodas());
     }
 
-    // 2. BUSCA DINÂMICA PELO NOME (Ex: /api/categorias/buscar?nome=Bebidas)
-    @GetMapping("/buscar")
-    public ResponseEntity<List<CategoriaResponseDTO>> buscar(@RequestParam String nome) {
-        List<CategoriaResponseDTO> resultados = categoriaService.buscarPorNome(nome);
-        return ResponseEntity.ok(resultados);
-    }
-
-    // 3. BUSCAR CATEGORIA POR ID
     @GetMapping("/{id}")
     public ResponseEntity<CategoriaResponseDTO> buscarPorId(@PathVariable UUID id) {
         return ResponseEntity.ok(categoriaService.buscarPorId(id));
     }
 
-    // 4. CADASTRAR NOVA CATEGORIA (Com validação ativada)
     @PostMapping
     public ResponseEntity<CategoriaResponseDTO> salvar(@RequestBody @Valid CategoriaRequestDTO dto) {
         CategoriaResponseDTO categoriaSalva = categoriaService.salvar(dto);
         return ResponseEntity.status(HttpStatus.CREATED).body(categoriaSalva);
     }
 
-    // 5. ATUALIZAR CATEGORIA EXISTENTE (Com validação ativada)
     @PutMapping("/{id}")
     public ResponseEntity<CategoriaResponseDTO> atualizar(
             @PathVariable UUID id,
@@ -58,10 +51,9 @@ public class CategoriaController {
         return ResponseEntity.ok(categoriaAtualizada);
     }
 
-    // 6. EXCLUIR CATEGORIA (Respeitando a trava de Chave Estrangeira do banco)
     @DeleteMapping("/{id}")
     public ResponseEntity<Void> deletar(@PathVariable UUID id) {
         categoriaService.deletar(id);
-        return ResponseEntity.noContent().build(); // Retorna Status 204 No Content
+        return ResponseEntity.noContent().build();
     }
 }

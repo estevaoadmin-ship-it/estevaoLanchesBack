@@ -1,8 +1,12 @@
 package com.paullomaggio.estevaoLanches.entities;
 
+import com.fasterxml.jackson.annotation.JsonIgnore;
 import jakarta.persistence.*;
 import jakarta.validation.constraints.*;
 import lombok.*;
+
+import java.util.ArrayList;
+import java.util.List;
 import java.util.UUID;
 
 @Entity
@@ -39,4 +43,11 @@ public class Categoria {
     @Size(max = 255)
     @Column(name = "url_imagem")
     private String urlImagem;
+
+    // =========================================================
+    // CASCADE: Exclui os produtos automaticamente ao excluir a categoria
+    // =========================================================
+    @JsonIgnore // Essencial para evitar loop infinito na hora de gerar o JSON
+    @OneToMany(mappedBy = "categoria", cascade = CascadeType.REMOVE, orphanRemoval = true)
+    private List<Produto> produtos = new ArrayList<>();
 }

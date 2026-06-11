@@ -14,7 +14,6 @@ import java.util.UUID;
 
 @RestController
 @RequestMapping("/api/produtos")
-// Liberado para aceitar requisições de qualquer origem no deploy (evita bloqueio de CORS)
 @CrossOrigin(origins = "*", allowedHeaders = "*", methods = {
         RequestMethod.GET, RequestMethod.POST, RequestMethod.PUT, RequestMethod.DELETE
 })
@@ -23,33 +22,27 @@ public class ProdutoController {
     @Autowired
     private ProdutoService produtoService;
 
-    // 1. LISTAR TODOS
+    // PADRÃO REST: Um único endpoint GET para a coleção.
+    // Se passar ?termo=X ele busca, se não passar, lista todos.
     @GetMapping
-    public ResponseEntity<List<ProdutoResponseDTO>> listar() {
+    public ResponseEntity<List<ProdutoResponseDTO>> listar(@RequestParam(required = false) String termo) {
+        if (termo != null && !termo.isBlank()) {
+            return ResponseEntity.ok(produtoService.buscarPorTermo(termo));
+        }
         return ResponseEntity.ok(produtoService.listarTodos());
     }
 
-    // 2. BUSCA DINÂMICA (Ex: /api/produtos/buscar?termo=X-Tevao)
-    @GetMapping("/buscar")
-    public ResponseEntity<List<ProdutoResponseDTO>> buscar(@RequestParam String termo) {
-        List<ProdutoResponseDTO> resultados = produtoService.buscarPorTermo(termo);
-        return ResponseEntity.ok(resultados);
-    }
-
-    // 3. BUSCAR POR ID ESPECÍFICO
     @GetMapping("/{id}")
     public ResponseEntity<ProdutoResponseDTO> buscarPorId(@PathVariable UUID id) {
         return ResponseEntity.ok(produtoService.buscarPorId(id));
     }
 
-    // 4. CRIAR NOVO PRODUTO (Com validação ativada)
     @PostMapping
     public ResponseEntity<ProdutoResponseDTO> salvar(@RequestBody @Valid ProdutoRequestDTO dto) {
         ProdutoResponseDTO produtoSalvo = produtoService.salvar(dto);
         return ResponseEntity.status(HttpStatus.CREATED).body(produtoSalvo);
     }
 
-    // 5. ATUALIZAR PRODUTO EXISTENTE (Com validação ativada)
     @PutMapping("/{id}")
     public ResponseEntity<ProdutoResponseDTO> atualizar(
             @PathVariable UUID id,
@@ -58,10 +51,9 @@ public class ProdutoController {
         return ResponseEntity.ok(produtoAtualizado);
     }
 
-    // 6. EXCLUIR PRODUTO
     @DeleteMapping("/{id}")
     public ResponseEntity<Void> deletar(@PathVariable UUID id) {
         produtoService.deletar(id);
-        return ResponseEntity.noContent().build(); // Retorna Status 204 No Content (sucesso sem corpo)
+        return ResponseEntity.noContent().build();
     }
 }
