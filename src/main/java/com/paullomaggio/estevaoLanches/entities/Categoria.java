@@ -1,8 +1,8 @@
 package com.paullomaggio.estevaoLanches.entities;
 
 import jakarta.persistence.*;
+import jakarta.validation.constraints.*;
 import lombok.*;
-
 import java.util.UUID;
 
 @Entity
@@ -19,19 +19,24 @@ public class Categoria {
     @EqualsAndHashCode.Include
     private UUID id;
 
+    @NotBlank(message = "O nome da categoria não pode ser nulo ou em branco.")
     @Column(nullable = false, length = 100)
     private String nome;
 
+    @Size(max = 255)
     @Column(length = 255)
     private String descricao;
 
-    // Ajuda a ordenar o cardápio no app do cliente (Lanches 1º, Bebidas 2º)
+    @NotNull(message = "A ordem de exibição é obrigatória.")
+    @Min(0)
     @Column(nullable = false)
     private Integer ordemExibicao = 0;
 
+    @NotNull(message = "O status ativo é obrigatório.")
     @Column(nullable = false)
     private Boolean ativo = true;
 
-    // Ícone ou foto da categoria para o App
+    @Size(max = 255)
+    @Column(name = "url_imagem")
     private String urlImagem;
 }
