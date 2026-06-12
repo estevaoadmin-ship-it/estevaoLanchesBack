@@ -9,6 +9,7 @@ import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
+import java.util.Random;
 
 @Entity
 @Table(name = "pedido")
@@ -23,6 +24,10 @@ public class Pedido {
     @GeneratedValue(strategy = GenerationType.UUID)
     @EqualsAndHashCode.Include
     private UUID id;
+
+    // Código curto e amigável para o cliente (Ex: "A4F2" ou "1045")
+    @Column(nullable = false, unique = true, length = 10)
+    private String numeroPedido;
 
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "cliente_id", nullable = false)
@@ -39,18 +44,30 @@ public class Pedido {
     @Column(nullable = false)
     private TipoPedido tipo; // MESA, DELIVERY, RETIRADA
 
-    // Se for MESA, guardamos o numero. Se for Delivery, fica null.
     private Integer numeroMesa;
-
-    // Se for DELIVERY, guardamos o endereco completo aqui (ou uma entidade Endereco)
     private String enderecoEntrega;
 
     @Column(nullable = false, precision = 10, scale = 2)
     private BigDecimal total = BigDecimal.ZERO;
 
     @Column(length = 255)
-    private String observacaoGeral; // Ex: "Troco para R$ 100" ou "Entregar na portaria"
+    private String observacaoGeral;
 
     @OneToMany(mappedBy = "pedido", cascade = CascadeType.ALL, orphanRemoval = true)
     private List<ItemPedido> itens = new ArrayList<>();
+
+    // Gera um código alfanumérico aleatório de 5 caracteres antes de salvar
+    @PrePersist
+    public void gerarNumeroPedido() {
+        if (this.numeroPedido == null) {
+            String caracteres = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
+            StringBuilder codigo = new StringBuilder();
+            Random rnd = new Random();
+            while (codigo.length() < 5) {
+                int index = (int) (rnd.nextFloat() * caracteres.length());
+                codigo.append(caracteres.charAt(index));
+            }
+            this.numeroPedido = codigo.toString();
+        }
+    }
 }

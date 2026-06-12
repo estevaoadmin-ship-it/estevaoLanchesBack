@@ -11,6 +11,7 @@ import java.util.stream.Collectors;
 
 public record PedidoResponseDTO(
         UUID id,
+        String numeroPedido, // <-- FALTAVA ISSO AQUI!
         String clienteNome,
         LocalDateTime dataHora,
         StatusPedido status,
@@ -23,6 +24,7 @@ public record PedidoResponseDTO(
     public PedidoResponseDTO(Pedido pedido) {
         this(
                 pedido.getId(),
+                pedido.getNumeroPedido(), // <-- E ISSO AQUI!
                 pedido.getCliente().getNome(),
                 pedido.getDataHora(),
                 pedido.getStatus(),
