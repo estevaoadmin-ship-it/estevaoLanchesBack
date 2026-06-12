@@ -3,6 +3,8 @@ package com.paullomaggio.estevaoLanches.entities;
 import jakarta.persistence.*;
 import lombok.*;
 import java.time.LocalDate;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.UUID;
 
 @Entity
@@ -32,4 +34,7 @@ public class Cliente {
     private String numero; // Telefone/WhatsApp
 
     private LocalDate dataNascimento;
+
+    @OneToMany(mappedBy = "cliente", cascade = CascadeType.ALL, orphanRemoval = true)
+    private List<Endereco> enderecos = new ArrayList<>();
 }
