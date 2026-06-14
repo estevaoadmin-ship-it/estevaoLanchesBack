@@ -11,7 +11,7 @@ import java.util.stream.Collectors;
 
 public record PedidoResponseDTO(
         UUID id,
-        String numeroPedido, // <-- FALTAVA ISSO AQUI!
+        String numeroPedido,
         String clienteNome,
         LocalDateTime dataHora,
         StatusPedido status,
@@ -19,20 +19,23 @@ public record PedidoResponseDTO(
         BigDecimal total,
         String enderecoEntrega,
         Integer numeroMesa,
+        String observacaoGeral,
         List<ItemPedidoResponseDTO> itens
 ) {
     public PedidoResponseDTO(Pedido pedido) {
         this(
                 pedido.getId(),
-                pedido.getNumeroPedido(), // <-- E ISSO AQUI!
-                pedido.getCliente().getNome(),
+                pedido.getNumeroPedido(),
+                // SEGURANÇA MÁXIMA: Se for cliente cadastrado pega o nome, se não, pega o nome temporário do balcão
+                pedido.getCliente() != null ? pedido.getCliente().getNome() : pedido.getNomeClienteBalcao(),
                 pedido.getDataHora(),
                 pedido.getStatus(),
                 pedido.getTipo(),
                 pedido.getTotal(),
                 pedido.getEnderecoEntrega(),
                 pedido.getNumeroMesa(),
-                pedido.getItens().stream().map(ItemPedidoResponseDTO::new).collect(Collectors.toList())
+                pedido.getObservacaoGeral(),
+                pedido.getItens() != null ? pedido.getItens().stream().map(ItemPedidoResponseDTO::new).collect(Collectors.toList()) : List.of()
         );
     }
 }

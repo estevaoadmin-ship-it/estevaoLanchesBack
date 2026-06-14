@@ -53,10 +53,13 @@ public class ClienteService {
 
     @Transactional
     public ClienteResponseDTO salvar(ClienteRequestDTO dto) {
-        if (dto.cpf() != null && clienteRepository.findByCpf(dto.cpf()).isPresent()) {
+        // Só verifica CPF se ele foi preenchido
+        if (dto.cpf() != null && !dto.cpf().isBlank() && clienteRepository.findByCpf(dto.cpf()).isPresent()) {
             throw new BusinessRuleException("Já existe um cliente cadastrado com este CPF.");
         }
-        if (clienteRepository.findByEmail(dto.email()).isPresent()) {
+
+        // Só verifica E-mail se ele foi preenchido (Evita conflito de e-mails vazios)
+        if (dto.email() != null && !dto.email().isBlank() && clienteRepository.findByEmail(dto.email()).isPresent()) {
             throw new BusinessRuleException("Já existe um cliente cadastrado com este e-mail.");
         }
 
@@ -70,10 +73,11 @@ public class ClienteService {
         Cliente cliente = clienteRepository.findById(id)
                 .orElseThrow(() -> new ResourceNotFoundException("Cliente não encontrado para atualização."));
 
-        if (dto.cpf() != null && clienteRepository.existsByCpfAndIdNot(dto.cpf(), id)) {
+        if (dto.cpf() != null && !dto.cpf().isBlank() && clienteRepository.existsByCpfAndIdNot(dto.cpf(), id)) {
             throw new BusinessRuleException("Este CPF já está sendo usado por outro cliente.");
         }
-        if (clienteRepository.existsByEmailAndIdNot(dto.email(), id)) {
+
+        if (dto.email() != null && !dto.email().isBlank() && clienteRepository.existsByEmailAndIdNot(dto.email(), id)) {
             throw new BusinessRuleException("Este e-mail já está sendo usado por outro cliente.");
         }
 

@@ -4,25 +4,19 @@ import com.paullomaggio.estevaoLanches.dtos.CheckoutRequestDTO;
 import com.paullomaggio.estevaoLanches.dtos.ItemPedidoRequestDTO;
 import com.paullomaggio.estevaoLanches.dtos.PedidoResponseDTO;
 import com.paullomaggio.estevaoLanches.dtos.PedidoStatusRequestDTO;
-import com.paullomaggio.estevaoLanches.entities.Carrinho;
-import com.paullomaggio.estevaoLanches.entities.ItemCarrinho;
-import com.paullomaggio.estevaoLanches.entities.ItemPedido;
-import com.paullomaggio.estevaoLanches.entities.Pedido;
-import com.paullomaggio.estevaoLanches.entities.Produto;
+import com.paullomaggio.estevaoLanches.entities.*;
 import com.paullomaggio.estevaoLanches.enums.StatusCaixa;
 import com.paullomaggio.estevaoLanches.enums.StatusPedido;
 import com.paullomaggio.estevaoLanches.exceptions.BusinessRuleException;
 import com.paullomaggio.estevaoLanches.exceptions.ResourceNotFoundException;
-import com.paullomaggio.estevaoLanches.repositories.CaixaRepository;
-import com.paullomaggio.estevaoLanches.repositories.CarrinhoRepository;
-import com.paullomaggio.estevaoLanches.repositories.PedidoRepository;
-import com.paullomaggio.estevaoLanches.repositories.ProdutoRepository;
+import com.paullomaggio.estevaoLanches.repositories.*;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 import java.util.UUID;
@@ -43,21 +37,16 @@ public class PedidoService {
     @Autowired
     private ProdutoRepository produtoRepository;
 
+    @Autowired
+    private ClienteRepository clienteRepository;
+
     @Transactional
     public PedidoResponseDTO finalizarPedido(CheckoutRequestDTO dto) {
         if (!caixaRepository.existsByStatus(StatusCaixa.ABERTO)) {
             throw new BusinessRuleException("O estabelecimento está fechado. Abra o caixa para iniciar as vendas!");
         }
 
-        Carrinho carrinho = carrinhoRepository.findByClienteId(dto.clienteId())
-                .orElseThrow(() -> new ResourceNotFoundException("Carrinho não encontrado!"));
-
-        if (carrinho.getItens().isEmpty()) {
-            throw new BusinessRuleException("O carrinho está vazio!");
-        }
-
         Pedido pedido = new Pedido();
-        pedido.setCliente(carrinho.getCliente());
         pedido.setStatus(StatusPedido.RECEBIDO);
         pedido.setTipo(dto.tipo());
         pedido.setEnderecoEntrega(dto.enderecoEntrega());
@@ -65,26 +54,76 @@ public class PedidoService {
         pedido.setObservacaoGeral(dto.observacaoGeral());
         pedido.setDataHora(LocalDateTime.now());
 
+        pedido.setFormaPagamento(dto.formaPagamento());
+        pedido.setValorRecebido(dto.valorRecebido());
+        pedido.setNomeClienteBalcao(dto.nomeClienteBalcao());
+
+        if (pedido.getItens() == null) {
+            pedido.setItens(new ArrayList<>());
+        }
+
         BigDecimal totalPedido = BigDecimal.ZERO;
 
-        for (ItemCarrinho itemCarrinho : carrinho.getItens()) {
-            ItemPedido itemPedido = new ItemPedido();
-            itemPedido.setPedido(pedido);
-            itemPedido.setProduto(itemCarrinho.getProduto());
-            itemPedido.setQuantidade(itemCarrinho.getQuantidade());
-            itemPedido.setObservacaoItem(itemCarrinho.getObservacao());
-            itemPedido.setPrecoUnitario(itemCarrinho.getProduto().getPreco());
+        // BIFURCAÇÃO: Se vier da lista direta (PDV), pula verificação de carrinho persistido
+        if (dto.itens() != null && !dto.itens().isEmpty()) {
 
-            BigDecimal subtotal = itemPedido.getPrecoUnitario().multiply(BigDecimal.valueOf(itemPedido.getQuantidade()));
-            totalPedido = totalPedido.add(subtotal);
-            pedido.getItens().add(itemPedido);
+            if (dto.clienteId() != null) {
+                Cliente cliente = clienteRepository.findById(dto.clienteId())
+                        .orElseThrow(() -> new ResourceNotFoundException("Cliente não encontrado!"));
+                pedido.setCliente(cliente);
+            } else {
+                pedido.setCliente(null);
+            }
+
+            for (var itemDto : dto.itens()) {
+                Produto produto = produtoRepository.findById(itemDto.produtoId())
+                        .orElseThrow(() -> new ResourceNotFoundException("Produto não encontrado: " + itemDto.produtoId()));
+
+                ItemPedido itemPedido = new ItemPedido();
+                itemPedido.setPedido(pedido);
+                itemPedido.setProduto(produto);
+                itemPedido.setQuantidade(itemDto.quantidade());
+                itemPedido.setObservacaoItem(itemDto.observacao());
+                itemPedido.setPrecoUnitario(produto.getPreco());
+
+                BigDecimal subtotal = itemPedido.getPrecoUnitario().multiply(BigDecimal.valueOf(itemPedido.getQuantidade()));
+                totalPedido = totalPedido.add(subtotal);
+                pedido.getItens().add(itemPedido);
+            }
+        } else {
+            // Fluxo nativo via App Delivery (Lê carrinho temporário)
+            if (dto.clienteId() == null) {
+                throw new BusinessRuleException("Para recuperar o carrinho do banco, o clienteId é obrigatório!");
+            }
+
+            Carrinho carrinho = carrinhoRepository.findByClienteId(dto.clienteId())
+                    .orElseThrow(() -> new ResourceNotFoundException("Carrinho não encontrado!"));
+
+            if (carrinho.getItens().isEmpty()) {
+                throw new BusinessRuleException("O carrinho está vazio!");
+            }
+
+            pedido.setCliente(carrinho.getCliente());
+
+            for (ItemCarrinho itemCarrinho : carrinho.getItens()) {
+                ItemPedido itemPedido = new ItemPedido();
+                itemPedido.setPedido(pedido);
+                itemPedido.setProduto(itemCarrinho.getProduto());
+                itemPedido.setQuantidade(itemCarrinho.getQuantidade());
+                itemPedido.setObservacaoItem(itemCarrinho.getObservacao());
+                itemPedido.setPrecoUnitario(itemCarrinho.getProduto().getPreco());
+
+                BigDecimal subtotal = itemPedido.getPrecoUnitario().multiply(BigDecimal.valueOf(itemPedido.getQuantidade()));
+                totalPedido = totalPedido.add(subtotal);
+                pedido.getItens().add(itemPedido);
+            }
+
+            carrinho.getItens().clear();
+            carrinhoRepository.save(carrinho);
         }
 
         pedido.setTotal(totalPedido);
         Pedido pedidoSalvo = pedidoRepository.save(pedido);
-
-        carrinho.getItens().clear();
-        carrinhoRepository.save(carrinho);
 
         return new PedidoResponseDTO(pedidoSalvo);
     }
