@@ -27,7 +27,7 @@ import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.argThat; // 🚀 Garantido import para matchers de argumento
+import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.Mockito.*;
 
 @ExtendWith(MockitoExtension.class)
@@ -64,19 +64,14 @@ class ProdutoServiceTest {
         produtoMock.setPreco(new BigDecimal("25.00"));
         produtoMock.setStatus(StatusProduto.DISPONIVEL);
         produtoMock.setIsCombo(false);
-        produtoMock.setPrecisaPreparo(true); // Padrão de lanche
+        produtoMock.setPrecisaPreparo(true);
         produtoMock.setCategoria(categoriaMock);
         produtoMock.setAdicionais(new ArrayList<>());
     }
 
-    // =========================================================================
-    // SEÇÃO 1: TESTES DE CRIAÇÃO (SALVAR) - AJUSTADOS
-    // =========================================================================
-
     @Test
     @DisplayName("Deve salvar produto com categoria e sem adicionais com sucesso")
     void deveSalvarProdutoSemAdicionais() {
-        // 🚀 AJUSTADO: Adicionado 'true' no construtor do DTO
         requestDTOMock = new ProdutoRequestDTO("X-Bacon Especial", "Hambúrguer", new BigDecimal("25.00"), "", StatusProduto.DISPONIVEL, false, true, categoriaId, null);
 
         when(categoriaRepository.findById(categoriaId)).thenReturn(Optional.of(categoriaMock));
@@ -93,7 +88,6 @@ class ProdutoServiceTest {
     @Test
     @DisplayName("Deve lançar exceção de negócio ao tentar salvar produto com categoria inexistente")
     void deveLancarExcecaoCategoriaInexistente() {
-        // 🚀 AJUSTADO: Adicionado 'true' no construtor do DTO
         requestDTOMock = new ProdutoRequestDTO("Erro", "Erro", BigDecimal.TEN, "", StatusProduto.DISPONIVEL, false, true, UUID.randomUUID(), null);
 
         when(categoriaRepository.findById(any())).thenReturn(Optional.empty());
@@ -106,7 +100,6 @@ class ProdutoServiceTest {
     @DisplayName("Deve salvar produto associando os adicionais corretamente")
     void deveSalvarProdutoComAdicionais() {
         UUID adicionalId = UUID.randomUUID();
-        // 🚀 AJUSTADO: Adicionado 'true' no construtor do DTO
         requestDTOMock = new ProdutoRequestDTO("Lanche", "Desc", BigDecimal.TEN, "", StatusProduto.DISPONIVEL, false, true, categoriaId, List.of(adicionalId));
 
         when(categoriaRepository.findById(categoriaId)).thenReturn(Optional.of(categoriaMock));
@@ -118,27 +111,23 @@ class ProdutoServiceTest {
         verify(adicionalRepository, times(1)).findAllById(anyList());
     }
 
-    // =========================================================================
-    // 🚀 NOVA SEÇÃO: VALIDAÇÃO DO FLUXO OPERACIONAL (COZINHA VS BALCÃO)
-    // =========================================================================
-
     @Test
     @DisplayName("CT-PROD-KPI-001: Deve repassar 'precisaPreparo = true' para a entidade ao salvar um lanche")
     void devePersistirProdutoQuePrecisaDePreparo() {
         requestDTOMock = new ProdutoRequestDTO("Burger Brutal", "Artesanal", new BigDecimal("32.00"), "", StatusProduto.DISPONIVEL, false, true, categoriaId, null);
 
         when(categoriaRepository.findById(categoriaId)).thenReturn(Optional.of(categoriaMock));
-        when(produtoRepository.save(any(Produto.class))).thenAnswer(invocation -> invocation.getArgument(0)); // Retorna a própria entidade gerada
+        when(produtoRepository.save(any(Produto.class))).thenAnswer(invocation -> invocation.getArgument(0));
 
         ProdutoResponseDTO response = produtoService.salvar(requestDTOMock);
 
         assertNotNull(response);
-        verify(produtoRepository).save(argThat(Produto::getPrecisaPreparo)); // Valida se o setter recebeu true
+        verify(produtoRepository).save(argThat(Produto::getPrecisaPreparo));
     }
 
     @Test
     @DisplayName("CT-PROD-KPI-002: Deve repassar 'precisaPreparo = false' para a entidade ao salvar uma bebida/produto pronto")
-    void devePersistirProdutoDiretoDeBalcaoSemPreparo() { // 🚀 CORRIGIDO: Nome do método unificado
+    void devePersistirProdutoDiretoDeBalcaoSemPreparo() {
         requestDTOMock = new ProdutoRequestDTO("Fanta Laranja", "Lata", new BigDecimal("5.50"), "", StatusProduto.DISPONIVEL, false, false, categoriaId, null);
 
         when(categoriaRepository.findById(categoriaId)).thenReturn(Optional.of(categoriaMock));
@@ -146,12 +135,8 @@ class ProdutoServiceTest {
 
         produtoService.salvar(requestDTOMock);
 
-        verify(produtoRepository).save(argThat(p -> !p.getPrecisaPreparo())); // Valida se o setter recebeu false
+        verify(produtoRepository).save(argThat(p -> !p.getPrecisaPreparo()));
     }
-
-    // =========================================================================
-    // SEÇÃO 2: TESTES DE BUSCA (READ) - INTACTOS
-    // =========================================================================
 
     @Test
     @DisplayName("Deve listar todos os produtos e converter para DTO")
@@ -184,15 +169,11 @@ class ProdutoServiceTest {
         assertEquals("Produto não encontrado com o ID informado.", exception.getMessage());
     }
 
-    // =========================================================================
-    // SEÇÃO 3: TESTES DE ATUALIZAÇÃO (UPDATE) - AJUSTADOS
-    // =========================================================================
-
     @Test
     @DisplayName("Deve atualizar as informações do produto e alterar fluxo operacional se necessário")
     void deveAtualizarProduto() {
-        // 🚀 AJUSTADO: Adicionado 'false' no DTO simulando uma alteração de destino operacional (ex: transformando em item de balcão)
-        requestDTOMock = new ProdutoRequestDTO("Nome Novo", "Desc Nova", BigDecimal.ONE, "", StatusProduto.DISPONIVEL, false, false, categoriaId, new ArrayList<>());
+        // 🚀 AJUSTADO: Trocado 'new ArrayList<>()' por 'List.of()' para garantir o padrão Java Record limpo
+        requestDTOMock = new ProdutoRequestDTO("Nome Novo", "Desc Nova", BigDecimal.ONE, "", StatusProduto.DISPONIVEL, false, false, categoriaId, List.of());
 
         when(produtoRepository.findById(produtoId)).thenReturn(Optional.of(produtoMock));
         when(categoriaRepository.findById(categoriaId)).thenReturn(Optional.of(categoriaMock));
@@ -200,17 +181,12 @@ class ProdutoServiceTest {
 
         produtoService.atualizar(produtoId, requestDTOMock);
 
-        // Verifica se os dados novos e a flag redefinida para FALSE foram mapeados com sucesso
         verify(produtoRepository).save(argThat(p ->
                 p.getNome().equals("Nome Novo") &&
                         p.getAdicionais().isEmpty() &&
                         !p.getPrecisaPreparo()
         ));
     }
-
-    // =========================================================================
-    // SEÇÃO 4: TESTES DE EXCLUSÃO (DELETE) - INTACTOS
-    // =========================================================================
 
     @Test
     @DisplayName("Deve deletar produto quando ele existir")

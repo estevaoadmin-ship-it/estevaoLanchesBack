@@ -15,6 +15,7 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Optional;
+import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -95,7 +96,6 @@ class PedidoRepositoryTest {
         return criarPedido(dataHora, status, numeroPedido, FormaPagamento.DINHEIRO, new BigDecimal("50.00"), produtoQuePrepara);
     }
 
-    // --- Testes 22 e 23: Histórico do Cliente ---
     @Test
     @DisplayName("Teste 22: Deve buscar pedidos do cliente ordenados por data decrescente")
     void deveBuscarPedidosDoClienteOrdenadosPorDataDecrescente() {
@@ -115,7 +115,6 @@ class PedidoRepositoryTest {
         assertThat(pedidos).isEmpty();
     }
 
-    // --- Testes 24, 25 e 26: Monitor da Cozinha/Caixa ---
     @Test
     @DisplayName("Testes 24 e 25: Deve buscar pedidos pelos status ordenados por data crescente")
     void deveBuscarPedidosPorStatusOrdenadosDataCrescente() {
@@ -141,7 +140,6 @@ class PedidoRepositoryTest {
         assertThat(pedidos).isEmpty();
     }
 
-    // --- Testes 27 e 28: Busca pelo Número do Pedido ---
     @Test
     @DisplayName("Teste 27: Deve buscar pedido pelo número do pedido")
     void deveBuscarPedidoPeloNumero() {
@@ -156,10 +154,6 @@ class PedidoRepositoryTest {
         Optional<Pedido> resultado = pedidoRepository.findByNumeroPedido("00000");
         assertThat(resultado).isEmpty();
     }
-
-    // ========================================================================
-    // 🚀 NOVOS CENÁRIOS DE INTEGRAÇÃO: TRIAGEM DE COZINHA E GARGALO DE PRODUTOS
-    // ========================================================================
 
     @Test
     @DisplayName("CT-REPO-KPI-001: Deve contar na esteira apenas pedidos que contenham itens para preparar")
@@ -181,8 +175,28 @@ class PedidoRepositoryTest {
         criarPedido(LocalDateTime.now(), StatusPedido.FINALIZADO, "A1", FormaPagamento.DINHEIRO, new BigDecimal("100.00"), produtoQuePrepara);
         criarPedido(LocalDateTime.now(), StatusPedido.FINALIZADO, "A2", FormaPagamento.DINHEIRO, new BigDecimal("50.00"), produtoProntoBalcao);
 
-        BigDecimal totalDinheiro = pedidoRepository.somarFaturamentoPorTurnoEForma(inicioTurno, "DINHEIRO", StatusPedido.FINALIZADO);
+        BigDecimal totalDinheiro = pedidoRepository.somarFaturamentoPorTurnoEForma(inicioTurno, FormaPagamento.DINHEIRO, StatusPedido.FINALIZADO);
 
         assertThat(totalDinheiro).isEqualByComparingTo(new BigDecimal("150.00"));
+    }
+
+    // ========================================================================
+    // 🚀 ATUALIZADO: Cenário de cobertura estrita para queries gerenciais do BI
+    // ========================================================================
+    @Test
+    @DisplayName("CT-REPO-BI-003: Deve rodar queries do painel gerencial no H2 sem estourar erros de sintaxe JPQL")
+    void deveExecutarQueriesDoRelatorioComSucesso() {
+        LocalDateTime inicio = LocalDateTime.now().minusDays(1);
+        LocalDateTime fim = LocalDateTime.now().plusDays(1);
+
+        criarPedido(LocalDateTime.now(), StatusPedido.FINALIZADO, "B1", FormaPagamento.PIX, new BigDecimal("35.00"), produtoQuePrepara);
+        entityManager.flush();
+
+        List<Pedido> relatorio = pedidoRepository.buscarPedidosParaRelatorio(inicio, fim);
+        List<com.paullomaggio.estevaoLanches.dtos.MeioPagamentoItemDTO> pagamentos =
+                pedidoRepository.somarFaturamentoPorMeioPagamento(inicio, fim, StatusPedido.FINALIZADO);
+
+        assertThat(relatorio).isNotEmpty();
+        assertThat(pagamentos).isNotEmpty();
     }
 }
