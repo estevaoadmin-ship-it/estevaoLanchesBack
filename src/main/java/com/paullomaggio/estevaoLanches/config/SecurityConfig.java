@@ -12,6 +12,12 @@ import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.security.web.authentication.UsernamePasswordAuthenticationFilter;
+import org.springframework.web.cors.CorsConfiguration;
+import org.springframework.web.cors.CorsConfigurationSource;
+import org.springframework.web.cors.UrlBasedCorsConfigurationSource;
+import org.springframework.web.cors.CorsUtils;
+
+import java.util.List;
 
 @Configuration
 @EnableWebSecurity
@@ -26,18 +32,27 @@ public class SecurityConfig {
     @Bean
     public SecurityFilterChain securityFilterChain(HttpSecurity http) throws Exception {
         return http
+                .cors(cors -> cors.configurationSource(corsConfigurationSource()))
                 .csrf(csrf -> csrf.disable())
                 .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
                 .authorizeHttpRequests(authorize -> authorize
-                        // Rota pública de Autenticação
-                        .requestMatchers(HttpMethod.POST, "/api/auth/login").permitAll()
+                        // Libera as checagens automáticas do navegador (OPTIONS) sem exigir token JWT
+                        .requestMatchers(CorsUtils::isPreFlightRequest).permitAll()
 
-                        // Travas de Negócio Baseadas nas Roles do Sistema
+                        // Rotas públicas de Autenticação e tratamento de erros lógicos do sistema
+                        .requestMatchers(HttpMethod.POST, "/api/auth/login").permitAll()
+                        .requestMatchers("/error").permitAll()
+
+                        // 🚨 CONTROLE DO CAIXA: Garçom/Caixa consulta o status, mas só o ADMIN abre ou fecha
+                        .requestMatchers(HttpMethod.GET, "/api/caixas/status").hasAnyRole("ADMIN", "GARCOM")
                         .requestMatchers("/api/caixas/**").hasRole("ADMIN")
+
+                        // Travas de Autoridade Exclusivas do Gerente (ADMIN)
                         .requestMatchers("/api/relatorios/**").hasRole("ADMIN")
                         .requestMatchers("/api/cardapio/**").hasRole("ADMIN")
                         .requestMatchers("/api/usuarios/**").hasRole("ADMIN")
 
+                        // Rotas Compartilhadas pelas Equipes Operacionais
                         .requestMatchers("/api/pedidos/checkout").hasAnyRole("ADMIN", "GARCOM")
                         .requestMatchers("/api/pedidos/**").hasAnyRole("ADMIN", "GARCOM", "COZINHA")
                         .requestMatchers("/api/clientes/**").hasAnyRole("ADMIN", "GARCOM")
@@ -49,12 +64,25 @@ public class SecurityConfig {
     }
 
     @Bean
+    public CorsConfigurationSource corsConfigurationSource() {
+        CorsConfiguration configuration = new CorsConfiguration();
+        configuration.setAllowedOrigins(List.of("http://localhost:4200"));
+        configuration.setAllowedMethods(List.of("GET", "POST", "PUT", "DELETE", "OPTIONS"));
+        configuration.setAllowedHeaders(List.of("Authorization", "Content-Type", "Cache-Control"));
+        configuration.setAllowCredentials(true);
+
+        UrlBasedCorsConfigurationSource source = new UrlBasedCorsConfigurationSource();
+        source.registerCorsConfiguration("/**", configuration);
+        return source;
+    }
+
+    @Bean
     public AuthenticationManager authenticationManager(AuthenticationConfiguration authenticationConfiguration) throws Exception {
         return authenticationConfiguration.getAuthenticationManager();
     }
 
     @Bean
     public PasswordEncoder passwordEncoder() {
-        return new BCryptPasswordEncoder(); // Aplicando Hash Robusto de Criptografia
+        return new BCryptPasswordEncoder();
     }
 }

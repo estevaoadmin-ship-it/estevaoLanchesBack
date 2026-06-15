@@ -7,6 +7,9 @@ import com.paullomaggio.estevaoLanches.exceptions.BusinessRuleException;
 import com.paullomaggio.estevaoLanches.exceptions.ResourceNotFoundException;
 import com.paullomaggio.estevaoLanches.repositories.UsuarioRepository;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.security.core.userdetails.UserDetails;
+import org.springframework.security.core.userdetails.UserDetailsService;
+import org.springframework.security.core.userdetails.UsernameNotFoundException;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -16,14 +19,21 @@ import java.util.UUID;
 import java.util.stream.Collectors;
 
 @Service
-public class UsuarioService {
+public class UsuarioService implements UserDetailsService { // AJUSTADO: Assinatura do contrato de segurança
 
     @Autowired
     private UsuarioRepository usuarioRepository;
 
-    // O Spring Security vai injetar essa interface automaticamente assim que adicionarmos a dependência no pom.xml
     @Autowired(required = false)
     private PasswordEncoder passwordEncoder;
+
+    // 🚨 CONEXÃO DO LOGlM: Método que localiza as credenciais digitadas no Angular dentro do Postgres
+    @Override
+    @Transactional(readOnly = true)
+    public UserDetails loadUserByUsername(String username) throws UsernameNotFoundException {
+        return usuarioRepository.findByEmail(username)
+                .orElseThrow(() -> new UsernameNotFoundException("Colaborador não localizado com o e-mail: " + username));
+    }
 
     @Transactional(readOnly = true)
     public List<UsuarioResponseDTO> listarTodos() {
@@ -48,7 +58,6 @@ public class UsuarioService {
 
     @Transactional
     public UsuarioResponseDTO salvar(UsuarioRequestDTO dto) {
-        // VALIDAÇÃO 1: Impede e-mails duplicados na infraestrutura do banco (Erro de Conflito - 409)
         if (usuarioRepository.existsByEmail(dto.email())) {
             throw new BusinessRuleException("O e-mail '" + dto.email() + "' já está cadastrado no sistema!");
         }
@@ -57,7 +66,6 @@ public class UsuarioService {
         usuario.setNome(dto.nome());
         usuario.setEmail(dto.email());
 
-        // CRIPTOGRAFIA PREVENTIVA: Se o Spring Security já estiver ativo, cifra a senha. Se não, salva limpo para testes.
         if (passwordEncoder != null) {
             usuario.setSenha(passwordEncoder.encode(dto.senha()));
         } else {
@@ -76,7 +84,6 @@ public class UsuarioService {
         Usuario usuario = usuarioRepository.findById(id)
                 .orElseThrow(() -> new ResourceNotFoundException("Impossível atualizar. Usuário não encontrado."));
 
-        // VALIDAÇÃO 2: Se o usuário estiver alterando o e-mail, garante que o novo e-mail não pertença a outra pessoa
         if (!usuario.getEmail().equalsIgnoreCase(dto.email()) && usuarioRepository.existsByEmail(dto.email())) {
             throw new BusinessRuleException("O e-mail '" + dto.email() + "' já está em uso por outro colaborador.");
         }
@@ -85,7 +92,6 @@ public class UsuarioService {
         usuario.setEmail(dto.email());
         usuario.setRole(dto.role());
 
-        // Se o operador preencheu uma nova senha no formulário, nós atualizamos com segurança
         if (dto.senha() != null && !dto.senha().isBlank()) {
             if (passwordEncoder != null) {
                 usuario.setSenha(passwordEncoder.encode(dto.senha()));
@@ -103,8 +109,6 @@ public class UsuarioService {
         Usuario usuario = usuarioRepository.findById(id)
                 .orElseThrow(() -> new ResourceNotFoundException("Usuário não encontrado para exclusão."));
 
-        // BLINDAGEM OPERACIONAL: Em vez de apagar e quebrar o histórico de pedidos vendidos por ele,
-        // nós desativamos o usuário. Ele perde o acesso imediatamente, mas o relatório financeiro fica intacto.
         usuario.setAtivo(false);
         usuarioRepository.save(usuario);
     }

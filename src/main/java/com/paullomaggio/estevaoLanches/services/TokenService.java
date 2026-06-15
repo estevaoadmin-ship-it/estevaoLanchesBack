@@ -42,12 +42,12 @@ public class TokenService {
                     .verify(token)
                     .getSubject();
         } catch (JWTVerificationException exception) {
-            return ""; // Token corrompido ou expirado retorna string vazia
+            return "";
         }
     }
 
     private Instant gerarDataExpiracao() {
-        // Token válido por 10 horas seguidas (Cobre um turno inteiro de trabalho)
-        return LocalDateTime.now().plusHours(10).toInstant(ZoneOffset.of("-03:00"));
+        // AJUSTADO: Token agora cobre turns operacionais longos de ate 12 horas seguidas
+        return LocalDateTime.now().plusHours(12).toInstant(ZoneOffset.of("-03:00"));
     }
 }

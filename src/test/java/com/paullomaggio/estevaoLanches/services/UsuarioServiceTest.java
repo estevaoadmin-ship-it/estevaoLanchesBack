@@ -14,6 +14,8 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.security.core.userdetails.UserDetails;
+import org.springframework.security.core.userdetails.UsernameNotFoundException;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.test.util.ReflectionTestUtils;
 
@@ -50,6 +52,30 @@ class UsuarioServiceTest {
 
         usuarioAtivo = new Usuario(idAtivo, "João Caixa", "joao@tevao.com", "senhaCripto123", RoleUsuario.GARCOM, true);
         usuarioInativo = new Usuario(idInativo, "Maria Antiga", "maria@tevao.com", "senhaCripto456", RoleUsuario.COZINHA, false);
+    }
+
+    // ==========================================
+    // CONTROLES DE CONTRATO DO SPRING SECURITY
+    // ==========================================
+
+    @Test
+    @DisplayName("Deve carregar UserDetails com sucesso ao buscar email corporativo existente")
+    void loadUserByUsernameCenario1() {
+        when(usuarioRepository.findByEmail("joao@tevao.com")).thenReturn(Optional.of(usuarioAtivo));
+
+        UserDetails resultado = usuarioService.loadUserByUsername("joao@tevao.com");
+
+        assertNotNull(resultado);
+        assertEquals("joao@tevao.com", resultado.getUsername());
+        verify(usuarioRepository, times(1)).findByEmail("joao@tevao.com");
+    }
+
+    @Test
+    @DisplayName("Deve estourar UsernameNotFoundException quando o email informado não existir no Postgres")
+    void loadUserByUsernameCenario2() {
+        when(usuarioRepository.findByEmail("fantasma@tevao.com")).thenReturn(Optional.empty());
+
+        assertThrows(UsernameNotFoundException.class, () -> usuarioService.loadUserByUsername("fantasma@tevao.com"));
     }
 
     // ==========================================
@@ -141,7 +167,7 @@ class UsuarioServiceTest {
         UsuarioResponseDTO resultado = usuarioService.salvar(request);
 
         assertNotNull(resultado);
-        assertEquals("Paulo", resultado.nome()); // <-- LINHA CORRIGIDA AQUI
+        assertEquals("Paulo", resultado.nome());
         assertTrue(resultado.ativo());
     }
 
@@ -171,20 +197,18 @@ class UsuarioServiceTest {
     @Test
     @DisplayName("Deve manter a senha em texto puro se o PasswordEncoder estiver nulo (Ambiente de Testes Limpo)")
     void salvarCenario4() {
-        // Remove temporariamente o mock do encoder via reflection para testar o fallback seguro
         ReflectionTestUtils.setField(usuarioService, "passwordEncoder", null);
 
         UsuarioRequestDTO request = new UsuarioRequestDTO("Paulo", "paulo@tevao.com", "textoPuro123", RoleUsuario.ADMIN);
         when(usuarioRepository.existsByEmail(request.email())).thenReturn(false);
         when(usuarioRepository.save(any(Usuario.class))).thenAnswer(invocation -> {
             Usuario u = invocation.getArgument(0);
-            assertEquals("textoPuro123", u.getSenha()); // Garante que salvou puro
+            assertEquals("textoPuro123", u.getSenha());
             return u;
         });
 
         usuarioService.salvar(request);
 
-        // Restaura o campo para não quebrar outros testes
         ReflectionTestUtils.setField(usuarioService, "passwordEncoder", passwordEncoder);
     }
 
@@ -228,7 +252,7 @@ class UsuarioServiceTest {
     @Test
     @DisplayName("CRÍTICO: Deve bloquear roubo de e-mail se funcionário tentar mudar seu cadastro para o e-mail de outro colega")
     void atualizarCenario3() {
-        UsuarioRequestDTO request = new UsuarioRequestDTO("João", "maria@tevao.com", "", RoleUsuario.GARCOM); // Tentando usar e-mail da Maria
+        UsuarioRequestDTO request = new UsuarioRequestDTO("João", "maria@tevao.com", "", RoleUsuario.GARCOM);
         when(usuarioRepository.findById(idAtivo)).thenReturn(Optional.of(usuarioAtivo));
         when(usuarioRepository.existsByEmail("maria@tevao.com")).thenReturn(true);
 
@@ -244,7 +268,6 @@ class UsuarioServiceTest {
 
         usuarioService.atualizar(idAtivo, request);
 
-        // Garante que a checagem global foi pulada porque o e-mail é dele mesmo
         verify(usuarioRepository, never()).existsByEmail(anyString());
     }
 
@@ -267,17 +290,14 @@ class UsuarioServiceTest {
         when(usuarioRepository.findById(idAtivo)).thenReturn(Optional.of(usuarioAtivo));
         when(usuarioRepository.save(any(Usuario.class))).thenAnswer(i -> i.getArgument(0));
 
-        // Cenário 7: Null
         UsuarioRequestDTO reqNull = new UsuarioRequestDTO("João", "joao@tevao.com", null, RoleUsuario.GARCOM);
         usuarioService.atualizar(idAtivo, reqNull);
         assertEquals("senhaCripto123", usuarioAtivo.getSenha());
 
-        // Cenário 8: Vazia ("")
         UsuarioRequestDTO reqVazia = new UsuarioRequestDTO("João", "joao@tevao.com", "", RoleUsuario.GARCOM);
         usuarioService.atualizar(idAtivo, reqVazia);
         assertEquals("senhaCripto123", usuarioAtivo.getSenha());
 
-        // Cenário 9: Espaço em Branco (" ")
         UsuarioRequestDTO reqBranco = new UsuarioRequestDTO("João", "joao@tevao.com", " ", RoleUsuario.GARCOM);
         usuarioService.atualizar(idAtivo, reqBranco);
         assertEquals("senhaCripto123", usuarioAtivo.getSenha());
@@ -297,9 +317,9 @@ class UsuarioServiceTest {
 
         usuarioService.deletarOuInativar(idAtivo);
 
-        assertFalse(usuarioAtivo.getAtivo()); // Ficou inativo
+        assertFalse(usuarioAtivo.getAtivo());
         verify(usuarioRepository, times(1)).save(usuarioAtivo);
-        verify(usuarioRepository, never()).delete(any(Usuario.class)); // NUNCA deleta fisicamente
+        verify(usuarioRepository, never()).delete(any(Usuario.class));
         verify(usuarioRepository, never()).deleteById(any(UUID.class));
     }
 }

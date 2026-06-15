@@ -24,7 +24,6 @@ class TokenServiceTest {
     @BeforeEach
     void setUp() {
         tokenService = new TokenService();
-        // Injeta a propriedade @Value manualmente no escopo do teste unitário
         ReflectionTestUtils.setField(tokenService, "secret", segredoPadrao);
 
         usuario = new Usuario();
@@ -36,7 +35,7 @@ class TokenServiceTest {
     }
 
     // ==========================================
-    // 1. TESTES DE GERAÇÃO DO JWT
+    // 1. TESTES DE GERAÇÃO DO JWT (AGORA COM 12 HORAS)
     // ==========================================
 
     @Test
@@ -49,30 +48,29 @@ class TokenServiceTest {
     }
 
     @Test
-    @DisplayName("CRÍTICO: O Token gerado deve conter as Claims corretas (Subject, Role, Nome, Issuer e Tempo de Turno)")
+    @DisplayName("CRÍTICO: O Token gerado deve conter as Claims corretas e a validade exata de 12 horas")
     void gerarTokenCenariosClaims() {
         String token = tokenService.gerarToken(usuario);
 
-        // Desembrulha o token gerado para inspecionar o coração do payload
         DecodedJWT decodedJWT = JWT.decode(token);
 
-        assertEquals("gerente@tevao.com", decodedJWT.getSubject()); // Subject = Email
-        assertEquals("ADMIN", decodedJWT.getClaim("role").asString()); // Claim Role
-        assertEquals("Estêvão Dono", decodedJWT.getClaim("nome").asString()); // Claim Nome
-        assertEquals("estevao-lanches-api", decodedJWT.getIssuer()); // Issuer de segurança
+        assertEquals("gerente@tevao.com", decodedJWT.getSubject());
+        assertEquals("ADMIN", decodedJWT.getClaim("role").asString());
+        assertEquals("Estêvão Dono", decodedJWT.getClaim("nome").asString());
+        assertEquals("estevao-lanches-api", decodedJWT.getIssuer());
 
         assertNotNull(decodedJWT.getExpiresAt());
 
-        long dezHorasEmSegundos = 10 * 60 * 60;
+        // AJUSTADO: Verificação de 12 horas operacionais completas
+        long dozeHorasEmSegundos = 12 * 60 * 60;
         long agoraEmSegundos = Instant.now().getEpochSecond();
         long expiracaoEmSegundos = decodedJWT.getExpiresAt().toInstant().getEpochSecond();
 
-        // Verifica se a expiração está calculada corretamente para o turno de 10 horas (tolerância de 5s para o processador)
-        assertTrue(expiracaoEmSegundos >= (agoraEmSegundos + dezHorasEmSegundos - 5));
+        assertTrue(expiracaoEmSegundos >= (agoraEmSegundos + dozeHorasEmSegundos - 5));
     }
 
     // ==========================================
-    // 2. TESTES DE VALIDAÇÃO E QUEBRA DE ASSINATURA
+    // 2. TESTES DE VALIDAÇÃO E SEGURANÇA Robusta
     // ==========================================
 
     @Test
@@ -99,7 +97,7 @@ class TokenServiceTest {
     @DisplayName("CRÍTICO: Deve bloquear tokens violados ou corrompidos por hackers por alteração de caracteres")
     void validarTokenCenarioCorrompido() {
         String tokenOriginal = tokenService.gerarToken(usuario);
-        String tokenAlterado = tokenOriginal + "a"; // Força quebra matemática da assinatura
+        String tokenAlterado = tokenOriginal + "a";
 
         String emailResultado = tokenService.validarToken(tokenAlterado);
 
@@ -109,7 +107,6 @@ class TokenServiceTest {
     @Test
     @DisplayName("CRÍTICO: Deve rejeitar o acesso se o token foi assinado com uma chave secreta alienígena")
     void validarTokenCenarioAssinaturaInvalida() {
-        // Fabrica um token usando uma chave falsa externa
         String tokenInvasor = JWT.create()
                 .withIssuer("estevao-lanches-api")
                 .withSubject("hacker@gmail.com")
@@ -117,7 +114,7 @@ class TokenServiceTest {
 
         String emailResultado = tokenService.validarToken(tokenInvasor);
 
-        assertEquals("", emailResultado); // Barreira contida
+        assertEquals("", emailResultado);
     }
 
     @Test
@@ -136,15 +133,14 @@ class TokenServiceTest {
     @Test
     @DisplayName("CRÍTICO: Deve bloquear funcionários antigos tentando usar tokens de turnos passados que já venceram")
     void validarTokenCenarioExpirado() {
-        // Monta um token que já nasceu vencido no passado
         String tokenExpirado = JWT.create()
                 .withIssuer("estevao-lanches-api")
                 .withSubject("gerente@tevao.com")
-                .withExpiresAt(Instant.now().minusSeconds(60)) // Venceu há 1 minuto
+                .withExpiresAt(Instant.now().minusSeconds(60))
                 .sign(Algorithm.HMAC256(segredoPadrao));
 
         String emailResultado = tokenService.validarToken(tokenExpirado);
 
-        assertEquals("", emailResultado); // Acesso bloqueado por tempo esgotado
+        assertEquals("", emailResultado);
     }
 }
