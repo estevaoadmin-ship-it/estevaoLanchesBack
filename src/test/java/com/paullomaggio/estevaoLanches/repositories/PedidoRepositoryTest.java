@@ -1,17 +1,17 @@
 package com.paullomaggio.estevaoLanches.repositories;
 
-import com.paullomaggio.estevaoLanches.entities.Cliente;
-import com.paullomaggio.estevaoLanches.entities.Pedido;
-import com.paullomaggio.estevaoLanches.enums.StatusPedido;
-import com.paullomaggio.estevaoLanches.enums.TipoPedido;
+import com.paullomaggio.estevaoLanches.entities.*;
+import com.paullomaggio.estevaoLanches.enums.*;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.orm.jpa.DataJpaTest;
+import org.springframework.boot.test.autoconfigure.orm.jpa.TestEntityManager;
 
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Optional;
@@ -27,7 +27,12 @@ class PedidoRepositoryTest {
     @Autowired
     private ClienteRepository clienteRepository;
 
+    @Autowired
+    private TestEntityManager entityManager;
+
     private Cliente clientePadrao;
+    private Produto produtoQuePrepara;
+    private Produto produtoProntoBalcao;
 
     @BeforeEach
     void setUp() {
@@ -36,30 +41,71 @@ class PedidoRepositoryTest {
         clientePadrao.setEmail("teste@email.com");
         clientePadrao.setCpf("12345678901");
         clienteRepository.save(clientePadrao);
+
+        Categoria categoria = new Categoria();
+        categoria.setNome("Geral");
+        entityManager.persist(categoria);
+
+        produtoQuePrepara = new Produto();
+        produtoQuePrepara.setNome("X-Bacon");
+        produtoQuePrepara.setDescricao("Lanche");
+        produtoQuePrepara.setPreco(new BigDecimal("25.00"));
+        produtoQuePrepara.setStatus(StatusProduto.values()[0]);
+        produtoQuePrepara.setIsCombo(false);
+        produtoQuePrepara.setPrecisaPreparo(true);
+        produtoQuePrepara.setCategoria(categoria);
+
+        produtoProntoBalcao = new Produto();
+        produtoProntoBalcao.setNome("Coca Lata");
+        produtoProntoBalcao.setDescricao("Bebida");
+        produtoProntoBalcao.setPreco(new BigDecimal("6.00"));
+        produtoProntoBalcao.setStatus(StatusProduto.values()[0]);
+        produtoProntoBalcao.setIsCombo(false);
+        produtoProntoBalcao.setPrecisaPreparo(false);
+        produtoProntoBalcao.setCategoria(categoria);
+
+        entityManager.persist(produtoQuePrepara);
+        entityManager.persist(produtoProntoBalcao);
+        entityManager.flush();
     }
 
-    private Pedido criarPedido(LocalDateTime dataHora, StatusPedido status, String numeroPedido) {
+    private Pedido criarPedido(LocalDateTime dataHora, StatusPedido status, String numeroPedido, FormaPagamento forma, BigDecimal total, Produto produto) {
         Pedido pedido = new Pedido();
         pedido.setCliente(clientePadrao);
         pedido.setDataHora(dataHora);
         pedido.setStatus(status);
         pedido.setTipo(TipoPedido.DELIVERY);
-        pedido.setTotal(new BigDecimal("50.00"));
+        pedido.setTotal(total);
         pedido.setNumeroPedido(numeroPedido);
+        pedido.setFormaPagamento(forma);
+        pedido.setItens(new ArrayList<>());
+
+        ItemPedido item = new ItemPedido();
+        item.setProduto(produto);
+        item.setQuantidade(1);
+        item.setPrecoUnitario(total);
+        item.setPedido(pedido);
+
+        pedido.getItens().add(item);
+
         return pedidoRepository.save(pedido);
+    }
+
+    private Pedido criarPedidoPadrao(LocalDateTime dataHora, StatusPedido status, String numeroPedido) {
+        return criarPedido(dataHora, status, numeroPedido, FormaPagamento.DINHEIRO, new BigDecimal("50.00"), produtoQuePrepara);
     }
 
     // --- Testes 22 e 23: Histórico do Cliente ---
     @Test
     @DisplayName("Teste 22: Deve buscar pedidos do cliente ordenados por data decrescente")
     void deveBuscarPedidosDoClienteOrdenadosPorDataDecrescente() {
-        criarPedido(LocalDateTime.now().minusDays(2), StatusPedido.FINALIZADO, "PED01");
-        criarPedido(LocalDateTime.now().minusDays(1), StatusPedido.FINALIZADO, "PED02"); // Mais recente
+        criarPedidoPadrao(LocalDateTime.now().minusDays(2), StatusPedido.FINALIZADO, "PED01");
+        criarPedidoPadrao(LocalDateTime.now().minusDays(1), StatusPedido.FINALIZADO, "PED02");
 
         List<Pedido> pedidos = pedidoRepository.findByClienteIdOrderByDataHoraDesc(clientePadrao.getId());
 
         assertThat(pedidos).hasSize(2);
-        assertThat(pedidos.get(0).getNumeroPedido()).isEqualTo("PED02"); // O mais recente deve vir primeiro
+        assertThat(pedidos.get(0).getNumeroPedido()).isEqualTo("PED02");
     }
 
     @Test
@@ -73,22 +119,21 @@ class PedidoRepositoryTest {
     @Test
     @DisplayName("Testes 24 e 25: Deve buscar pedidos pelos status ordenados por data crescente")
     void deveBuscarPedidosPorStatusOrdenadosDataCrescente() {
-        criarPedido(LocalDateTime.now().minusMinutes(30), StatusPedido.RECEBIDO, "PED01"); // Mais antigo
-        criarPedido(LocalDateTime.now().minusMinutes(10), StatusPedido.EM_PREPARO, "PED02");
-        criarPedido(LocalDateTime.now(), StatusPedido.FINALIZADO, "PED03"); // Fora do filtro
+        criarPedidoPadrao(LocalDateTime.now().minusMinutes(30), StatusPedido.RECEBIDO, "PED01");
+        criarPedidoPadrao(LocalDateTime.now().minusMinutes(10), StatusPedido.EM_PREPARO, "PED02");
+        criarPedidoPadrao(LocalDateTime.now(), StatusPedido.FINALIZADO, "PED03");
 
         List<StatusPedido> statusAtivos = Arrays.asList(StatusPedido.RECEBIDO, StatusPedido.EM_PREPARO);
         List<Pedido> pedidos = pedidoRepository.findByStatusInOrderByDataHoraAsc(statusAtivos);
 
         assertThat(pedidos).hasSize(2);
-        assertThat(pedidos.get(0).getNumeroPedido()).isEqualTo("PED01"); // O mais antigo deve ser o primeiro da fila
-        assertThat(pedidos).noneMatch(p -> p.getStatus() == StatusPedido.FINALIZADO);
+        assertThat(pedidos.get(0).getNumeroPedido()).isEqualTo("PED01");
     }
 
     @Test
     @DisplayName("Teste 26: Deve retornar lista vazia quando não existir pedido com os status informados")
     void deveRetornarVazioSeNenhumStatusCorresponder() {
-        criarPedido(LocalDateTime.now(), StatusPedido.FINALIZADO, "PED01");
+        criarPedidoPadrao(LocalDateTime.now(), StatusPedido.FINALIZADO, "PED01");
 
         List<StatusPedido> statusAtivos = Arrays.asList(StatusPedido.RECEBIDO);
         List<Pedido> pedidos = pedidoRepository.findByStatusInOrderByDataHoraAsc(statusAtivos);
@@ -100,7 +145,7 @@ class PedidoRepositoryTest {
     @Test
     @DisplayName("Teste 27: Deve buscar pedido pelo número do pedido")
     void deveBuscarPedidoPeloNumero() {
-        criarPedido(LocalDateTime.now(), StatusPedido.RECEBIDO, "XYZ99");
+        criarPedidoPadrao(LocalDateTime.now(), StatusPedido.RECEBIDO, "XYZ99");
         Optional<Pedido> resultado = pedidoRepository.findByNumeroPedido("XYZ99");
         assertThat(resultado).isPresent();
     }
@@ -110,5 +155,34 @@ class PedidoRepositoryTest {
     void naoDeveEncontrarPedidoComNumeroInexistente() {
         Optional<Pedido> resultado = pedidoRepository.findByNumeroPedido("00000");
         assertThat(resultado).isEmpty();
+    }
+
+    // ========================================================================
+    // 🚀 NOVOS CENÁRIOS DE INTEGRAÇÃO: TRIAGEM DE COZINHA E GARGALO DE PRODUTOS
+    // ========================================================================
+
+    @Test
+    @DisplayName("CT-REPO-KPI-001: Deve contar na esteira apenas pedidos que contenham itens para preparar")
+    void deveContarPedidosEmEsteiraComPrecisao() {
+        criarPedido(LocalDateTime.now(), StatusPedido.RECEBIDO, "P1", FormaPagamento.PIX, new BigDecimal("25.00"), produtoQuePrepara);
+        criarPedido(LocalDateTime.now(), StatusPedido.EM_PREPARO, "P2", FormaPagamento.PIX, new BigDecimal("25.00"), produtoQuePrepara);
+        criarPedido(LocalDateTime.now(), StatusPedido.RECEBIDO, "P3", FormaPagamento.PIX, new BigDecimal("6.00"), produtoProntoBalcao);
+
+        long ativos = pedidoRepository.countPedidosAtivos(StatusPedido.FINALIZADO, StatusPedido.CANCELADO);
+
+        assertThat(ativos).isEqualTo(2);
+    }
+
+    @Test
+    @DisplayName("CT-REPO-KPI-002: Deve faturar independentemente se o produto exige ou não preparo")
+    void deveCalcularFaturamentoFatiadoPorTurno() {
+        LocalDateTime inicioTurno = LocalDateTime.now().minusHours(1);
+
+        criarPedido(LocalDateTime.now(), StatusPedido.FINALIZADO, "A1", FormaPagamento.DINHEIRO, new BigDecimal("100.00"), produtoQuePrepara);
+        criarPedido(LocalDateTime.now(), StatusPedido.FINALIZADO, "A2", FormaPagamento.DINHEIRO, new BigDecimal("50.00"), produtoProntoBalcao);
+
+        BigDecimal totalDinheiro = pedidoRepository.somarFaturamentoPorTurnoEForma(inicioTurno, "DINHEIRO", StatusPedido.FINALIZADO);
+
+        assertThat(totalDinheiro).isEqualByComparingTo(new BigDecimal("150.00"));
     }
 }

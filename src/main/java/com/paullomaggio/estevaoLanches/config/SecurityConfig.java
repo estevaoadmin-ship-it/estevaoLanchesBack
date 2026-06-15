@@ -43,8 +43,9 @@ public class SecurityConfig {
                         .requestMatchers(HttpMethod.POST, "/api/auth/login").permitAll()
                         .requestMatchers("/error").permitAll()
 
-                        // 🚨 CONTROLE DO CAIXA: Garçom/Caixa consulta o status, mas só o ADMIN abre ou fecha
+                        // 🚨 CONTROLE DO CAIXA AJUSTADO: Ambos perfis leem o status e o resumo dos cards, mas só ADMIN abre/fecha (POST/PATCH)
                         .requestMatchers(HttpMethod.GET, "/api/caixas/status").hasAnyRole("ADMIN", "GARCOM")
+                        .requestMatchers(HttpMethod.GET, "/api/caixas/resumo").hasAnyRole("ADMIN", "GARCOM") // ✨ Liberado para o painel operacional de ambos
                         .requestMatchers("/api/caixas/**").hasRole("ADMIN")
 
                         // Travas de Autoridade Exclusivas do Gerente (ADMIN)
@@ -67,7 +68,10 @@ public class SecurityConfig {
     public CorsConfigurationSource corsConfigurationSource() {
         CorsConfiguration configuration = new CorsConfiguration();
         configuration.setAllowedOrigins(List.of("http://localhost:4200"));
-        configuration.setAllowedMethods(List.of("GET", "POST", "PUT", "DELETE", "OPTIONS"));
+
+        // 🚨 CORRIGIDO: Adicionado "PATCH" para permitir o fechamento síncrono do turno sem travar no Preflight
+        configuration.setAllowedMethods(List.of("GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"));
+
         configuration.setAllowedHeaders(List.of("Authorization", "Content-Type", "Cache-Control"));
         configuration.setAllowCredentials(true);
 

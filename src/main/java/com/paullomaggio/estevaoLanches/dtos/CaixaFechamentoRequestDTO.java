@@ -1,9 +1,11 @@
 package com.paullomaggio.estevaoLanches.dtos;
 
+import jakarta.validation.constraints.NotNull;
+import jakarta.validation.constraints.PositiveOrZero;
 import java.math.BigDecimal;
-import java.util.UUID;
 
 public record CaixaFechamentoRequestDTO(
-        BigDecimal valorFechamento,
-        UUID usuarioId // <-- Quem está fechando?
+        @NotNull(message = "O valor total de fechamento do caixa é obrigatório.")
+        @PositiveOrZero(message = "O valor de fechamento não pode ser um número negativo.")
+        BigDecimal valorFechamento
 ) {}

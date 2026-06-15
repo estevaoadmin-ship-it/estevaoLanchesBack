@@ -28,9 +28,11 @@ public record ProdutoRequestDTO(
         @NotNull(message = "Informe se o produto é um combo ou não.")
         Boolean isCombo,
 
+        @NotNull(message = "Informe se o produto necessita de preparo operacional na cozinha.")
+        Boolean precisaPreparo, // 🚀 INCLUSÃO: Captura o dado enviado pelo Angular
+
         @NotNull(message = "O ID da categoria é obrigatório para vincular o produto.")
         UUID categoriaId,
 
-        // Lista de adicionais pode ser vazia, mas não deve ser nula
         List<UUID> adicionaisIds
 ) {}

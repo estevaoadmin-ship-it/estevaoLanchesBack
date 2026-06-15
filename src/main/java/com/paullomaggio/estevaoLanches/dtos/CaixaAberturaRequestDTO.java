@@ -1,9 +1,11 @@
 package com.paullomaggio.estevaoLanches.dtos;
 
+import jakarta.validation.constraints.NotNull;
+import jakarta.validation.constraints.PositiveOrZero;
 import java.math.BigDecimal;
-import java.util.UUID;
 
 public record CaixaAberturaRequestDTO(
-        BigDecimal valorAbertura,
-        UUID usuarioId // <-- Quem está abrindo?
+        @NotNull(message = "O valor de abertura do fundo de troco é obrigatório.")
+        @PositiveOrZero(message = "O valor de abertura não pode ser um número negativo.")
+        BigDecimal valorAbertura
 ) {}

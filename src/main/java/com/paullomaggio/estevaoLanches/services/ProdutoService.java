@@ -86,8 +86,9 @@ public class ProdutoService {
         produto.setUrlImagem(dto.urlImagem());
         produto.setStatus(dto.status());
         produto.setIsCombo(dto.isCombo());
+        produto.setPrecisaPreparo(dto.precisaPreparo()); // 🚀 CORRIGIDO: Vincula a flag à entidade persistida
 
-        // Vincula a Categoria - Caso não ache, lança exceção de Regra de Negócio (400)
+        // Vincula a Categoria
         Categoria categoria = categoriaRepository.findById(dto.categoriaId())
                 .orElseThrow(() -> new BusinessRuleException("A Categoria informada para o produto não existe!"));
         produto.setCategoria(categoria);

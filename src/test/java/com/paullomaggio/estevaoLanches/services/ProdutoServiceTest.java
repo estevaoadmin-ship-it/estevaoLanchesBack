@@ -27,6 +27,7 @@ import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.argThat; // 🚀 Garantido import para matchers de argumento
 import static org.mockito.Mockito.*;
 
 @ExtendWith(MockitoExtension.class)
@@ -63,18 +64,20 @@ class ProdutoServiceTest {
         produtoMock.setPreco(new BigDecimal("25.00"));
         produtoMock.setStatus(StatusProduto.DISPONIVEL);
         produtoMock.setIsCombo(false);
+        produtoMock.setPrecisaPreparo(true); // Padrão de lanche
         produtoMock.setCategoria(categoriaMock);
         produtoMock.setAdicionais(new ArrayList<>());
     }
 
     // =========================================================================
-    // TESTES DE CRIAÇÃO (SALVAR)
+    // SEÇÃO 1: TESTES DE CRIAÇÃO (SALVAR) - AJUSTADOS
     // =========================================================================
 
     @Test
     @DisplayName("Deve salvar produto com categoria e sem adicionais com sucesso")
     void deveSalvarProdutoSemAdicionais() {
-        requestDTOMock = new ProdutoRequestDTO("X-Bacon Especial", "Hambúrguer", new BigDecimal("25.00"), "", StatusProduto.DISPONIVEL, false, categoriaId, null);
+        // 🚀 AJUSTADO: Adicionado 'true' no construtor do DTO
+        requestDTOMock = new ProdutoRequestDTO("X-Bacon Especial", "Hambúrguer", new BigDecimal("25.00"), "", StatusProduto.DISPONIVEL, false, true, categoriaId, null);
 
         when(categoriaRepository.findById(categoriaId)).thenReturn(Optional.of(categoriaMock));
         when(produtoRepository.save(any(Produto.class))).thenReturn(produtoMock);
@@ -90,11 +93,11 @@ class ProdutoServiceTest {
     @Test
     @DisplayName("Deve lançar exceção de negócio ao tentar salvar produto com categoria inexistente")
     void deveLancarExcecaoCategoriaInexistente() {
-        requestDTOMock = new ProdutoRequestDTO("Erro", "Erro", BigDecimal.TEN, "", StatusProduto.DISPONIVEL, false, UUID.randomUUID(), null);
+        // 🚀 AJUSTADO: Adicionado 'true' no construtor do DTO
+        requestDTOMock = new ProdutoRequestDTO("Erro", "Erro", BigDecimal.TEN, "", StatusProduto.DISPONIVEL, false, true, UUID.randomUUID(), null);
 
         when(categoriaRepository.findById(any())).thenReturn(Optional.empty());
 
-        // Agora espera uma BusinessRuleException
         BusinessRuleException exception = assertThrows(BusinessRuleException.class, () -> produtoService.salvar(requestDTOMock));
         assertEquals("A Categoria informada para o produto não existe!", exception.getMessage());
     }
@@ -103,7 +106,8 @@ class ProdutoServiceTest {
     @DisplayName("Deve salvar produto associando os adicionais corretamente")
     void deveSalvarProdutoComAdicionais() {
         UUID adicionalId = UUID.randomUUID();
-        requestDTOMock = new ProdutoRequestDTO("Lanche", "Desc", BigDecimal.TEN, "", StatusProduto.DISPONIVEL, false, categoriaId, List.of(adicionalId));
+        // 🚀 AJUSTADO: Adicionado 'true' no construtor do DTO
+        requestDTOMock = new ProdutoRequestDTO("Lanche", "Desc", BigDecimal.TEN, "", StatusProduto.DISPONIVEL, false, true, categoriaId, List.of(adicionalId));
 
         when(categoriaRepository.findById(categoriaId)).thenReturn(Optional.of(categoriaMock));
         when(adicionalRepository.findAllById(any())).thenReturn(List.of(new Adicional()));
@@ -115,7 +119,38 @@ class ProdutoServiceTest {
     }
 
     // =========================================================================
-    // TESTES DE BUSCA (READ)
+    // 🚀 NOVA SEÇÃO: VALIDAÇÃO DO FLUXO OPERACIONAL (COZINHA VS BALCÃO)
+    // =========================================================================
+
+    @Test
+    @DisplayName("CT-PROD-KPI-001: Deve repassar 'precisaPreparo = true' para a entidade ao salvar um lanche")
+    void devePersistirProdutoQuePrecisaDePreparo() {
+        requestDTOMock = new ProdutoRequestDTO("Burger Brutal", "Artesanal", new BigDecimal("32.00"), "", StatusProduto.DISPONIVEL, false, true, categoriaId, null);
+
+        when(categoriaRepository.findById(categoriaId)).thenReturn(Optional.of(categoriaMock));
+        when(produtoRepository.save(any(Produto.class))).thenAnswer(invocation -> invocation.getArgument(0)); // Retorna a própria entidade gerada
+
+        ProdutoResponseDTO response = produtoService.salvar(requestDTOMock);
+
+        assertNotNull(response);
+        verify(produtoRepository).save(argThat(Produto::getPrecisaPreparo)); // Valida se o setter recebeu true
+    }
+
+    @Test
+    @DisplayName("CT-PROD-KPI-002: Deve repassar 'precisaPreparo = false' para a entidade ao salvar uma bebida/produto pronto")
+    void devePersistirProdutoDiretoDeBalcaoSemPreparo() { // 🚀 CORRIGIDO: Nome do método unificado
+        requestDTOMock = new ProdutoRequestDTO("Fanta Laranja", "Lata", new BigDecimal("5.50"), "", StatusProduto.DISPONIVEL, false, false, categoriaId, null);
+
+        when(categoriaRepository.findById(categoriaId)).thenReturn(Optional.of(categoriaMock));
+        when(produtoRepository.save(any(Produto.class))).thenAnswer(invocation -> invocation.getArgument(0));
+
+        produtoService.salvar(requestDTOMock);
+
+        verify(produtoRepository).save(argThat(p -> !p.getPrecisaPreparo())); // Valida se o setter recebeu false
+    }
+
+    // =========================================================================
+    // SEÇÃO 2: TESTES DE BUSCA (READ) - INTACTOS
     // =========================================================================
 
     @Test
@@ -145,19 +180,19 @@ class ProdutoServiceTest {
     void deveLancarExcecaoIdInexistente() {
         when(produtoRepository.findById(any())).thenReturn(Optional.empty());
 
-        // Agora espera uma ResourceNotFoundException
         ResourceNotFoundException exception = assertThrows(ResourceNotFoundException.class, () -> produtoService.buscarPorId(UUID.randomUUID()));
         assertEquals("Produto não encontrado com o ID informado.", exception.getMessage());
     }
 
     // =========================================================================
-    // TESTES DE ATUALIZAÇÃO (UPDATE)
+    // SEÇÃO 3: TESTES DE ATUALIZAÇÃO (UPDATE) - AJUSTADOS
     // =========================================================================
 
     @Test
-    @DisplayName("Deve atualizar as informações do produto")
+    @DisplayName("Deve atualizar as informações do produto e alterar fluxo operacional se necessário")
     void deveAtualizarProduto() {
-        requestDTOMock = new ProdutoRequestDTO("Nome Novo", "Desc Nova", BigDecimal.ONE, "", StatusProduto.DISPONIVEL, false, categoriaId, new ArrayList<>());
+        // 🚀 AJUSTADO: Adicionado 'false' no DTO simulando uma alteração de destino operacional (ex: transformando em item de balcão)
+        requestDTOMock = new ProdutoRequestDTO("Nome Novo", "Desc Nova", BigDecimal.ONE, "", StatusProduto.DISPONIVEL, false, false, categoriaId, new ArrayList<>());
 
         when(produtoRepository.findById(produtoId)).thenReturn(Optional.of(produtoMock));
         when(categoriaRepository.findById(categoriaId)).thenReturn(Optional.of(categoriaMock));
@@ -165,11 +200,16 @@ class ProdutoServiceTest {
 
         produtoService.atualizar(produtoId, requestDTOMock);
 
-        verify(produtoRepository).save(argThat(p -> p.getNome().equals("Nome Novo") && p.getAdicionais().isEmpty()));
+        // Verifica se os dados novos e a flag redefinida para FALSE foram mapeados com sucesso
+        verify(produtoRepository).save(argThat(p ->
+                p.getNome().equals("Nome Novo") &&
+                        p.getAdicionais().isEmpty() &&
+                        !p.getPrecisaPreparo()
+        ));
     }
 
     // =========================================================================
-    // TESTES DE EXCLUSÃO (DELETE)
+    // SEÇÃO 4: TESTES DE EXCLUSÃO (DELETE) - INTACTOS
     // =========================================================================
 
     @Test
@@ -187,7 +227,6 @@ class ProdutoServiceTest {
     void deveLancarExcecaoDeletarInexistente() {
         when(produtoRepository.existsById(produtoId)).thenReturn(false);
 
-        // Agora espera uma ResourceNotFoundException
         ResourceNotFoundException exception = assertThrows(ResourceNotFoundException.class, () -> produtoService.deletar(produtoId));
         assertEquals("Não é possível excluir. Produto não encontrado!", exception.getMessage());
         verify(produtoRepository, never()).deleteById(any());

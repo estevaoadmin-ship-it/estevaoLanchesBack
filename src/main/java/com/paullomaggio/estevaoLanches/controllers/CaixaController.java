@@ -2,36 +2,45 @@ package com.paullomaggio.estevaoLanches.controllers;
 
 import com.paullomaggio.estevaoLanches.dtos.CaixaAberturaRequestDTO;
 import com.paullomaggio.estevaoLanches.dtos.CaixaFechamentoRequestDTO;
-import com.paullomaggio.estevaoLanches.entities.Caixa;
+import com.paullomaggio.estevaoLanches.dtos.CaixaResumoResponseDTO;
+import com.paullomaggio.estevaoLanches.dtos.CaixaStatusResponseDTO;
 import com.paullomaggio.estevaoLanches.services.CaixaService;
+import jakarta.validation.Valid;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
+import java.util.Map;
+
 @RestController
 @RequestMapping("/api/caixas")
-@CrossOrigin(origins = "http://localhost:4200")
 public class CaixaController {
 
     @Autowired
     private CaixaService caixaService;
 
-    // RESTful: Verifica o status atual (bom para o Angular decidir se mostra aviso)
     @GetMapping("/status")
-    public ResponseEntity<Boolean> verificarStatus() {
-        return ResponseEntity.ok(caixaService.isCaixaAberto());
+    public ResponseEntity<?> verificarStatus() {
+        return caixaService.obterStatusAtual()
+                .map(ResponseEntity::ok)
+                .orElse(ResponseEntity.ok().body(null));
     }
 
-    // RESTful: POST cria o recurso do Caixa do dia (Abertura)
+    // 🚀 NOVO ENDPOINT: Expõe o painel de KPIs financeiros fatiados para o Angular
+    @GetMapping("/resumo")
+    public ResponseEntity<CaixaResumoResponseDTO> obterResumo() {
+        return ResponseEntity.ok(caixaService.obterResumoTurno());
+    }
+
     @PostMapping
-    public ResponseEntity<Caixa> abrir(@RequestBody CaixaAberturaRequestDTO dto) {
-        return ResponseEntity.status(HttpStatus.CREATED).body(caixaService.abrirCaixa(dto));
+    public ResponseEntity<CaixaStatusResponseDTO> abrir(@RequestBody @Valid CaixaAberturaRequestDTO dto) {
+        CaixaStatusResponseDTO response = caixaService.abrirCaixa(dto);
+        return ResponseEntity.ok(response);
     }
 
-    // RESTful: PATCH altera parcialmente o recurso do Caixa ativo (Fechamento)
     @PatchMapping("/ativo")
-    public ResponseEntity<Caixa> fechar(@RequestBody CaixaFechamentoRequestDTO dto) {
-        return ResponseEntity.ok(caixaService.fecharCaixa(dto));
+    public ResponseEntity<?> fechar(@RequestBody @Valid CaixaFechamentoRequestDTO dto) {
+        caixaService.fecharCaixa(dto);
+        return ResponseEntity.ok().body(Map.of("message", "Turno encerrado e salvo com sucesso!"));
     }
 }

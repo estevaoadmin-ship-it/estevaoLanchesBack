@@ -64,8 +64,8 @@ class PedidoServiceTest {
         cliente.setId(clienteId);
         cliente.setNome("Maria Santos");
 
-        prodA = new Produto(); prodA.setId(prodAId); prodA.setPreco(new BigDecimal("10.00")); prodA.setNome("X-Bacon");
-        prodB = new Produto(); prodB.setId(prodBId); prodB.setPreco(new BigDecimal("20.00")); prodB.setNome("X-Tudo");
+        prodA = new Produto(); prodA.setId(prodAId); prodA.setPreco(new BigDecimal("10.00")); prodA.setNome("X-Bacon"); prodA.setPrecisaPreparo(true);
+        prodB = new Produto(); prodB.setId(prodBId); prodB.setPreco(new BigDecimal("20.00")); prodB.setNome("X-Tudo"); prodB.setPrecisaPreparo(true);
 
         carrinho = new Carrinho();
         carrinho.setCliente(cliente);
@@ -92,10 +92,6 @@ class PedidoServiceTest {
         pedidoPadrao.getItens().add(itemPedidoExistente);
     }
 
-    // ==========================================
-    // SEÇÃO 1: FLUXOS DE CHECKOUT (CARRINHO E PDV)
-    // ==========================================
-
     @Test
     @DisplayName("Testes 1 a 8, 13 e 16: Checkout Geral, Limpeza de Carrinho e Preço Blindado")
     void deveFinalizarCheckoutsDiversosComSucesso() {
@@ -108,7 +104,7 @@ class PedidoServiceTest {
         PedidoResponseDTO resultado = pedidoService.finalizarPedido(dtoApp);
 
         assertThat(resultado.total()).isEqualByComparingTo(new BigDecimal("20.00"));
-        assertThat(carrinho.getItens()).isEmpty(); // Valida Teste 13 (Limpar carrinho)
+        assertThat(carrinho.getItens()).isEmpty();
     }
 
     @Test
@@ -116,25 +112,18 @@ class PedidoServiceTest {
     void deveLancarExcecoesRegrasDeNegocioNoCheckout() {
         CheckoutRequestDTO dto = new CheckoutRequestDTO(clienteId, TipoPedido.DELIVERY, null, null, null, null, null, FormaPagamento.PIX, null, null);
 
-        // T9: Caixa fechado
         when(caixaRepository.existsByStatus(StatusCaixa.ABERTO)).thenReturn(false);
         assertThrows(BusinessRuleException.class, () -> pedidoService.finalizarPedido(dto));
 
         when(caixaRepository.existsByStatus(StatusCaixa.ABERTO)).thenReturn(true);
 
-        // T10 e T11: Carrinho Inexistente/Cliente Nulo no App
         when(carrinhoRepository.findByClienteId(clienteId)).thenReturn(Optional.empty());
         assertThrows(ResourceNotFoundException.class, () -> pedidoService.finalizarPedido(dto));
 
-        // T12: Carrinho Vazio
         carrinho.getItens().clear();
         when(carrinhoRepository.findByClienteId(clienteId)).thenReturn(Optional.of(carrinho));
         assertThrows(BusinessRuleException.class, () -> pedidoService.finalizarPedido(dto));
     }
-
-    // ==========================================
-    // SEÇÃO 2: BUSCA, LISTAGEM E MONITOR
-    // ==========================================
 
     @Test
     @DisplayName("Testes 19 a 22: Buscar Pedido e Listar Todos")
@@ -142,7 +131,6 @@ class PedidoServiceTest {
         when(pedidoRepository.findById(pedidoId)).thenReturn(Optional.of(pedidoPadrao));
         assertThat(pedidoService.buscarPorId(pedidoId).id()).isEqualTo(pedidoId);
 
-        // CORREÇÃO: Usando any(UUID.class) para resolver o PotentialStubbingProblem
         when(pedidoRepository.findById(any(UUID.class))).thenReturn(Optional.empty());
         assertThrows(ResourceNotFoundException.class, () -> pedidoService.buscarPorId(UUID.randomUUID()));
 
@@ -166,10 +154,6 @@ class PedidoServiceTest {
         assertThat(pedidoService.listarPedidosAtivosMonitor()).isEmpty();
     }
 
-    // ==========================================
-    // SEÇÃO 3: ATUALIZAÇÃO DE STATUS
-    // ==========================================
-
     @Test
     @DisplayName("Testes 27 a 30: Deve atualizar status seguindo o fluxo normal")
     void deveAtualizarStatusComSucesso() {
@@ -190,14 +174,9 @@ class PedidoServiceTest {
         pedidoPadrao.setStatus(StatusPedido.CANCELADO);
         assertThrows(BusinessRuleException.class, () -> pedidoService.atualizarStatus(pedidoId, new PedidoStatusRequestDTO(StatusPedido.RECEBIDO)));
 
-        // CORREÇÃO: Usando any(UUID.class) para evitar falso negativo do Mockito
         when(pedidoRepository.findById(any(UUID.class))).thenReturn(Optional.empty());
         assertThrows(ResourceNotFoundException.class, () -> pedidoService.atualizarStatus(UUID.randomUUID(), new PedidoStatusRequestDTO(StatusPedido.RECEBIDO)));
     }
-
-    // ==========================================
-    // SEÇÃO 4: CANCELAMENTO
-    // ==========================================
 
     @Test
     @DisplayName("Testes 34 a 39: Deve permitir cancelar pedidos abertos e impedir finalizados")
@@ -211,10 +190,6 @@ class PedidoServiceTest {
         assertThrows(BusinessRuleException.class, () -> pedidoService.cancelarPedido(pedidoId));
     }
 
-    // ==========================================
-    // SEÇÃO 5: ADICIONAR E REMOVER ITENS DA COMANDA
-    // ==========================================
-
     @Test
     @DisplayName("Testes 40 e 41: Deve adicionar item e recalcular total")
     void deveAdicionarItemERecalcularTotal() {
@@ -226,7 +201,6 @@ class PedidoServiceTest {
 
         PedidoResponseDTO res = pedidoService.adicionarItemPedido(pedidoId, novoItem);
 
-        // Total Original: 20.00 + (1 * 20.00 Produto B) = 40.00
         assertThat(res.total()).isEqualByComparingTo(new BigDecimal("40.00"));
         assertThat(pedidoPadrao.getItens()).hasSize(2);
     }
@@ -240,7 +214,7 @@ class PedidoServiceTest {
         when(produtoRepository.findById(prodBId)).thenReturn(Optional.empty());
         assertThrows(ResourceNotFoundException.class, () -> pedidoService.adicionarItemPedido(pedidoId, novoItem));
 
-        pedidoPadrao.setStatus(StatusPedido.EM_ROTA); // Impede Rota, Finalizado e Cancelado
+        pedidoPadrao.setStatus(StatusPedido.EM_ROTA);
         assertThrows(BusinessRuleException.class, () -> pedidoService.adicionarItemPedido(pedidoId, novoItem));
     }
 
@@ -252,7 +226,6 @@ class PedidoServiceTest {
 
         PedidoResponseDTO res = pedidoService.removerItemPedido(pedidoId, itemExistenteId);
 
-        // Total Original: 20.00 - (2 * 10.00 Item Existente) = 0.00
         assertThat(res.total()).isEqualByComparingTo(BigDecimal.ZERO);
         assertThat(pedidoPadrao.getItens()).isEmpty();
     }
@@ -267,10 +240,6 @@ class PedidoServiceTest {
         assertThrows(BusinessRuleException.class, () -> pedidoService.removerItemPedido(pedidoId, itemExistenteId));
     }
 
-    // ==========================================
-    // SEÇÃO 6: EXCLUSÃO FÍSICA E EDGE CASES
-    // ==========================================
-
     @Test
     @DisplayName("Teste 54: Impedir exclusão física")
     void deveImpedirExclusaoFisica() {
@@ -281,7 +250,7 @@ class PedidoServiceTest {
     @DisplayName("Testes 55 a 60: Casos de Borda (Extremos, Sem Observação, Múltiplos Itens)")
     void deveProcessarCasosDeBordaComSucesso() {
         List<ItemPedidoRequestDTO> itensExtremos = new ArrayList<>();
-        for (int i = 0; i < 50; i++) { // Simulando 50 itens
+        for (int i = 0; i < 50; i++) {
             itensExtremos.add(new ItemPedidoRequestDTO(prodAId, 2, ""));
         }
 
@@ -293,10 +262,7 @@ class PedidoServiceTest {
 
         PedidoResponseDTO resultado = pedidoService.finalizarPedido(dtoBorda);
 
-        // 50 itens * 2 qtd * 10 reais = 1000 reais
         assertThat(resultado.total()).isEqualByComparingTo(new BigDecimal("1000.00"));
-
-        // CORREÇÃO: Validando o null corretamente
         assertThat(resultado.observacaoGeral()).isNull();
     }
 }

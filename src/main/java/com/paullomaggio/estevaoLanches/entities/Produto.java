@@ -48,6 +48,11 @@ public class Produto {
     @Column(nullable = false)
     private Boolean isCombo = false;
 
+    // 🚀 NOVO CAMPO: Define se o produto exige fabricação ou se é entregue direto no balcão
+    @NotNull
+    @Column(name = "precisa_preparo", nullable = false)
+    private Boolean precisaPreparo = true;
+
     @NotNull(message = "A categoria é obrigatória.")
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "categoria_id", nullable = false)
