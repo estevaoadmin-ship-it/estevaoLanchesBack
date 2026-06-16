@@ -3,15 +3,21 @@ package com.paullomaggio.estevaoLanches.dtos;
 import com.paullomaggio.estevaoLanches.entities.Produto;
 import com.paullomaggio.estevaoLanches.enums.StatusProduto;
 import java.math.BigDecimal;
+import java.util.List;
 import java.util.UUID;
+import java.util.stream.Collectors;
 
 public record ProdutoResponseDTO(
         UUID id,
         String nome,
         String descricao,
         BigDecimal preco,
+        String urlImagem,
         StatusProduto status,
-        String categoriaNome // Devolvemos só o nome da categoria para ficar leve!
+        Boolean isCombo,
+        Boolean precisaPreparo,
+        String categoriaNome,
+        List<AdicionalResponseDTO> adicionais // 🚀 AQUI ESTÁ A CHAVE: O Angular precisa disso!
 ) {
     public ProdutoResponseDTO(Produto produto) {
         this(
@@ -19,8 +25,17 @@ public record ProdutoResponseDTO(
                 produto.getNome(),
                 produto.getDescricao(),
                 produto.getPreco(),
+                produto.getUrlImagem(),
                 produto.getStatus(),
-                produto.getCategoria() != null ? produto.getCategoria().getNome() : null
+                produto.getIsCombo(),
+                produto.getPrecisaPreparo(),
+                produto.getCategoria() != null ? produto.getCategoria().getNome() : null,
+                // 🚀 Mapeia a lista do banco para o DTO. Retorna lista vazia se for null.
+                produto.getAdicionais() != null ?
+                        produto.getAdicionais().stream()
+                                .map(AdicionalResponseDTO::new)
+                                .collect(Collectors.toList())
+                        : List.of()
         );
     }
 }

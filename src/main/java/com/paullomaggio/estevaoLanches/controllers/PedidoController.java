@@ -1,13 +1,9 @@
 package com.paullomaggio.estevaoLanches.controllers;
 
-import com.paullomaggio.estevaoLanches.dtos.CheckoutRequestDTO;
-import com.paullomaggio.estevaoLanches.dtos.ItemPedidoRequestDTO;
-import com.paullomaggio.estevaoLanches.dtos.PedidoResponseDTO;
-import com.paullomaggio.estevaoLanches.dtos.PedidoStatusRequestDTO;
+import com.paullomaggio.estevaoLanches.dtos.*;
 import com.paullomaggio.estevaoLanches.services.PedidoService;
 import jakarta.validation.Valid;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
@@ -23,8 +19,13 @@ public class PedidoController {
     private PedidoService pedidoService;
 
     @PostMapping("/checkout")
-    public ResponseEntity<PedidoResponseDTO> criarPedido(@Valid @RequestBody CheckoutRequestDTO dto) {
-        return ResponseEntity.status(HttpStatus.CREATED).body(pedidoService.finalizarPedido(dto));
+    public ResponseEntity<PedidoResponseDTO> finalizarPedido(@RequestBody @Valid CheckoutRequestDTO dto) {
+        return ResponseEntity.ok(pedidoService.finalizarPedido(dto));
+    }
+
+    @GetMapping("/monitor")
+    public ResponseEntity<List<PedidoResponseDTO>> listarPedidosAtivosMonitor() {
+        return ResponseEntity.ok(pedidoService.listarPedidosAtivosMonitor());
     }
 
     @GetMapping
@@ -37,18 +38,8 @@ public class PedidoController {
         return ResponseEntity.ok(pedidoService.buscarPorId(id));
     }
 
-    @GetMapping("/cliente/{clienteId}")
-    public ResponseEntity<List<PedidoResponseDTO>> listarHistoricoCliente(@PathVariable UUID clienteId) {
-        return ResponseEntity.ok(pedidoService.listarHistoricoCliente(clienteId));
-    }
-
-    @GetMapping("/monitor")
-    public ResponseEntity<List<PedidoResponseDTO>> listarPedidosAtivosMonitor() {
-        return ResponseEntity.ok(pedidoService.listarPedidosAtivosMonitor());
-    }
-
     @PutMapping("/{id}/status")
-    public ResponseEntity<PedidoResponseDTO> atualizarStatus(@PathVariable UUID id, @Valid @RequestBody PedidoStatusRequestDTO dto) {
+    public ResponseEntity<PedidoResponseDTO> atualizarStatus(@PathVariable UUID id, @RequestBody @Valid PedidoStatusRequestDTO dto) {
         return ResponseEntity.ok(pedidoService.atualizarStatus(id, dto));
     }
 
@@ -58,7 +49,7 @@ public class PedidoController {
     }
 
     @PostMapping("/{pedidoId}/itens")
-    public ResponseEntity<PedidoResponseDTO> adicionarItemPedido(@PathVariable UUID pedidoId, @Valid @RequestBody ItemPedidoRequestDTO dto) {
+    public ResponseEntity<PedidoResponseDTO> adicionarItemPedido(@PathVariable UUID pedidoId, @RequestBody @Valid ItemPedidoRequestDTO dto) {
         return ResponseEntity.ok(pedidoService.adicionarItemPedido(pedidoId, dto));
     }
 
@@ -67,9 +58,11 @@ public class PedidoController {
         return ResponseEntity.ok(pedidoService.removerItemPedido(pedidoId, itemId));
     }
 
-    @DeleteMapping("/{id}")
-    public ResponseEntity<Void> excluirFisicamente(@PathVariable UUID id) {
-        pedidoService.excluirFisicamente(id);
-        return ResponseEntity.noContent().build();
+    @PutMapping("/{pedidoId}/itens/{itemId}/adicionais")
+    public ResponseEntity<PedidoResponseDTO> atualizarAdicionaisDoItem(
+            @PathVariable UUID pedidoId,
+            @PathVariable UUID itemId,
+            @RequestBody List<UUID> adicionaisIds) {
+        return ResponseEntity.ok(pedidoService.atualizarAdicionaisDoItem(pedidoId, itemId, adicionaisIds));
     }
 }

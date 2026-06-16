@@ -3,6 +3,8 @@ package com.paullomaggio.estevaoLanches.entities;
 import jakarta.persistence.*;
 import lombok.*;
 import java.math.BigDecimal;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.UUID;
 
 @Entity
@@ -28,11 +30,18 @@ public class ItemPedido {
     private Produto produto;
 
     @Column(nullable = false)
-    private Integer quantidade;
+    private Integer quantidade; // Mantido o padrao BR
 
-    // CRUCIAL: Guarda o preco do produto no exato momento da compra (seguranca fiscal)
     @Column(nullable = false, precision = 10, scale = 2)
     private BigDecimal precoUnitario;
 
-    private String observacaoItem; // Ex: "Sem cebola", "Carne bem passada"
+    private String observacaoItem;
+
+    @ManyToMany(fetch = FetchType.LAZY)
+    @JoinTable(
+            name = "item_pedido_adicional",
+            joinColumns = @JoinColumn(name = "item_pedido_id"),
+            inverseJoinColumns = @JoinColumn(name = "adicional_id")
+    )
+    private List<Adicional> adicionais = new ArrayList<>();
 }

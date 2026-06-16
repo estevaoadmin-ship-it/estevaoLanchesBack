@@ -47,9 +47,13 @@ class ProdutoServiceTest {
 
     private Categoria categoriaMock;
     private Produto produtoMock;
+    private Adicional adicionalMock1;
+    private Adicional adicionalMock2;
     private ProdutoRequestDTO requestDTOMock;
     private UUID categoriaId = UUID.randomUUID();
     private UUID produtoId = UUID.randomUUID();
+    private UUID adicionalId1 = UUID.randomUUID();
+    private UUID adicionalId2 = UUID.randomUUID();
 
     @BeforeEach
     void setUp() {
@@ -57,10 +61,20 @@ class ProdutoServiceTest {
         categoriaMock.setId(categoriaId);
         categoriaMock.setNome("Lanches");
 
+        adicionalMock1 = new Adicional();
+        adicionalMock1.setId(adicionalId1);
+        adicionalMock1.setNome("Bacon Extra");
+        adicionalMock1.setPreco(new BigDecimal("4.50"));
+
+        adicionalMock2 = new Adicional();
+        adicionalMock2.setId(adicionalId2);
+        adicionalMock2.setNome("Cheddar Cremoso");
+        adicionalMock2.setPreco(new BigDecimal("5.00"));
+
         produtoMock = new Produto();
         produtoMock.setId(produtoId);
         produtoMock.setNome("X-Bacon Especial");
-        produtoMock.setDescricao("Hambúrguer artesanal");
+        produtoMock.setDescricao("Hamburguer artesanal");
         produtoMock.setPreco(new BigDecimal("25.00"));
         produtoMock.setStatus(StatusProduto.DISPONIVEL);
         produtoMock.setIsCombo(false);
@@ -72,7 +86,7 @@ class ProdutoServiceTest {
     @Test
     @DisplayName("Deve salvar produto com categoria e sem adicionais com sucesso")
     void deveSalvarProdutoSemAdicionais() {
-        requestDTOMock = new ProdutoRequestDTO("X-Bacon Especial", "Hambúrguer", new BigDecimal("25.00"), "", StatusProduto.DISPONIVEL, false, true, categoriaId, null);
+        requestDTOMock = new ProdutoRequestDTO("X-Bacon Especial", "Hamburguer", new BigDecimal("25.00"), "", StatusProduto.DISPONIVEL, false, true, categoriaId, null);
 
         when(categoriaRepository.findById(categoriaId)).thenReturn(Optional.of(categoriaMock));
         when(produtoRepository.save(any(Produto.class))).thenReturn(produtoMock);
@@ -86,7 +100,7 @@ class ProdutoServiceTest {
     }
 
     @Test
-    @DisplayName("Deve lançar exceção de negócio ao tentar salvar produto com categoria inexistente")
+    @DisplayName("Deve lancar excecao de negocio ao tentar salvar produto com categoria inexistente")
     void deveLancarExcecaoCategoriaInexistente() {
         requestDTOMock = new ProdutoRequestDTO("Erro", "Erro", BigDecimal.TEN, "", StatusProduto.DISPONIVEL, false, true, UUID.randomUUID(), null);
 
@@ -99,11 +113,10 @@ class ProdutoServiceTest {
     @Test
     @DisplayName("Deve salvar produto associando os adicionais corretamente")
     void deveSalvarProdutoComAdicionais() {
-        UUID adicionalId = UUID.randomUUID();
-        requestDTOMock = new ProdutoRequestDTO("Lanche", "Desc", BigDecimal.TEN, "", StatusProduto.DISPONIVEL, false, true, categoriaId, List.of(adicionalId));
+        requestDTOMock = new ProdutoRequestDTO("Lanche", "Desc", BigDecimal.TEN, "", StatusProduto.DISPONIVEL, false, true, categoriaId, List.of(adicionalId1));
 
         when(categoriaRepository.findById(categoriaId)).thenReturn(Optional.of(categoriaMock));
-        when(adicionalRepository.findAllById(any())).thenReturn(List.of(new Adicional()));
+        when(adicionalRepository.findAllById(any())).thenReturn(List.of(adicionalMock1));
         when(produtoRepository.save(any(Produto.class))).thenReturn(produtoMock);
 
         produtoService.salvar(requestDTOMock);
@@ -161,7 +174,7 @@ class ProdutoServiceTest {
     }
 
     @Test
-    @DisplayName("Deve lançar ResourceNotFoundException ao buscar ID que não existe")
+    @DisplayName("Deve lancar ResourceNotFoundException ao buscar ID que nao existe")
     void deveLancarExcecaoIdInexistente() {
         when(produtoRepository.findById(any())).thenReturn(Optional.empty());
 
@@ -170,9 +183,8 @@ class ProdutoServiceTest {
     }
 
     @Test
-    @DisplayName("Deve atualizar as informações do produto e alterar fluxo operacional se necessário")
+    @DisplayName("Deve atualizar as informacoes do produto e alterar fluxo operacional se necessario")
     void deveAtualizarProduto() {
-        // 🚀 AJUSTADO: Trocado 'new ArrayList<>()' por 'List.of()' para garantir o padrão Java Record limpo
         requestDTOMock = new ProdutoRequestDTO("Nome Novo", "Desc Nova", BigDecimal.ONE, "", StatusProduto.DISPONIVEL, false, false, categoriaId, List.of());
 
         when(produtoRepository.findById(produtoId)).thenReturn(Optional.of(produtoMock));
@@ -199,12 +211,114 @@ class ProdutoServiceTest {
     }
 
     @Test
-    @DisplayName("Deve lançar ResourceNotFoundException ao tentar deletar produto que não existe")
+    @DisplayName("Deve lancar ResourceNotFoundException ao tentar deletar produto que nao existe")
     void deveLancarExcecaoDeletarInexistente() {
         when(produtoRepository.existsById(produtoId)).thenReturn(false);
 
         ResourceNotFoundException exception = assertThrows(ResourceNotFoundException.class, () -> produtoService.deletar(produtoId));
         assertEquals("Não é possível excluir. Produto não encontrado!", exception.getMessage());
         verify(produtoRepository, never()).deleteById(any());
+    }
+
+    @Test
+    @DisplayName("Novo Teste: Deve salvar produto garantindo que multiplos adicionais sejam inseridos na entidade")
+    void deveSalvarProdutoComMultiplosAdicionaisEVerificarPopulacao() {
+        List<UUID> idsAdicionais = List.of(adicionalId1, adicionalId2);
+        requestDTOMock = new ProdutoRequestDTO("Burger Combo", "Artesanal Completo", new BigDecimal("35.00"), "", StatusProduto.DISPONIVEL, true, true, categoriaId, idsAdicionais);
+
+        when(categoriaRepository.findById(categoriaId)).thenReturn(Optional.of(categoriaMock));
+        when(adicionalRepository.findAllById(idsAdicionais)).thenReturn(List.of(adicionalMock1, adicionalMock2));
+        when(produtoRepository.save(any(Produto.class))).thenAnswer(invocation -> invocation.getArgument(0));
+
+        ProdutoResponseDTO response = produtoService.salvar(requestDTOMock);
+
+        assertNotNull(response);
+        verify(adicionalRepository).findAllById(idsAdicionais);
+        verify(produtoRepository).save(argThat(p -> p.getAdicionais().size() == 2));
+    }
+
+    @Test
+    @DisplayName("Novo Teste: Deve atualizar produto substituindo a lista antiga de adicionais por novos elementos")
+    void deveAtualizarProdutoSubstituindoListaDeAdicionais() {
+        produtoMock.getAdicionais().add(adicionalMock1);
+
+        List<UUID> novosIds = List.of(adicionalId2);
+        requestDTOMock = new ProdutoRequestDTO("X-Bacon Especial", "Hamburguer artesanal", new BigDecimal("25.00"), "", StatusProduto.DISPONIVEL, false, true, categoriaId, novosIds);
+
+        when(produtoRepository.findById(produtoId)).thenReturn(Optional.of(produtoMock));
+        when(categoriaRepository.findById(categoriaId)).thenReturn(Optional.of(categoriaMock));
+        when(adicionalRepository.findAllById(novosIds)).thenReturn(List.of(adicionalMock2));
+        when(produtoRepository.save(any(Produto.class))).thenAnswer(invocation -> invocation.getArgument(0));
+
+        produtoService.atualizar(produtoId, requestDTOMock);
+
+        verify(adicionalRepository).findAllById(novosIds);
+        verify(produtoRepository).save(argThat(p ->
+                p.getAdicionais().size() == 1 &&
+                        p.getAdicionais().get(0).getId().equals(adicionalId2)
+        ));
+    }
+
+    @Test
+    @DisplayName("Novo Teste: Deve limpar todos os adicionais do produto ao atualizar passando lista vazia")
+    void deveLimparAdicionaisAoAtualizarComListaVazia() {
+        produtoMock.getAdicionais().add(adicionalMock1);
+        produtoMock.getAdicionais().add(adicionalMock2);
+
+        requestDTOMock = new ProdutoRequestDTO("X-Bacon Especial", "Hamburguer artesanal", new BigDecimal("25.00"), "", StatusProduto.DISPONIVEL, false, true, categoriaId, List.of());
+
+        when(produtoRepository.findById(produtoId)).thenReturn(Optional.of(produtoMock));
+        when(categoriaRepository.findById(categoriaId)).thenReturn(Optional.of(categoriaMock));
+        when(produtoRepository.save(any(Produto.class))).thenAnswer(invocation -> invocation.getArgument(0));
+
+        produtoService.atualizar(produtoId, requestDTOMock);
+
+        verify(adicionalRepository, never()).findAllById(anyList());
+        verify(produtoRepository).save(argThat(p -> p.getAdicionais().isEmpty()));
+    }
+
+    @Test
+    @DisplayName("Novo Teste: Deve lancar ResourceNotFoundException ao tentar atualizar um produto que nao existe")
+    void deveLancarExcecaoAoAtualizarProdutoInexistente() {
+        requestDTOMock = new ProdutoRequestDTO("Item Fantasma", "Descricao", BigDecimal.TEN, "", StatusProduto.DISPONIVEL, false, false, categoriaId, List.of());
+
+        when(produtoRepository.findById(any(UUID.class))).thenReturn(Optional.empty());
+
+        ResourceNotFoundException exception = assertThrows(ResourceNotFoundException.class, () ->
+                produtoService.atualizar(UUID.randomUUID(), requestDTOMock)
+        );
+        // CORRIGIDO: String de comparacao ajustada para bater exatamente com a mensagem real do seu service
+        assertEquals("Não é possível editar. Produto não encontrado!", exception.getMessage());
+        verify(produtoRepository, never()).save(any(Produto.class));
+    }
+
+    @Test
+    @DisplayName("Novo Teste: Deve lancar BusinessRuleException ao tentar atualizar produto vinculando uma categoria inexistente")
+    void deveLancarExcecaoAoAtualizarProdutoComCategoriaInexistente() {
+        requestDTOMock = new ProdutoRequestDTO("X-Monstro", "Lanche Gigante", new BigDecimal("30.00"), "", StatusProduto.DISPONIVEL, false, true, categoriaId, List.of());
+
+        when(produtoRepository.findById(produtoId)).thenReturn(Optional.of(produtoMock));
+        when(categoriaRepository.findById(categoriaId)).thenReturn(Optional.empty());
+
+        BusinessRuleException exception = assertThrows(BusinessRuleException.class, () ->
+                produtoService.atualizar(produtoId, requestDTOMock)
+        );
+        assertEquals("A Categoria informada para o produto não existe!", exception.getMessage());
+        verify(produtoRepository, never()).save(any(Produto.class));
+    }
+
+    @Test
+    @DisplayName("Novo Teste: Deve modificar a propriedade precisaPreparo de um produto existente durante a atualizacao")
+    void deveAlterarFluxoOperacionalPreparoNaAtualizacao() {
+        // ProdutoMock inicia como precisaPreparo = true (Lanche)
+        requestDTOMock = new ProdutoRequestDTO("Suco Atômico", "Bebida Pronta", new BigDecimal("8.00"), "", StatusProduto.DISPONIVEL, false, false, categoriaId, List.of());
+
+        when(produtoRepository.findById(produtoId)).thenReturn(Optional.of(produtoMock));
+        when(categoriaRepository.findById(categoriaId)).thenReturn(Optional.of(categoriaMock));
+        when(produtoRepository.save(any(Produto.class))).thenAnswer(invocation -> invocation.getArgument(0));
+
+        produtoService.atualizar(produtoId, requestDTOMock);
+
+        verify(produtoRepository).save(argThat(p -> !p.getPrecisaPreparo()));
     }
 }

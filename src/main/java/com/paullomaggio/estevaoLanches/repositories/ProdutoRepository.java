@@ -14,8 +14,20 @@ import java.util.UUID;
 @Repository
 public interface ProdutoRepository extends JpaRepository<Produto, UUID> {
 
+    // =========================================================================
+    // CORREÇÃO OPERACIONAL: Sobrescreve a busca geral para trazer a Categoria
+    // e os Adicionais juntos. Isso previne que a lista venha como "undefined".
+    // =========================================================================
+    @Override
+    @Query("SELECT DISTINCT p FROM Produto p " +
+            "LEFT JOIN FETCH p.categoria " +
+            "LEFT JOIN FETCH p.adicionais")
+    List<Produto> findAll();
+
     List<Produto> findByStatus(StatusProduto status);
+
     List<Produto> findByIsComboTrue();
+
     List<Produto> findByIsComboFalse();
 
     @Query("SELECT p FROM Produto p " +
@@ -26,7 +38,7 @@ public interface ProdutoRepository extends JpaRepository<Produto, UUID> {
     List<Produto> buscarPorTermo(@Param("termo") String termo);
 
     // =========================================================================
-    // NOVO: Método que deleta todos os produtos vinculados a uma categoria
+    // Método que deleta todos os produtos vinculados a uma categoria
     // =========================================================================
     @Modifying
     @Query("DELETE FROM Produto p WHERE p.categoria.id = :categoriaId")

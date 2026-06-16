@@ -9,6 +9,7 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
+import java.util.UUID;
 
 @RestController
 @RequestMapping("/api/adicionais")
@@ -26,5 +27,18 @@ public class AdicionalController {
     @PostMapping
     public ResponseEntity<AdicionalResponseDTO> salvar(@RequestBody AdicionalRequestDTO dto) {
         return ResponseEntity.status(HttpStatus.CREATED).body(adicionalService.salvar(dto));
+    }
+
+    //  ADICIONADO: Rota que libera a edição de adicionais
+    @PutMapping("/{id}")
+    public ResponseEntity<AdicionalResponseDTO> atualizar(@PathVariable UUID id, @RequestBody AdicionalRequestDTO dto) {
+        return ResponseEntity.ok(adicionalService.atualizar(id, dto));
+    }
+
+    //  ADICIONADO: Rota que libera a exclusão de adicionais
+    @DeleteMapping("/{id}")
+    public ResponseEntity<Void> deletar(@PathVariable UUID id) {
+        adicionalService.deletar(id);
+        return ResponseEntity.noContent().build();
     }
 }

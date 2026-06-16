@@ -40,10 +40,13 @@ public class PedidoService {
     @Autowired
     private ClienteRepository clienteRepository;
 
+    @Autowired
+    private AdicionalRepository adicionalRepository;
+
     @Transactional
     public PedidoResponseDTO finalizarPedido(CheckoutRequestDTO dto) {
         if (!caixaRepository.existsByStatus(StatusCaixa.ABERTO)) {
-            throw new BusinessRuleException("O estabelecimento está fechado. Abra o caixa para iniciar as vendas!");
+            throw new BusinessRuleException("O estabelecimento esta fechado. Abra o caixa para iniciar as vendas!");
         }
 
         Pedido pedido = new Pedido();
@@ -64,12 +67,11 @@ public class PedidoService {
 
         BigDecimal totalPedido = BigDecimal.ZERO;
 
-        // BIFURCAÇÃO: Se vier da lista direta (PDV), pula verificação de carrinho persistido
         if (dto.itens() != null && !dto.itens().isEmpty()) {
 
             if (dto.clienteId() != null) {
                 Cliente cliente = clienteRepository.findById(dto.clienteId())
-                        .orElseThrow(() -> new ResourceNotFoundException("Cliente não encontrado!"));
+                        .orElseThrow(() -> new ResourceNotFoundException("Cliente nao encontrado!"));
                 pedido.setCliente(cliente);
             } else {
                 pedido.setCliente(null);
@@ -77,7 +79,7 @@ public class PedidoService {
 
             for (var itemDto : dto.itens()) {
                 Produto produto = produtoRepository.findById(itemDto.produtoId())
-                        .orElseThrow(() -> new ResourceNotFoundException("Produto não encontrado: " + itemDto.produtoId()));
+                        .orElseThrow(() -> new ResourceNotFoundException("Produto nao encontrado: " + itemDto.produtoId()));
 
                 ItemPedido itemPedido = new ItemPedido();
                 itemPedido.setPedido(pedido);
@@ -86,21 +88,31 @@ public class PedidoService {
                 itemPedido.setObservacaoItem(itemDto.observacao());
                 itemPedido.setPrecoUnitario(produto.getPreco());
 
-                BigDecimal subtotal = itemPedido.getPrecoUnitario().multiply(BigDecimal.valueOf(itemPedido.getQuantidade()));
+                if (itemDto.adicionaisIds() != null && !itemDto.adicionaisIds().isEmpty()) {
+                    List<Adicional> adicionais = adicionalRepository.findAllById(itemDto.adicionaisIds());
+                    itemPedido.setAdicionais(adicionais);
+                }
+
+                BigDecimal precoAdicionais = itemPedido.getAdicionais().stream()
+                        .map(Adicional::getPreco)
+                        .reduce(BigDecimal.ZERO, BigDecimal::add);
+
+                BigDecimal subtotal = itemPedido.getPrecoUnitario().add(precoAdicionais)
+                        .multiply(BigDecimal.valueOf(itemPedido.getQuantidade()));
+
                 totalPedido = totalPedido.add(subtotal);
                 pedido.getItens().add(itemPedido);
             }
         } else {
-            // Fluxo nativo via App Delivery (Lê carrinho temporário)
             if (dto.clienteId() == null) {
-                throw new BusinessRuleException("Para recuperar o carrinho do banco, o clienteId é obrigatório!");
+                throw new BusinessRuleException("Para recuperar o carrinho do banco, o clienteId e obrigatorio!");
             }
 
             Carrinho carrinho = carrinhoRepository.findByClienteId(dto.clienteId())
-                    .orElseThrow(() -> new ResourceNotFoundException("Carrinho não encontrado!"));
+                    .orElseThrow(() -> new ResourceNotFoundException("Carrinho nao encontrado!"));
 
             if (carrinho.getItens().isEmpty()) {
-                throw new BusinessRuleException("O carrinho está vazio!");
+                throw new BusinessRuleException("O carrinho esta vazio!");
             }
 
             pedido.setCliente(carrinho.getCliente());
@@ -131,7 +143,7 @@ public class PedidoService {
     @Transactional(readOnly = true)
     public PedidoResponseDTO buscarPorId(UUID id) {
         Pedido pedido = pedidoRepository.findById(id)
-                .orElseThrow(() -> new ResourceNotFoundException("Pedido não encontrado."));
+                .orElseThrow(() -> new ResourceNotFoundException("Pedido nao encontrado."));
         return new PedidoResponseDTO(pedido);
     }
 
@@ -160,10 +172,10 @@ public class PedidoService {
     @Transactional
     public PedidoResponseDTO atualizarStatus(UUID id, PedidoStatusRequestDTO dto) {
         Pedido pedido = pedidoRepository.findById(id)
-                .orElseThrow(() -> new ResourceNotFoundException("Pedido não encontrado."));
+                .orElseThrow(() -> new ResourceNotFoundException("Pedido nao encontrado."));
 
         if (pedido.getStatus() == StatusPedido.FINALIZADO || pedido.getStatus() == StatusPedido.CANCELADO) {
-            throw new BusinessRuleException("Não é possível alterar o status de um pedido Finalizado ou Cancelado.");
+            throw new BusinessRuleException("Nao e possivel alterar o status de um pedido Finalizado ou Cancelado.");
         }
 
         pedido.setStatus(dto.status());
@@ -173,10 +185,10 @@ public class PedidoService {
     @Transactional
     public PedidoResponseDTO cancelarPedido(UUID id) {
         Pedido pedido = pedidoRepository.findById(id)
-                .orElseThrow(() -> new ResourceNotFoundException("Pedido não encontrado."));
+                .orElseThrow(() -> new ResourceNotFoundException("Pedido nao encontrado."));
 
         if (pedido.getStatus() == StatusPedido.FINALIZADO) {
-            throw new BusinessRuleException("Pedidos já entregues (Finalizados) não podem ser cancelados.");
+            throw new BusinessRuleException("Pedidos ja entregues (Finalizados) nao podem ser cancelados.");
         }
 
         pedido.setStatus(StatusPedido.CANCELADO);
@@ -186,14 +198,14 @@ public class PedidoService {
     @Transactional
     public PedidoResponseDTO adicionarItemPedido(UUID pedidoId, ItemPedidoRequestDTO dto) {
         Pedido pedido = pedidoRepository.findById(pedidoId)
-                .orElseThrow(() -> new ResourceNotFoundException("Pedido não encontrado."));
+                .orElseThrow(() -> new ResourceNotFoundException("Pedido nao encontrado."));
 
         if (pedido.getStatus() == StatusPedido.FINALIZADO || pedido.getStatus() == StatusPedido.CANCELADO || pedido.getStatus() == StatusPedido.EM_ROTA) {
-            throw new BusinessRuleException("Não é possível adicionar itens a um pedido que já está em rota, finalizado ou cancelado.");
+            throw new BusinessRuleException("Nao e possivel adicionar itens a um pedido que ja esta em rota, finalizado ou cancelado.");
         }
 
         Produto produto = produtoRepository.findById(dto.produtoId())
-                .orElseThrow(() -> new ResourceNotFoundException("Produto não encontrado no cardápio."));
+                .orElseThrow(() -> new ResourceNotFoundException("Produto nao encontrado no cardapio."));
 
         ItemPedido novoItem = new ItemPedido();
         novoItem.setPedido(pedido);
@@ -202,9 +214,20 @@ public class PedidoService {
         novoItem.setPrecoUnitario(produto.getPreco());
         novoItem.setObservacaoItem(dto.observacao());
 
+        if (dto.adicionaisIds() != null && !dto.adicionaisIds().isEmpty()) {
+            List<Adicional> adicionais = adicionalRepository.findAllById(dto.adicionaisIds());
+            novoItem.setAdicionais(adicionais);
+        }
+
+        BigDecimal precoAdicionais = novoItem.getAdicionais().stream()
+                .map(Adicional::getPreco)
+                .reduce(BigDecimal.ZERO, BigDecimal::add);
+
         pedido.getItens().add(novoItem);
 
-        BigDecimal valorAdicional = produto.getPreco().multiply(BigDecimal.valueOf(dto.quantidade()));
+        BigDecimal valorAdicional = produto.getPreco().add(precoAdicionais)
+                .multiply(BigDecimal.valueOf(dto.quantidade()));
+
         pedido.setTotal(pedido.getTotal().add(valorAdicional));
 
         return new PedidoResponseDTO(pedidoRepository.save(pedido));
@@ -213,27 +236,64 @@ public class PedidoService {
     @Transactional
     public PedidoResponseDTO removerItemPedido(UUID pedidoId, UUID itemId) {
         Pedido pedido = pedidoRepository.findById(pedidoId)
-                .orElseThrow(() -> new ResourceNotFoundException("Pedido não encontrado."));
+                .orElseThrow(() -> new ResourceNotFoundException("Pedido nao encontrado."));
 
         if (pedido.getStatus() == StatusPedido.FINALIZADO || pedido.getStatus() == StatusPedido.CANCELADO || pedido.getStatus() == StatusPedido.EM_ROTA) {
-            throw new BusinessRuleException("Não é possível alterar os itens de um pedido que já está em rota, finalizado ou cancelado.");
+            throw new BusinessRuleException("Nao e possivel alterar os itens de um pedido que ja esta em rota, finalizado ou cancelado.");
         }
 
         ItemPedido itemParaRemover = pedido.getItens().stream()
                 .filter(item -> item.getId().equals(itemId))
                 .findFirst()
-                .orElseThrow(() -> new ResourceNotFoundException("Item não encontrado nesta comanda."));
+                .orElseThrow(() -> new ResourceNotFoundException("Item nao encontrado nesta comanda."));
 
-        BigDecimal valorSubtrair = itemParaRemover.getPrecoUnitario().multiply(BigDecimal.valueOf(itemParaRemover.getQuantidade()));
+        BigDecimal precoAdicionais = itemParaRemover.getAdicionais().stream()
+                .map(Adicional::getPreco)
+                .reduce(BigDecimal.ZERO, BigDecimal::add);
+
+        BigDecimal valorSubtrair = itemParaRemover.getPrecoUnitario().add(precoAdicionais)
+                .multiply(BigDecimal.valueOf(itemParaRemover.getQuantidade()));
+
         pedido.setTotal(pedido.getTotal().subtract(valorSubtrair));
-
         pedido.getItens().remove(itemParaRemover);
 
         return new PedidoResponseDTO(pedidoRepository.save(pedido));
     }
 
     @Transactional
+    public PedidoResponseDTO atualizarAdicionaisDoItem(UUID pedidoId, UUID itemId, List<UUID> adicionaisIds) {
+        Pedido pedido = pedidoRepository.findById(pedidoId)
+                .orElseThrow(() -> new ResourceNotFoundException("Pedido nao encontrado."));
+
+        ItemPedido item = pedido.getItens().stream()
+                .filter(i -> i.getId().equals(itemId))
+                .findFirst()
+                .orElseThrow(() -> new ResourceNotFoundException("Item nao encontrado nesta comanda."));
+
+        if (pedido.getStatus() == StatusPedido.FINALIZADO || pedido.getStatus() == StatusPedido.CANCELADO || pedido.getStatus() == StatusPedido.EM_ROTA) {
+            throw new BusinessRuleException("Nao e possivel alterar os adicionais de um pedido que ja esta em rota, finalizado ou cancelado.");
+        }
+
+        BigDecimal precoAdicionaisAntigos = item.getAdicionais().stream()
+                .map(Adicional::getPreco)
+                .reduce(BigDecimal.ZERO, BigDecimal::add);
+        BigDecimal subtotalAntigo = item.getPrecoUnitario().add(precoAdicionaisAntigos).multiply(BigDecimal.valueOf(item.getQuantidade()));
+        pedido.setTotal(pedido.getTotal().subtract(subtotalAntigo));
+
+        List<Adicional> novosAdicionais = adicionalRepository.findAllById(adicionaisIds);
+        item.setAdicionais(novosAdicionais);
+
+        BigDecimal precoNovosAdicionais = novosAdicionais.stream()
+                .map(Adicional::getPreco)
+                .reduce(BigDecimal.ZERO, BigDecimal::add);
+        BigDecimal subtotalNovo = item.getPrecoUnitario().add(precoNovosAdicionais).multiply(BigDecimal.valueOf(item.getQuantidade()));
+        pedido.setTotal(pedido.getTotal().add(subtotalNovo));
+
+        return new PedidoResponseDTO(pedidoRepository.save(pedido));
+    }
+
+    @Transactional
     public void excluirFisicamente(UUID id) {
-        throw new BusinessRuleException("Por razões financeiras e de auditoria, pedidos não podem ser excluídos do banco de dados. Utilize a função de Cancelamento.");
+        throw new BusinessRuleException("Por razoes financeiras e de auditoria, pedidos nao podem ser excluidos do banco de dados. Utilize a funcao de Cancelamento.");
     }
 }
