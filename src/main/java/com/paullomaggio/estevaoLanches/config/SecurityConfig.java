@@ -39,21 +39,22 @@ public class SecurityConfig {
                         // Libera as checagens automáticas do navegador (OPTIONS) sem exigir token JWT
                         .requestMatchers(CorsUtils::isPreFlightRequest).permitAll()
 
-                        // Rotas públicas de Autenticação e tratamento de erros lógicos do sistema
+                        // Rotas públicas de Autenticação
                         .requestMatchers(HttpMethod.POST, "/api/auth/login").permitAll()
+                        .requestMatchers(HttpMethod.POST, "/api/auth/cliente/google").permitAll() // 🚨 ROTA LIBERADA
                         .requestMatchers("/error").permitAll()
 
-                        // 🚨 CONTROLE DO CAIXA AJUSTADO: Ambos perfis leem o status e o resumo dos cards, mas só ADMIN abre/fecha (POST/PATCH)
+                        // CONTROLE DO CAIXA
                         .requestMatchers(HttpMethod.GET, "/api/caixas/status").hasAnyRole("ADMIN", "GARCOM")
-                        .requestMatchers(HttpMethod.GET, "/api/caixas/resumo").hasAnyRole("ADMIN", "GARCOM") // ✨ Liberado para o painel operacional de ambos
+                        .requestMatchers(HttpMethod.GET, "/api/caixas/resumo").hasAnyRole("ADMIN", "GARCOM")
                         .requestMatchers("/api/caixas/**").hasRole("ADMIN")
 
-                        // Travas de Autoridade Exclusivas do Gerente (ADMIN)
+                        // TRAVAS DO GERENTE (ADMIN)
                         .requestMatchers("/api/relatorios/**").hasRole("ADMIN")
                         .requestMatchers("/api/cardapio/**").hasRole("ADMIN")
                         .requestMatchers("/api/usuarios/**").hasRole("ADMIN")
 
-                        // Rotas Compartilhadas pelas Equipes Operacionais
+                        // ROTAS OPERACIONAIS
                         .requestMatchers("/api/pedidos/checkout").hasAnyRole("ADMIN", "GARCOM")
                         .requestMatchers("/api/pedidos/**").hasAnyRole("ADMIN", "GARCOM", "COZINHA")
                         .requestMatchers("/api/clientes/**").hasAnyRole("ADMIN", "GARCOM")
@@ -68,10 +69,7 @@ public class SecurityConfig {
     public CorsConfigurationSource corsConfigurationSource() {
         CorsConfiguration configuration = new CorsConfiguration();
         configuration.setAllowedOrigins(List.of("http://localhost:4200"));
-
-        // 🚨 CORRIGIDO: Adicionado "PATCH" para permitir o fechamento síncrono do turno sem travar no Preflight
         configuration.setAllowedMethods(List.of("GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"));
-
         configuration.setAllowedHeaders(List.of("Authorization", "Content-Type", "Cache-Control"));
         configuration.setAllowCredentials(true);
 

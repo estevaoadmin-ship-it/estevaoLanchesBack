@@ -324,4 +324,72 @@ class ClienteServiceTest {
 
         clienteService.salvar(requestDTOMock);
     }
+
+    // ==========================================
+    // NOVOS TESTES: REGRAS DE NULIDADE (APPS)
+    // ==========================================
+
+    @Test
+    @DisplayName("Teste 34: Deve salvar cliente sem validar CPF se ele for nulo")
+    void deveSalvarClienteSemValidarCpfSeNulo() {
+        ClienteRequestDTO dtoSemCpf = new ClienteRequestDTO("Carlos Google", null, "google@email.com", "11999999999", null, null);
+
+        // Mocka apenas a validação do e-mail, que está preenchido
+        when(clienteRepository.findByEmail("google@email.com")).thenReturn(Optional.empty());
+        when(clienteRepository.save(any(Cliente.class))).thenReturn(clienteMock);
+
+        clienteService.salvar(dtoSemCpf);
+
+        // Garante que o banco NUNCA foi consultado atrás de um CPF nulo
+        verify(clienteRepository, never()).findByCpf(any());
+        verify(clienteRepository, times(1)).save(any(Cliente.class));
+    }
+
+    @Test
+    @DisplayName("Teste 35: Deve salvar cliente sem validar e-mail se ele for nulo ou vazio")
+    void deveSalvarClienteSemValidarEmailSeVazio() {
+        ClienteRequestDTO dtoSemEmail = new ClienteRequestDTO("Carlos Zap", "11122233344", "   ", "11999999999", null, null);
+
+        // Mocka apenas a validação do CPF, que está preenchido
+        when(clienteRepository.findByCpf("11122233344")).thenReturn(Optional.empty());
+        when(clienteRepository.save(any(Cliente.class))).thenReturn(clienteMock);
+
+        clienteService.salvar(dtoSemEmail);
+
+        // Garante que o banco NUNCA foi consultado atrás de um e-mail em branco
+        verify(clienteRepository, never()).findByEmail(any());
+        verify(clienteRepository, times(1)).save(any(Cliente.class));
+    }
+
+    @Test
+    @DisplayName("Teste 36: Deve atualizar cliente sem validar CPF se ele for nulo")
+    void deveAtualizarClienteSemValidarCpfSeNulo() {
+        ClienteRequestDTO dtoSemCpf = new ClienteRequestDTO("Carlos Editado", null, "google@email.com", "11999999999", null, null);
+
+        when(clienteRepository.findById(clienteId)).thenReturn(Optional.of(clienteMock));
+        // Apenas o e-mail será validado para a atualização
+        when(clienteRepository.existsByEmailAndIdNot("google@email.com", clienteId)).thenReturn(false);
+        when(clienteRepository.save(any(Cliente.class))).thenReturn(clienteMock);
+
+        clienteService.atualizar(clienteId, dtoSemCpf);
+
+        verify(clienteRepository, never()).existsByCpfAndIdNot(any(), any());
+        verify(clienteRepository, times(1)).save(any(Cliente.class));
+    }
+
+    @Test
+    @DisplayName("Teste 37: Deve atualizar cliente sem validar e-mail se ele for vazio")
+    void deveAtualizarClienteSemValidarEmailSeVazio() {
+        ClienteRequestDTO dtoSemEmail = new ClienteRequestDTO("Carlos Editado", "11122233344", "", "11999999999", null, null);
+
+        when(clienteRepository.findById(clienteId)).thenReturn(Optional.of(clienteMock));
+        // Apenas o CPF será validado para a atualização
+        when(clienteRepository.existsByCpfAndIdNot("11122233344", clienteId)).thenReturn(false);
+        when(clienteRepository.save(any(Cliente.class))).thenReturn(clienteMock);
+
+        clienteService.atualizar(clienteId, dtoSemEmail);
+
+        verify(clienteRepository, never()).existsByEmailAndIdNot(any(), any());
+        verify(clienteRepository, times(1)).save(any(Cliente.class));
+    }
 }

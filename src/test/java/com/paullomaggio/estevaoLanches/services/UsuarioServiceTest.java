@@ -322,4 +322,70 @@ class UsuarioServiceTest {
         verify(usuarioRepository, never()).delete(any(Usuario.class));
         verify(usuarioRepository, never()).deleteById(any(UUID.class));
     }
+
+    // =========================================================================
+    // NOVOS TESTES DE BLINDAGEM (EDGE CASES E INTEGRIDADE)
+    // =========================================================================
+
+    @Test
+    @DisplayName("Teste 34: Deve garantir que o e-mail seja comparado de forma case-insensitive na atualização")
+    void deveIgnorarCaseAoValidarEmailDuplicadoNaAtualizacao() {
+        UsuarioRequestDTO request = new UsuarioRequestDTO("João", "JOAO@TEVAO.COM", "", RoleUsuario.GARCOM);
+
+        when(usuarioRepository.findById(idAtivo)).thenReturn(Optional.of(usuarioAtivo));
+        // O e-mail no repositório é "joao@tevao.com", mas enviamos "JOAO@TEVAO.COM"
+        // Deveria passar porque é o mesmo usuário
+        when(usuarioRepository.save(any(Usuario.class))).thenAnswer(i -> i.getArgument(0));
+
+        usuarioService.atualizar(idAtivo, request);
+
+        verify(usuarioRepository, never()).existsByEmail(anyString());
+    }
+
+    @Test
+    @DisplayName("Teste 35: Deve lançar exceção se ID não encontrado no Soft Delete")
+    void deveLancarExcecaoAoInativarUsuarioInexistente() {
+        when(usuarioRepository.findById(any())).thenReturn(Optional.empty());
+
+        assertThrows(ResourceNotFoundException.class, () -> usuarioService.deletarOuInativar(UUID.randomUUID()));
+    }
+
+    @Test
+    @DisplayName("Teste 36: Deve garantir que o ID nunca seja alterado durante uma atualização")
+    void devePreservarIdOriginalNaAtualizacao() {
+        UsuarioRequestDTO request = new UsuarioRequestDTO("Nome Novo", "novo@tevao.com", "", RoleUsuario.GARCOM);
+        when(usuarioRepository.findById(idAtivo)).thenReturn(Optional.of(usuarioAtivo));
+        when(usuarioRepository.save(any(Usuario.class))).thenAnswer(i -> i.getArgument(0));
+
+        UsuarioResponseDTO resultado = usuarioService.atualizar(idAtivo, request);
+
+        assertEquals(idAtivo, resultado.id(), "O ID do usuário não pode mudar durante a atualização");
+    }
+
+    @Test
+    @DisplayName("Teste 37: Deve permitir salvar usuário com e-mail idêntico ao de um inativo (se for a regra)")
+    void devePermitirCadastroSeEmailEstiverEmUsuarioInativo() {
+        // Se a regra de negócio permitir reutilizar e-mails de inativos
+        UsuarioRequestDTO request = new UsuarioRequestDTO("Novo", "maria@tevao.com", "senha", RoleUsuario.GARCOM);
+        when(usuarioRepository.existsByEmail(request.email())).thenReturn(false);
+        when(usuarioRepository.save(any(Usuario.class))).thenAnswer(i -> i.getArgument(0));
+
+        usuarioService.salvar(request);
+        verify(usuarioRepository).save(any(Usuario.class));
+    }
+
+    @Test
+    @DisplayName("Teste 38: Deve verificar comportamento ao salvar com PasswordEncoder nulo")
+    void deveSalvarSemCriptografiaSeEncoderNulo() {
+        ReflectionTestUtils.setField(usuarioService, "passwordEncoder", null);
+        UsuarioRequestDTO request = new UsuarioRequestDTO("Paulo", "paulo@tevao.com", "123", RoleUsuario.ADMIN);
+        when(usuarioRepository.existsByEmail(any())).thenReturn(false);
+        when(usuarioRepository.save(any(Usuario.class))).thenAnswer(i -> i.getArgument(0));
+
+        UsuarioResponseDTO result = usuarioService.salvar(request);
+
+        assertNotNull(result);
+        // Reset para não afetar outros testes
+        ReflectionTestUtils.setField(usuarioService, "passwordEncoder", passwordEncoder);
+    }
 }

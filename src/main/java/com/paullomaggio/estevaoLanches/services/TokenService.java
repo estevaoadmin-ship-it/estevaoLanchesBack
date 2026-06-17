@@ -2,12 +2,11 @@ package com.paullomaggio.estevaoLanches.services;
 
 import com.auth0.jwt.JWT;
 import com.auth0.jwt.algorithms.Algorithm;
-import com.auth0.jwt.exceptions.JWTCreationException;
-import com.auth0.jwt.exceptions.JWTVerificationException;
+import com.auth0.jwt.interfaces.DecodedJWT;
+import com.paullomaggio.estevaoLanches.entities.Cliente;
 import com.paullomaggio.estevaoLanches.entities.Usuario;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
-
 import java.time.Instant;
 import java.time.LocalDateTime;
 import java.time.ZoneOffset;
@@ -15,39 +14,54 @@ import java.time.ZoneOffset;
 @Service
 public class TokenService {
 
-    @Value("${api.security.token.secret:ChaveSecretaEstevaoLanches2026!}")
+    @Value("${api.security.token.secret}")
     private String secret;
 
     public String gerarToken(Usuario usuario) {
-        try {
-            Algorithm algorithm = Algorithm.HMAC256(secret);
-            return JWT.create()
-                    .withIssuer("estevao-lanches-api")
-                    .withSubject(usuario.getEmail())
-                    .withClaim("role", usuario.getRole().name())
-                    .withClaim("nome", usuario.getNome())
-                    .withExpiresAt(gerarDataExpiracao())
-                    .sign(algorithm);
-        } catch (JWTCreationException exception) {
-            throw new RuntimeException("Erro ao gerar token JWT", exception);
-        }
+        return JWT.create()
+                .withIssuer("estevao-lanches-api")
+                .withSubject(usuario.getEmail())
+                .withClaim("role", usuario.getRole().name())
+                .withClaim("nome", usuario.getNome())
+                .withClaim("tipo_conta", "COLABORADOR")
+                .withExpiresAt(gerarDataExpiracao())
+                .sign(Algorithm.HMAC256(secret));
+    }
+
+    public String gerarTokenCliente(Cliente cliente) {
+        return JWT.create()
+                .withIssuer("estevao-lanches-api")
+                .withSubject(cliente.getEmail())
+                .withClaim("role", "CLIENTE")
+                .withClaim("nome", cliente.getNome())
+                .withClaim("tipo_conta", "CLIENTE")
+                .withExpiresAt(gerarDataExpiracao())
+                .sign(Algorithm.HMAC256(secret));
     }
 
     public String validarToken(String token) {
         try {
-            Algorithm algorithm = Algorithm.HMAC256(secret);
-            return JWT.require(algorithm)
+            return JWT.require(Algorithm.HMAC256(secret))
                     .withIssuer("estevao-lanches-api")
                     .build()
                     .verify(token)
                     .getSubject();
-        } catch (JWTVerificationException exception) {
-            return "";
-        }
+        } catch (Exception e) { return ""; }
+    }
+
+    public String extrairTipoConta(String token) {
+        try {
+            DecodedJWT jwt = JWT.require(Algorithm.HMAC256(secret))
+                    .withIssuer("estevao-lanches-api")
+                    .build()
+                    .verify(token);
+
+            var claim = jwt.getClaim("tipo_conta");
+            return (claim.isMissing() || claim.isNull()) ? "COLABORADOR" : claim.asString();
+        } catch (Exception e) { return null; }
     }
 
     private Instant gerarDataExpiracao() {
-        // AJUSTADO: Token agora cobre turns operacionais longos de ate 12 horas seguidas
         return LocalDateTime.now().plusHours(12).toInstant(ZoneOffset.of("-03:00"));
     }
 }

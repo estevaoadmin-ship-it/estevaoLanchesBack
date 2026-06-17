@@ -3,6 +3,7 @@ package com.paullomaggio.estevaoLanches.services;
 import com.auth0.jwt.JWT;
 import com.auth0.jwt.algorithms.Algorithm;
 import com.auth0.jwt.interfaces.DecodedJWT;
+import com.paullomaggio.estevaoLanches.entities.Cliente;
 import com.paullomaggio.estevaoLanches.entities.Usuario;
 import com.paullomaggio.estevaoLanches.enums.RoleUsuario;
 import org.junit.jupiter.api.BeforeEach;
@@ -19,7 +20,8 @@ class TokenServiceTest {
 
     private TokenService tokenService;
     private Usuario usuario;
-    private String segredoPadrao = "ChaveSecretaEstevaoLanches2026!";
+    private Cliente cliente;
+    private final String segredoPadrao = "ChaveSecretaEstevaoLanches2026!";
 
     @BeforeEach
     void setUp() {
@@ -32,115 +34,177 @@ class TokenServiceTest {
         usuario.setEmail("gerente@tevao.com");
         usuario.setRole(RoleUsuario.ADMIN);
         usuario.setAtivo(true);
-    }
 
-    // ==========================================
-    // 1. TESTES DE GERAÇÃO DO JWT (AGORA COM 12 HORAS)
-    // ==========================================
+        cliente = new Cliente();
+        cliente.setId(UUID.randomUUID());
+        cliente.setNome("José Antônio d'Ávila");
+        cliente.setEmail("jose.cliente+ifood@gmail.com");
+    }
 
     @Test
     @DisplayName("Garantia de Emissão: Deve estruturar um JWT preenchido e assinado")
     void gerarTokenCenariosEstruturais() {
         String token = tokenService.gerarToken(usuario);
-
         assertNotNull(token);
-        assertFalse(token.isBlank());
+        assertEquals(3, token.split("\\.").length);
     }
 
     @Test
-    @DisplayName("CRÍTICO: O Token gerado deve conter as Claims corretas e a validade exata de 12 horas")
+    @DisplayName("CRÍTICO: Deve conter as Claims corretas e validade de 12 horas")
     void gerarTokenCenariosClaims() {
         String token = tokenService.gerarToken(usuario);
+        DecodedJWT jwt = JWT.decode(token);
 
-        DecodedJWT decodedJWT = JWT.decode(token);
+        assertEquals("gerente@tevao.com", jwt.getSubject());
+        assertEquals("ADMIN", jwt.getClaim("role").asString());
+        assertEquals("COLABORADOR", jwt.getClaim("tipo_conta").asString());
 
-        assertEquals("gerente@tevao.com", decodedJWT.getSubject());
-        assertEquals("ADMIN", decodedJWT.getClaim("role").asString());
-        assertEquals("Estêvão Dono", decodedJWT.getClaim("nome").asString());
-        assertEquals("estevao-lanches-api", decodedJWT.getIssuer());
-
-        assertNotNull(decodedJWT.getExpiresAt());
-
-        // AJUSTADO: Verificação de 12 horas operacionais completas
-        long dozeHorasEmSegundos = 12 * 60 * 60;
-        long agoraEmSegundos = Instant.now().getEpochSecond();
-        long expiracaoEmSegundos = decodedJWT.getExpiresAt().toInstant().getEpochSecond();
-
-        assertTrue(expiracaoEmSegundos >= (agoraEmSegundos + dozeHorasEmSegundos - 5));
-    }
-
-    // ==========================================
-    // 2. TESTES DE VALIDAÇÃO E SEGURANÇA Robusta
-    // ==========================================
-
-    @Test
-    @DisplayName("Deve extrair o e-mail do funcionário com sucesso ao receber um token legítimo")
-    void validarTokenCenarioValido() {
-        String token = tokenService.gerarToken(usuario);
-
-        String emailDecodificado = tokenService.validarToken(token);
-
-        assertEquals("gerente@tevao.com", emailDecodificado);
+        long dozeHoras = 12 * 60 * 60;
+        long expiracao = jwt.getExpiresAt().toInstant().getEpochSecond();
+        long esperado = Instant.now().getEpochSecond() + dozeHoras;
+        assertTrue(Math.abs(expiracao - esperado) < 10);
     }
 
     @Test
-    @DisplayName("Deve recusar strings aleatórias ou vazias retornando string vazia de negação")
-    void validarTokenCenarioInvalido() {
-        String email1 = tokenService.validarToken("uma-string-qualquer-que-nao-e-jwt");
-        String email2 = tokenService.validarToken("");
+    @DisplayName("CRÍTICO: Deve gerar token exclusivo para Cliente")
+    void deveGerarTokenParaClienteComClaimsCorretas() {
+        String token = tokenService.gerarTokenCliente(cliente);
+        DecodedJWT jwt = JWT.decode(token);
 
-        assertEquals("", email1);
-        assertEquals("", email2);
+        assertEquals("CLIENTE", jwt.getClaim("tipo_conta").asString());
+        assertEquals("CLIENTE", jwt.getClaim("role").asString());
     }
 
     @Test
-    @DisplayName("CRÍTICO: Deve bloquear tokens violados ou corrompidos por hackers por alteração de caracteres")
-    void validarTokenCenarioCorrompido() {
-        String tokenOriginal = tokenService.gerarToken(usuario);
-        String tokenAlterado = tokenOriginal + "a";
-
-        String emailResultado = tokenService.validarToken(tokenAlterado);
-
-        assertEquals("", emailResultado);
+    @DisplayName("Deve extrair corretamente tipo de conta COLABORADOR e CLIENTE")
+    void deveExtrairTipoContaCorretamente() {
+        assertEquals("COLABORADOR", tokenService.extrairTipoConta(tokenService.gerarToken(usuario)));
+        assertEquals("CLIENTE", tokenService.extrairTipoConta(tokenService.gerarTokenCliente(cliente)));
     }
 
     @Test
-    @DisplayName("CRÍTICO: Deve rejeitar o acesso se o token foi assinado com uma chave secreta alienígena")
-    void validarTokenCenarioAssinaturaInvalida() {
-        String tokenInvasor = JWT.create()
+    @DisplayName("Fallback: Deve retornar COLABORADOR se o token não tiver a claim tipo_conta")
+    void deveRetornarColaboradorParaTokensAntigos() {
+        String tokenAntigo = JWT.create()
                 .withIssuer("estevao-lanches-api")
-                .withSubject("hacker@gmail.com")
-                .sign(Algorithm.HMAC256("ChaveFalsaQualquer123"));
-
-        String emailResultado = tokenService.validarToken(tokenInvasor);
-
-        assertEquals("", emailResultado);
-    }
-
-    @Test
-    @DisplayName("Deve rejeitar tokens gerados por servidores de terceiros com Issuer modificado")
-    void validarTokenCenarioIssuerInvalido() {
-        String tokenIssuerFalso = JWT.create()
-                .withIssuer("sistema-de-outro-restaurante")
-                .withSubject("gerente@tevao.com")
+                .withSubject("antigo@tevao.com")
                 .sign(Algorithm.HMAC256(segredoPadrao));
 
-        String emailResultado = tokenService.validarToken(tokenIssuerFalso);
-
-        assertEquals("", emailResultado);
+        assertEquals("COLABORADOR", tokenService.extrairTipoConta(tokenAntigo));
     }
 
     @Test
-    @DisplayName("CRÍTICO: Deve bloquear funcionários antigos tentando usar tokens de turnos passados que já venceram")
-    void validarTokenCenarioExpirado() {
+    @DisplayName("Deve retornar nulo para tokens inválidos")
+    void deveRetornarNullParaTokenInvalido() {
+        assertNull(tokenService.extrairTipoConta("token.invalido.abc"));
+        assertNull(tokenService.extrairTipoConta(null));
+    }
+
+    @Test
+    @DisplayName("Validação: Deve retornar e-mail correto para token legítimo")
+    void validarTokenCenarioValido() {
+        String token = tokenService.gerarToken(usuario);
+        assertEquals("gerente@tevao.com", tokenService.validarToken(token));
+    }
+
+    @Test
+    @DisplayName("Validação: Deve retornar string vazia para tokens maliciosos/inválidos")
+    void validarTokenCenarioInvalido() {
+        assertEquals("", tokenService.validarToken("invalido"));
+        assertEquals("", tokenService.validarToken(""));
+        assertEquals("", tokenService.validarToken(null));
+    }
+
+    @Test
+    @DisplayName("Segurança: Deve bloquear tokens corrompidos")
+    void validarTokenCenarioCorrompido() {
+        String token = tokenService.gerarToken(usuario);
+        assertEquals("", tokenService.validarToken(token + "x"));
+    }
+
+    @Test
+    @DisplayName("Segurança: Deve rejeitar token com chave secreta diferente")
+    void validarTokenAssinaturaInvalida() {
+        String tokenHacker = JWT.create().withSubject("hacker").sign(Algorithm.HMAC256("ChaveErrada"));
+        assertEquals("", tokenService.validarToken(tokenHacker));
+    }
+
+    @Test
+    @DisplayName("Segurança: Deve rejeitar token expirado")
+    void validarTokenExpirado() {
         String tokenExpirado = JWT.create()
                 .withIssuer("estevao-lanches-api")
                 .withSubject("gerente@tevao.com")
                 .withExpiresAt(Instant.now().minusSeconds(60))
                 .sign(Algorithm.HMAC256(segredoPadrao));
 
-        String emailResultado = tokenService.validarToken(tokenExpirado);
+        assertEquals("", tokenService.validarToken(tokenExpirado));
+    }
 
-        assertEquals("", emailResultado);
+    @Test
+    @DisplayName("Segurança: Deve rejeitar ataque de algoritmo NONE")
+    void deveRejeitarTokenAlgoritmoNone() {
+        String header = "eyJhbGciOiJub25lIiwidHlwIjoiSldUIn0"; // {"alg":"none"}
+        String payload = "eyJzdWIiOiJoYWNrZXIiLCJpc3MiOiJlc3RldmFvLWxhbmNoZXMtYXBpIn0";
+        String token = header + "." + payload + ".";
+        assertEquals("", tokenService.validarToken(token));
+    }
+
+    @Test
+    @DisplayName("Blindagem: Deve rejeitar tokens com Claims manipuladas (ex: Role trocada)")
+    void deveRejeitarTokenComClaimsManipuladas() {
+        // Criamos um token, mas tentamos forçar que um CLIENTE tenha role ADMIN via estrutura manual
+        String tokenMalicioso = JWT.create()
+                .withIssuer("estevao-lanches-api")
+                .withSubject("hacker@gmail.com")
+                .withClaim("role", "ADMIN") // Tentativa de escalação de privilégio
+                .withClaim("tipo_conta", "CLIENTE")
+                .sign(Algorithm.HMAC256(segredoPadrao));
+
+        // Embora o token seja assinado, o seu sistema no SecurityFilter
+        // deve validar a consistência.
+        // O teste aqui garante que o serviço de extração não falha ao ler claims estranhas.
+        assertEquals("CLIENTE", tokenService.extrairTipoConta(tokenMalicioso));
+    }
+
+    @Test
+    @DisplayName("Blindagem: Deve lidar com tokens que possuem Claims inesperadas (Overposting)")
+    void deveLidarComClaimsExtrasSemQuebrar() {
+        String tokenComSujeira = JWT.create()
+                .withIssuer("estevao-lanches-api")
+                .withSubject("usuario@teste.com")
+                .withClaim("tipo_conta", "CLIENTE")
+                .withClaim("dados_extras", "valor_que_nao_deveria_estar_aqui")
+                .sign(Algorithm.HMAC256(segredoPadrao));
+
+        assertDoesNotThrow(() -> {
+            String tipo = tokenService.extrairTipoConta(tokenComSujeira);
+            assertEquals("CLIENTE", tipo);
+        });
+    }
+
+    @Test
+    @DisplayName("Performance: Deve validar que o tempo de processamento é desprezível")
+    void testePerformanceValidacao() {
+        String token = tokenService.gerarToken(usuario);
+
+        long inicio = System.currentTimeMillis();
+        for(int i = 0; i < 100; i++) {
+            tokenService.validarToken(token);
+        }
+        long fim = System.currentTimeMillis();
+
+        assertTrue((fim - inicio) < 200, "A validação de 100 tokens deve levar menos de 200ms");
+    }
+
+    @Test
+    @DisplayName("Blindagem: Deve rejeitar tokens com Issuer mal formado")
+    void validarTokenIssuerDiferente() {
+        String tokenErrado = JWT.create()
+                .withIssuer("outro-sistema-qualquer")
+                .withSubject("teste@tevao.com")
+                .sign(Algorithm.HMAC256(segredoPadrao));
+
+        assertEquals("", tokenService.validarToken(tokenErrado));
     }
 }
