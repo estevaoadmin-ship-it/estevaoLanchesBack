@@ -38,16 +38,18 @@ public class PedidoController {
         return ResponseEntity.ok(pedidoService.buscarPorId(id));
     }
 
+    @GetMapping("/cliente/{clienteId}")
+    public ResponseEntity<List<PedidoResponseDTO>> listarHistoricoCliente(@PathVariable UUID clienteId) {
+        return ResponseEntity.ok(pedidoService.listarHistoricoCliente(clienteId));
+    }
+
     @PutMapping("/{id}/status")
     public ResponseEntity<PedidoResponseDTO> atualizarStatus(@PathVariable UUID id, @RequestBody @Valid PedidoStatusRequestDTO dto) {
         return ResponseEntity.ok(pedidoService.atualizarStatus(id, dto));
     }
 
-    // === NOVA ROTA: RECEBIMENTO FINANCEIRO ===
     @PutMapping("/{id}/pagar")
-    public ResponseEntity<PedidoResponseDTO> receberPagamento(
-            @PathVariable UUID id,
-            @RequestBody @Valid PagamentoRequestDTO dto) {
+    public ResponseEntity<PedidoResponseDTO> receberPagamento(@PathVariable UUID id, @RequestBody @Valid PagamentoRequestDTO dto) {
         return ResponseEntity.ok(pedidoService.receberPagamento(id, dto));
     }
 

@@ -41,8 +41,12 @@ public class SecurityConfig {
 
                         // Rotas públicas de Autenticação
                         .requestMatchers(HttpMethod.POST, "/api/auth/login").permitAll()
-                        .requestMatchers(HttpMethod.POST, "/api/auth/cliente/google").permitAll() // 🚨 ROTA LIBERADA
+                        .requestMatchers(HttpMethod.POST, "/api/auth/cliente/google").permitAll()
                         .requestMatchers("/error").permitAll()
+
+                        // 🚨 PONTE DE IMPRESSÃO LIBERADA (Deve vir ANTES das rotas de pedidos!)
+                        .requestMatchers("/api/fila-impressao/**").permitAll()
+                        .requestMatchers("/api/pedidos/fila-impressao/**").permitAll()
 
                         // CONTROLE DO CAIXA
                         .requestMatchers(HttpMethod.GET, "/api/caixas/status").hasAnyRole("ADMIN", "GARCOM")

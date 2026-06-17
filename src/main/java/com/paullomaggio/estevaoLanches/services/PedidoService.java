@@ -2,11 +2,8 @@ package com.paullomaggio.estevaoLanches.services;
 
 import com.paullomaggio.estevaoLanches.dtos.*;
 import com.paullomaggio.estevaoLanches.entities.*;
-import com.paullomaggio.estevaoLanches.enums.StatusCaixa;
-import com.paullomaggio.estevaoLanches.enums.StatusFinanceiro;
-import com.paullomaggio.estevaoLanches.enums.StatusPedido;
-import com.paullomaggio.estevaoLanches.exceptions.BusinessRuleException;
-import com.paullomaggio.estevaoLanches.exceptions.ResourceNotFoundException;
+import com.paullomaggio.estevaoLanches.enums.*;
+import com.paullomaggio.estevaoLanches.exceptions.*;
 import com.paullomaggio.estevaoLanches.repositories.*;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
@@ -23,23 +20,13 @@ import java.util.stream.Collectors;
 @Service
 public class PedidoService {
 
-    @Autowired
-    private CarrinhoRepository carrinhoRepository;
-
-    @Autowired
-    private PedidoRepository pedidoRepository;
-
-    @Autowired
-    private CaixaRepository caixaRepository;
-
-    @Autowired
-    private ProdutoRepository produtoRepository;
-
-    @Autowired
-    private ClienteRepository clienteRepository;
-
-    @Autowired
-    private AdicionalRepository adicionalRepository;
+    @Autowired private CarrinhoRepository carrinhoRepository;
+    @Autowired private PedidoRepository pedidoRepository;
+    @Autowired private CaixaRepository caixaRepository;
+    @Autowired private ProdutoRepository produtoRepository;
+    @Autowired private ClienteRepository clienteRepository;
+    @Autowired private AdicionalRepository adicionalRepository;
+    @Autowired private FilaImpressaoRepository filaImpressaoRepository;
 
     @Transactional
     public PedidoResponseDTO finalizarPedido(CheckoutRequestDTO dto) {
@@ -54,145 +41,132 @@ public class PedidoService {
         pedido.setNumeroMesa(dto.numeroMesa());
         pedido.setObservacaoGeral(dto.observacaoGeral());
         pedido.setDataHora(LocalDateTime.now());
-
         pedido.setFormaPagamento(dto.formaPagamento());
         pedido.setValorRecebido(dto.valorRecebido());
         pedido.setNomeClienteBalcao(dto.nomeClienteBalcao());
 
-        // === NOVA LOGICA FINANCEIRA ===
-        if (dto.formaPagamento() != null) {
-            pedido.setStatusFinanceiro(StatusFinanceiro.PAGO); // Pedido de Balcão (já pago)
-        } else {
-            pedido.setStatusFinanceiro(StatusFinanceiro.AGUARDANDO_PAGAMENTO); // Mesa ou Delivery (paga depois)
-        }
+        pedido.setStatusFinanceiro(dto.formaPagamento() != null ? StatusFinanceiro.PAGO : StatusFinanceiro.AGUARDANDO_PAGAMENTO);
+        pedido.setItens(new ArrayList<>());
 
-        if (pedido.getItens() == null) {
-            pedido.setItens(new ArrayList<>());
-        }
-
-        BigDecimal totalPedido = BigDecimal.ZERO;
-
-        if (dto.itens() != null && !dto.itens().isEmpty()) {
-
-            if (dto.clienteId() != null) {
-                Cliente cliente = clienteRepository.findById(dto.clienteId())
-                        .orElseThrow(() -> new ResourceNotFoundException("Cliente nao encontrado!"));
-                pedido.setCliente(cliente);
-            } else {
-                pedido.setCliente(null);
-            }
-
-            for (var itemDto : dto.itens()) {
-                Produto produto = produtoRepository.findById(itemDto.produtoId())
-                        .orElseThrow(() -> new ResourceNotFoundException("Produto nao encontrado: " + itemDto.produtoId()));
-
-                ItemPedido itemPedido = new ItemPedido();
-                itemPedido.setPedido(pedido);
-                itemPedido.setProduto(produto);
-                itemPedido.setQuantidade(itemDto.quantidade());
-                itemPedido.setObservacaoItem(itemDto.observacao());
-                itemPedido.setPrecoUnitario(produto.getPreco());
-
-                if (itemDto.adicionaisIds() != null && !itemDto.adicionaisIds().isEmpty()) {
-                    List<Adicional> adicionais = adicionalRepository.findAllById(itemDto.adicionaisIds());
-                    itemPedido.setAdicionais(adicionais);
-                }
-
-                BigDecimal precoAdicionais = itemPedido.getAdicionais().stream()
-                        .map(Adicional::getPreco)
-                        .reduce(BigDecimal.ZERO, BigDecimal::add);
-
-                BigDecimal subtotal = itemPedido.getPrecoUnitario().add(precoAdicionais)
-                        .multiply(BigDecimal.valueOf(itemPedido.getQuantidade()));
-
-                totalPedido = totalPedido.add(subtotal);
-                pedido.getItens().add(itemPedido);
-            }
-        } else {
-            if (dto.clienteId() == null) {
-                throw new BusinessRuleException("Para recuperar o carrinho do banco, o clienteId e obrigatorio!");
-            }
-
-            Carrinho carrinho = carrinhoRepository.findByClienteId(dto.clienteId())
-                    .orElseThrow(() -> new ResourceNotFoundException("Carrinho nao encontrado!"));
-
-            if (carrinho.getItens().isEmpty()) {
-                throw new BusinessRuleException("O carrinho esta vazio!");
-            }
-
-            pedido.setCliente(carrinho.getCliente());
-
-            for (ItemCarrinho itemCarrinho : carrinho.getItens()) {
-                ItemPedido itemPedido = new ItemPedido();
-                itemPedido.setPedido(pedido);
-                itemPedido.setProduto(itemCarrinho.getProduto());
-                itemPedido.setQuantidade(itemCarrinho.getQuantidade());
-                itemPedido.setObservacaoItem(itemCarrinho.getObservacao());
-                itemPedido.setPrecoUnitario(itemCarrinho.getProduto().getPreco());
-
-                BigDecimal subtotal = itemPedido.getPrecoUnitario().multiply(BigDecimal.valueOf(itemPedido.getQuantidade()));
-                totalPedido = totalPedido.add(subtotal);
-                pedido.getItens().add(itemPedido);
-            }
-
-            carrinho.getItens().clear();
-            carrinhoRepository.save(carrinho);
-        }
-
+        BigDecimal totalPedido = processarItens(pedido, dto);
         pedido.setTotal(totalPedido);
+
         Pedido pedidoSalvo = pedidoRepository.save(pedido);
+
+        // 🚨 BLINDAGEM TRANSACIONAL: Fila de Impressão
+        adicionarNaFila(pedidoSalvo, FilaImpressao.DestinoImpressao.COZINHA);
+
+        if (pedidoSalvo.getStatusFinanceiro() == StatusFinanceiro.PAGO) {
+            adicionarNaFila(pedidoSalvo, FilaImpressao.DestinoImpressao.RECIBO_CLIENTE);
+        }
 
         return new PedidoResponseDTO(pedidoSalvo);
     }
 
-    // === NOVO METODO: RECEBER PAGAMENTO ===
+    private BigDecimal processarItens(Pedido pedido, CheckoutRequestDTO dto) {
+        BigDecimal total = BigDecimal.ZERO;
+
+        if (dto.itens() != null && !dto.itens().isEmpty()) {
+            if (dto.clienteId() != null) {
+                pedido.setCliente(clienteRepository.findById(dto.clienteId())
+                        .orElseThrow(() -> new ResourceNotFoundException("Cliente nao encontrado!")));
+            }
+            for (var itemDto : dto.itens()) {
+                Produto produto = produtoRepository.findById(itemDto.produtoId())
+                        .orElseThrow(() -> new ResourceNotFoundException("Produto nao encontrado: " + itemDto.produtoId()));
+                ItemPedido itemPedido = criarItem(pedido, produto, itemDto.quantidade(), itemDto.observacao(), itemDto.adicionaisIds());
+                total = total.add(calcularSubtotal(itemPedido));
+                pedido.getItens().add(itemPedido);
+            }
+        } else {
+            if (dto.clienteId() == null) throw new BusinessRuleException("Para recuperar o carrinho do banco, o clienteId e obrigatorio!");
+
+            Carrinho carrinho = carrinhoRepository.findByClienteId(dto.clienteId())
+                    .orElseThrow(() -> new ResourceNotFoundException("Carrinho nao encontrado!"));
+            if (carrinho.getItens().isEmpty()) throw new BusinessRuleException("O carrinho esta vazio!");
+
+            pedido.setCliente(carrinho.getCliente());
+            for (ItemCarrinho ic : carrinho.getItens()) {
+                ItemPedido itemPedido = criarItem(pedido, ic.getProduto(), ic.getQuantidade(), ic.getObservacao(), null);
+                total = total.add(calcularSubtotal(itemPedido));
+                pedido.getItens().add(itemPedido);
+            }
+            carrinho.getItens().clear();
+            carrinhoRepository.save(carrinho);
+        }
+        return total;
+    }
+
+    private ItemPedido criarItem(Pedido pedido, Produto p, int qtd, String obs, List<UUID> ads) {
+        ItemPedido ip = new ItemPedido();
+        ip.setPedido(pedido);
+        ip.setProduto(p);
+        ip.setQuantidade(qtd);
+        ip.setObservacaoItem(obs);
+        ip.setPrecoUnitario(p.getPreco());
+        if (ads != null && !ads.isEmpty()) {
+            ip.setAdicionais(adicionalRepository.findAllById(ads));
+        } else {
+            ip.setAdicionais(new ArrayList<>());
+        }
+        return ip;
+    }
+
+    private BigDecimal calcularSubtotal(ItemPedido ip) {
+        BigDecimal ads = ip.getAdicionais().stream()
+                .map(Adicional::getPreco)
+                .reduce(BigDecimal.ZERO, BigDecimal::add);
+        return ip.getPrecoUnitario().add(ads).multiply(BigDecimal.valueOf(ip.getQuantidade()));
+    }
+
+    private void adicionarNaFila(Pedido pedido, FilaImpressao.DestinoImpressao destino) {
+        FilaImpressao fila = new FilaImpressao();
+        fila.setPedido(pedido);
+        fila.setDestino(destino);
+        fila.setStatus(FilaImpressao.StatusImpressao.PENDENTE);
+        filaImpressaoRepository.save(fila);
+    }
+
     @Transactional
     public PedidoResponseDTO receberPagamento(UUID id, PagamentoRequestDTO dto) {
         Pedido pedido = pedidoRepository.findById(id)
                 .orElseThrow(() -> new ResourceNotFoundException("Pedido nao encontrado."));
 
-        if (pedido.getStatusFinanceiro() == StatusFinanceiro.PAGO) {
-            throw new BusinessRuleException("Este pedido ja consta como PAGO.");
-        }
-
-        if (pedido.getStatus() == StatusPedido.CANCELADO) {
-            throw new BusinessRuleException("Nao e possivel receber pagamento de um pedido cancelado.");
-        }
+        if (pedido.getStatusFinanceiro() == StatusFinanceiro.PAGO) throw new BusinessRuleException("Este pedido ja consta como PAGO.");
+        if (pedido.getStatus() == StatusPedido.CANCELADO) throw new BusinessRuleException("Nao e possivel receber pagamento de um pedido cancelado.");
 
         pedido.setFormaPagamento(dto.formaPagamento());
         pedido.setValorRecebido(dto.valorRecebido());
         pedido.setStatusFinanceiro(StatusFinanceiro.PAGO);
 
-        return new PedidoResponseDTO(pedidoRepository.save(pedido));
+        Pedido pedidoSalvo = pedidoRepository.save(pedido);
+        adicionarNaFila(pedidoSalvo, FilaImpressao.DestinoImpressao.RECIBO_CLIENTE);
+
+        return new PedidoResponseDTO(pedidoSalvo);
     }
 
     @Transactional(readOnly = true)
     public PedidoResponseDTO buscarPorId(UUID id) {
-        Pedido pedido = pedidoRepository.findById(id)
-                .orElseThrow(() -> new ResourceNotFoundException("Pedido nao encontrado."));
-        return new PedidoResponseDTO(pedido);
+        return new PedidoResponseDTO(pedidoRepository.findById(id)
+                .orElseThrow(() -> new ResourceNotFoundException("Pedido nao encontrado.")));
     }
 
     @Transactional(readOnly = true)
     public List<PedidoResponseDTO> listarTodos() {
-        return pedidoRepository.findAll().stream()
-                .map(PedidoResponseDTO::new)
-                .collect(Collectors.toList());
+        return pedidoRepository.findAll().stream().map(PedidoResponseDTO::new).collect(Collectors.toList());
     }
 
     @Transactional(readOnly = true)
     public List<PedidoResponseDTO> listarHistoricoCliente(UUID clienteId) {
         return pedidoRepository.findByClienteIdOrderByDataHoraDesc(clienteId).stream()
-                .map(PedidoResponseDTO::new)
-                .collect(Collectors.toList());
+                .map(PedidoResponseDTO::new).collect(Collectors.toList());
     }
 
     @Transactional(readOnly = true)
     public List<PedidoResponseDTO> listarPedidosAtivosMonitor() {
         List<StatusPedido> ativos = Arrays.asList(StatusPedido.RECEBIDO, StatusPedido.EM_PREPARO, StatusPedido.PRONTO, StatusPedido.EM_ROTA, StatusPedido.SERVIDO);
         return pedidoRepository.findByStatusInOrderByDataHoraAsc(ativos).stream()
-                .map(PedidoResponseDTO::new)
-                .collect(Collectors.toList());
+                .map(PedidoResponseDTO::new).collect(Collectors.toList());
     }
 
     @Transactional
@@ -213,18 +187,10 @@ public class PedidoService {
         Pedido pedido = pedidoRepository.findById(id)
                 .orElseThrow(() -> new ResourceNotFoundException("Pedido nao encontrado."));
 
-        if (pedido.getStatus() == StatusPedido.FINALIZADO) {
-            throw new BusinessRuleException("Pedidos ja finalizados nao podem ser cancelados.");
-        }
+        if (pedido.getStatus() == StatusPedido.FINALIZADO) throw new BusinessRuleException("Pedidos ja finalizados nao podem ser cancelados.");
 
         pedido.setStatus(StatusPedido.CANCELADO);
-
-        // Ajuste financeiro no cancelamento
-        if (pedido.getStatusFinanceiro() == StatusFinanceiro.PAGO) {
-            pedido.setStatusFinanceiro(StatusFinanceiro.ESTORNADO);
-        } else {
-            pedido.setStatusFinanceiro(StatusFinanceiro.CANCELADO);
-        }
+        pedido.setStatusFinanceiro(pedido.getStatusFinanceiro() == StatusFinanceiro.PAGO ? StatusFinanceiro.ESTORNADO : StatusFinanceiro.CANCELADO);
 
         return new PedidoResponseDTO(pedidoRepository.save(pedido));
     }
@@ -233,34 +199,14 @@ public class PedidoService {
     public PedidoResponseDTO adicionarItemPedido(UUID pedidoId, ItemPedidoRequestDTO dto) {
         Pedido pedido = pedidoRepository.findById(pedidoId)
                 .orElseThrow(() -> new ResourceNotFoundException("Pedido nao encontrado."));
-
         validarEdicaoPedido(pedido);
 
         Produto produto = produtoRepository.findById(dto.produtoId())
                 .orElseThrow(() -> new ResourceNotFoundException("Produto nao encontrado no cardapio."));
 
-        ItemPedido novoItem = new ItemPedido();
-        novoItem.setPedido(pedido);
-        novoItem.setProduto(produto);
-        novoItem.setQuantidade(dto.quantidade());
-        novoItem.setPrecoUnitario(produto.getPreco());
-        novoItem.setObservacaoItem(dto.observacao());
-
-        if (dto.adicionaisIds() != null && !dto.adicionaisIds().isEmpty()) {
-            List<Adicional> adicionais = adicionalRepository.findAllById(dto.adicionaisIds());
-            novoItem.setAdicionais(adicionais);
-        }
-
-        BigDecimal precoAdicionais = novoItem.getAdicionais().stream()
-                .map(Adicional::getPreco)
-                .reduce(BigDecimal.ZERO, BigDecimal::add);
-
+        ItemPedido novoItem = criarItem(pedido, produto, dto.quantidade(), dto.observacao(), dto.adicionaisIds());
         pedido.getItens().add(novoItem);
-
-        BigDecimal valorAdicional = produto.getPreco().add(precoAdicionais)
-                .multiply(BigDecimal.valueOf(dto.quantidade()));
-
-        pedido.setTotal(pedido.getTotal().add(valorAdicional));
+        pedido.setTotal(pedido.getTotal().add(calcularSubtotal(novoItem)));
 
         return new PedidoResponseDTO(pedidoRepository.save(pedido));
     }
@@ -269,22 +215,13 @@ public class PedidoService {
     public PedidoResponseDTO removerItemPedido(UUID pedidoId, UUID itemId) {
         Pedido pedido = pedidoRepository.findById(pedidoId)
                 .orElseThrow(() -> new ResourceNotFoundException("Pedido nao encontrado."));
-
         validarEdicaoPedido(pedido);
 
         ItemPedido itemParaRemover = pedido.getItens().stream()
-                .filter(item -> item.getId().equals(itemId))
-                .findFirst()
+                .filter(item -> item.getId().equals(itemId)).findFirst()
                 .orElseThrow(() -> new ResourceNotFoundException("Item nao encontrado nesta comanda."));
 
-        BigDecimal precoAdicionais = itemParaRemover.getAdicionais().stream()
-                .map(Adicional::getPreco)
-                .reduce(BigDecimal.ZERO, BigDecimal::add);
-
-        BigDecimal valorSubtrair = itemParaRemover.getPrecoUnitario().add(precoAdicionais)
-                .multiply(BigDecimal.valueOf(itemParaRemover.getQuantidade()));
-
-        pedido.setTotal(pedido.getTotal().subtract(valorSubtrair));
+        pedido.setTotal(pedido.getTotal().subtract(calcularSubtotal(itemParaRemover)));
         pedido.getItens().remove(itemParaRemover);
 
         return new PedidoResponseDTO(pedidoRepository.save(pedido));
@@ -294,33 +231,19 @@ public class PedidoService {
     public PedidoResponseDTO atualizarAdicionaisDoItem(UUID pedidoId, UUID itemId, List<UUID> adicionaisIds) {
         Pedido pedido = pedidoRepository.findById(pedidoId)
                 .orElseThrow(() -> new ResourceNotFoundException("Pedido nao encontrado."));
-
         validarEdicaoPedido(pedido);
 
         ItemPedido item = pedido.getItens().stream()
-                .filter(i -> i.getId().equals(itemId))
-                .findFirst()
+                .filter(i -> i.getId().equals(itemId)).findFirst()
                 .orElseThrow(() -> new ResourceNotFoundException("Item nao encontrado nesta comanda."));
 
-        BigDecimal precoAdicionaisAntigos = item.getAdicionais().stream()
-                .map(Adicional::getPreco)
-                .reduce(BigDecimal.ZERO, BigDecimal::add);
-        BigDecimal subtotalAntigo = item.getPrecoUnitario().add(precoAdicionaisAntigos).multiply(BigDecimal.valueOf(item.getQuantidade()));
-        pedido.setTotal(pedido.getTotal().subtract(subtotalAntigo));
-
-        List<Adicional> novosAdicionais = adicionalRepository.findAllById(adicionaisIds);
-        item.setAdicionais(novosAdicionais);
-
-        BigDecimal precoNovosAdicionais = novosAdicionais.stream()
-                .map(Adicional::getPreco)
-                .reduce(BigDecimal.ZERO, BigDecimal::add);
-        BigDecimal subtotalNovo = item.getPrecoUnitario().add(precoNovosAdicionais).multiply(BigDecimal.valueOf(item.getQuantidade()));
-        pedido.setTotal(pedido.getTotal().add(subtotalNovo));
+        pedido.setTotal(pedido.getTotal().subtract(calcularSubtotal(item)));
+        item.setAdicionais(adicionalRepository.findAllById(adicionaisIds));
+        pedido.setTotal(pedido.getTotal().add(calcularSubtotal(item)));
 
         return new PedidoResponseDTO(pedidoRepository.save(pedido));
     }
 
-    // Metodo auxiliar para centralizar as regras de bloqueio de edicao
     private void validarEdicaoPedido(Pedido pedido) {
         if (pedido.getStatusFinanceiro() == StatusFinanceiro.PAGO) {
             throw new BusinessRuleException("Nao e possivel alterar os itens de um pedido que ja foi pago.");

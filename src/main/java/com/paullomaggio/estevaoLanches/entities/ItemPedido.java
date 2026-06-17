@@ -1,5 +1,6 @@
 package com.paullomaggio.estevaoLanches.entities;
 
+import com.fasterxml.jackson.annotation.JsonIgnore; // 🚨 Importação necessária
 import jakarta.persistence.*;
 import lombok.*;
 import java.math.BigDecimal;
@@ -21,6 +22,8 @@ public class ItemPedido {
     @EqualsAndHashCode.Include
     private UUID id;
 
+    // 🚨 A MÁGICA AQUI: O @JsonIgnore impede o loop infinito no JSON
+    @JsonIgnore
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "pedido_id", nullable = false)
     private Pedido pedido;
