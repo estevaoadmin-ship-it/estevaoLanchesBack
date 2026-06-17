@@ -1,16 +1,8 @@
 package com.paullomaggio.estevaoLanches.services;
 
-import com.paullomaggio.estevaoLanches.dtos.CheckoutRequestDTO;
-import com.paullomaggio.estevaoLanches.dtos.ItemPedidoRequestDTO;
-import com.paullomaggio.estevaoLanches.dtos.PedidoResponseDTO;
-import com.paullomaggio.estevaoLanches.dtos.PedidoStatusRequestDTO;
-import com.paullomaggio.estevaoLanches.dtos.PagamentoRequestDTO;
+import com.paullomaggio.estevaoLanches.dtos.*;
 import com.paullomaggio.estevaoLanches.entities.*;
-import com.paullomaggio.estevaoLanches.enums.FormaPagamento;
-import com.paullomaggio.estevaoLanches.enums.StatusCaixa;
-import com.paullomaggio.estevaoLanches.enums.StatusFinanceiro;
-import com.paullomaggio.estevaoLanches.enums.StatusPedido;
-import com.paullomaggio.estevaoLanches.enums.TipoPedido;
+import com.paullomaggio.estevaoLanches.enums.*;
 import com.paullomaggio.estevaoLanches.exceptions.BusinessRuleException;
 import com.paullomaggio.estevaoLanches.exceptions.ResourceNotFoundException;
 import com.paullomaggio.estevaoLanches.repositories.*;
@@ -18,6 +10,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.ArgumentCaptor;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
@@ -116,7 +109,7 @@ class PedidoServiceTest {
         assertThat(carrinho.getItens()).isEmpty();
 
         // Blindagem: Como já foi pago, deve mandar pra cozinha e gerar recibo
-        verify(filaImpressaoRepository, atLeast(1)).save(any(FilaImpressao.class));
+        verify(filaImpressaoRepository, times(2)).save(any(FilaImpressao.class));
     }
 
     @Test
@@ -137,8 +130,8 @@ class PedidoServiceTest {
         assertThat(resultado.statusFinanceiro()).isEqualTo(StatusFinanceiro.PAGO);
         assertThat(resultado.total()).isEqualByComparingTo(new BigDecimal("10.00"));
 
-        // Verifica se a fila foi chamada para salvar
-        verify(filaImpressaoRepository, atLeast(1)).save(any(FilaImpressao.class));
+        // Verifica se a fila foi chamada para salvar (Cozinha + Recibo por ser PAGO)
+        verify(filaImpressaoRepository, times(2)).save(any(FilaImpressao.class));
         verify(carrinhoRepository, never()).findByClienteId(any()); // Não pode ter tocado no carrinho
     }
 
@@ -154,7 +147,8 @@ class PedidoServiceTest {
         PedidoResponseDTO resultado = pedidoService.finalizarPedido(dtoMesa);
 
         assertThat(resultado.statusFinanceiro()).isEqualTo(StatusFinanceiro.AGUARDANDO_PAGAMENTO);
-        // Opcional: Aqui você pode verificar se apenas a via COZINHA foi gerada na Fila, dependendo de como implementou.
+        // Verifica se apenas 1 impressão foi gerada (Cozinha)
+        verify(filaImpressaoRepository, times(1)).save(any(FilaImpressao.class));
     }
 
     @Test
@@ -212,7 +206,7 @@ class PedidoServiceTest {
     }
 
     // =========================================================================
-    // 3. TESTES DE CANCELAMENTO E ESTORNO
+    // 3. TESTES DE CANCELAMENTO E ESTORNO (BLINDAGEM ANTIFANTASMA)
     // =========================================================================
 
     @Test
@@ -230,6 +224,22 @@ class PedidoServiceTest {
 
         // Blindagem: Cancelamento não deve cuspir papel na impressora
         verify(filaImpressaoRepository, never()).save(any(FilaImpressao.class));
+    }
+
+    @Test
+    @DisplayName("Blindagem Antifantasma: Cancelar pedido abandonado sem pagar deve zerar financeiro como CANCELADO")
+    void deveMudarParaCanceladoSeNaoEstavaPagoAoCancelar() {
+        pedidoPadrao.setStatus(StatusPedido.PRONTO);
+        pedidoPadrao.setStatusFinanceiro(StatusFinanceiro.AGUARDANDO_PAGAMENTO);
+
+        when(pedidoRepository.findById(pedidoId)).thenReturn(Optional.of(pedidoPadrao));
+        when(pedidoRepository.save(any(Pedido.class))).thenAnswer(i -> i.getArgument(0));
+
+        PedidoResponseDTO res = pedidoService.cancelarPedido(pedidoId);
+
+        // Garante que some das queries de faturamento baseadas em StatusFinanceiro.PAGO
+        assertThat(res.status()).isEqualTo(StatusPedido.CANCELADO);
+        assertThat(res.statusFinanceiro()).isEqualTo(StatusFinanceiro.CANCELADO);
     }
 
     @Test
@@ -286,16 +296,33 @@ class PedidoServiceTest {
     }
 
     // =========================================================================
-    // 5. TESTES DE CONSULTAS (LISTAGENS)
+    // 5. TESTES DE CONSULTAS E FILTROS DO MONITOR
     // =========================================================================
 
     @Test
-    @DisplayName("Consultas: Deve listar Histórico e Monitor da Cozinha")
-    void deveListarHistoricoEMonitor() {
+    @DisplayName("Consultas: Deve listar Histórico do Cliente corretamente")
+    void deveListarHistoricoDoCliente() {
         when(pedidoRepository.findByClienteIdOrderByDataHoraDesc(clienteId)).thenReturn(List.of(pedidoPadrao));
         assertThat(pedidoService.listarHistoricoCliente(clienteId)).hasSize(1);
+    }
 
-        when(pedidoRepository.findByStatusInOrderByDataHoraAsc(anyList())).thenReturn(List.of(pedidoPadrao));
-        assertThat(pedidoService.listarPedidosAtivosMonitor()).hasSize(1);
+    @Test
+    @SuppressWarnings("unchecked")
+    @DisplayName("Blindagem Monitor Cozinha: Deve buscar apenas status de preparo ativos (RECEBIDO, EM_PREPARO, PRONTO)")
+    void deveListarPedidosAtivosMonitorFiltrandoApenasEtapasDeProducao() {
+        ArgumentCaptor<List<StatusPedido>> statusCaptor = ArgumentCaptor.forClass(List.class);
+        when(pedidoRepository.findByStatusInOrderByDataHoraAsc(statusCaptor.capture())).thenReturn(List.of(pedidoPadrao));
+
+        List<PedidoResponseDTO> resultado = pedidoService.listarPedidosAtivosMonitor();
+
+        assertThat(resultado).hasSize(1);
+
+        // Garante que o monitor busca exatamente as etapas de produção física na cozinha
+        List<StatusPedido> statusEnviados = statusCaptor.getValue();
+        assertThat(statusEnviados).containsExactlyInAnyOrder(
+                StatusPedido.RECEBIDO,
+                StatusPedido.EM_PREPARO,
+                StatusPedido.PRONTO
+        );
     }
 }

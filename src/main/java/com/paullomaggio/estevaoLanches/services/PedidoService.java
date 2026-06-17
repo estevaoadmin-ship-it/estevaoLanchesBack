@@ -53,7 +53,6 @@ public class PedidoService {
 
         Pedido pedidoSalvo = pedidoRepository.save(pedido);
 
-        // 🚨 BLINDAGEM TRANSACIONAL: Fila de Impressão
         adicionarNaFila(pedidoSalvo, FilaImpressao.DestinoImpressao.COZINHA);
 
         if (pedidoSalvo.getStatusFinanceiro() == StatusFinanceiro.PAGO) {
@@ -164,7 +163,8 @@ public class PedidoService {
 
     @Transactional(readOnly = true)
     public List<PedidoResponseDTO> listarPedidosAtivosMonitor() {
-        List<StatusPedido> ativos = Arrays.asList(StatusPedido.RECEBIDO, StatusPedido.EM_PREPARO, StatusPedido.PRONTO, StatusPedido.EM_ROTA, StatusPedido.SERVIDO);
+        // 🛡️ FILTRO ANTIFANTASMA: Garante o fluxo produtivo real limpando o monitor da cozinha
+        List<StatusPedido> ativos = Arrays.asList(StatusPedido.RECEBIDO, StatusPedido.EM_PREPARO, StatusPedido.PRONTO);
         return pedidoRepository.findByStatusInOrderByDataHoraAsc(ativos).stream()
                 .map(PedidoResponseDTO::new).collect(Collectors.toList());
     }
@@ -190,6 +190,8 @@ public class PedidoService {
         if (pedido.getStatus() == StatusPedido.FINALIZADO) throw new BusinessRuleException("Pedidos ja finalizados nao podem ser cancelados.");
 
         pedido.setStatus(StatusPedido.CANCELADO);
+
+        // 🛡️ REGRA FINANCEIRA ANTIFANTASMA: Se abandonou sem pagar, cancela o faturamento. Se já pagou, gera estorno.
         pedido.setStatusFinanceiro(pedido.getStatusFinanceiro() == StatusFinanceiro.PAGO ? StatusFinanceiro.ESTORNADO : StatusFinanceiro.CANCELADO);
 
         return new PedidoResponseDTO(pedidoRepository.save(pedido));

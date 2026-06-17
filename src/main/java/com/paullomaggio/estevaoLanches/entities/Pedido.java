@@ -30,7 +30,6 @@ public class Pedido {
     @Column(nullable = false, unique = true, length = 10)
     private String numeroPedido;
 
-    // CLIENTE AJUSTADO: Nullable = true para permitir vendas rápidas / avulsas no balcão
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "cliente_id", nullable = true)
     private Cliente cliente;
@@ -41,12 +40,10 @@ public class Pedido {
     @Column(nullable = false)
     private LocalDateTime dataHora = LocalDateTime.now();
 
-    // === STATUS OPERACIONAL ===
     @Enumerated(EnumType.STRING)
     @Column(nullable = false)
     private StatusPedido status;
 
-    // === STATUS FINANCEIRO (NOVO CAMPO) ===
     @Enumerated(EnumType.STRING)
     @Column(nullable = false)
     private StatusFinanceiro statusFinanceiro = StatusFinanceiro.AGUARDANDO_PAGAMENTO;
@@ -64,7 +61,6 @@ public class Pedido {
     @Column(length = 255)
     private String observacaoGeral;
 
-    // CAMPOS DE PAGAMENTO ADICIONADOS (Agora podem nascer nulos para Mesa/Delivery)
     @Enumerated(EnumType.STRING)
     @Column(length = 20)
     private FormaPagamento formaPagamento;
