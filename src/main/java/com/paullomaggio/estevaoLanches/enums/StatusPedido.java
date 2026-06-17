@@ -1,10 +1,11 @@
 package com.paullomaggio.estevaoLanches.enums;
 
 public enum StatusPedido {
-    RECEBIDO,     // Pedido acabou de chegar do Carrinho/App
-    EM_PREPARO,   // Cozinha aceitou e está fazendo o lanche
-    PRONTO,       // Lanche na rampa esperando garçom ou motoboy
+    RECEBIDO,     // Pedido acabou de chegar do Carrinho/App/PDV
+    EM_PREPARO,   // Cozinha aceitou e está a fazer o lanche
+    PRONTO,       // Lanche na rampa à espera do garçom ou motoboy
     EM_ROTA,      // Motoboy saiu para entrega (Apenas para DELIVERY)
-    FINALIZADO,   // Entregue ao cliente e pago
+    SERVIDO,      // Lanche foi entregue na mesa do cliente (Apenas para MESA)
+    FINALIZADO,   // Ciclo operacional totalmente encerrado (Mesa limpa / Entrega concluída)
     CANCELADO     // Cliente desistiu ou restaurante rejeitou
 }

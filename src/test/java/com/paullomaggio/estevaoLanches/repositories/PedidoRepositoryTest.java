@@ -15,7 +15,6 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Optional;
-import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -75,6 +74,10 @@ class PedidoRepositoryTest {
         pedido.setCliente(clientePadrao);
         pedido.setDataHora(dataHora);
         pedido.setStatus(status);
+
+        // NOVO STATUS APLICADO NOS TESTES MOCKS:
+        pedido.setStatusFinanceiro(forma != null ? StatusFinanceiro.PAGO : StatusFinanceiro.AGUARDANDO_PAGAMENTO);
+
         pedido.setTipo(TipoPedido.DELIVERY);
         pedido.setTotal(total);
         pedido.setNumeroPedido(numeroPedido);
@@ -180,9 +183,6 @@ class PedidoRepositoryTest {
         assertThat(totalDinheiro).isEqualByComparingTo(new BigDecimal("150.00"));
     }
 
-    // ========================================================================
-    // 🚀 ATUALIZADO: Cenário de cobertura estrita para queries gerenciais do BI
-    // ========================================================================
     @Test
     @DisplayName("CT-REPO-BI-003: Deve rodar queries do painel gerencial no H2 sem estourar erros de sintaxe JPQL")
     void deveExecutarQueriesDoRelatorioComSucesso() {

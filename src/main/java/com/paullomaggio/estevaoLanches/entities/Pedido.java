@@ -1,6 +1,7 @@
 package com.paullomaggio.estevaoLanches.entities;
 
 import com.paullomaggio.estevaoLanches.enums.StatusPedido;
+import com.paullomaggio.estevaoLanches.enums.StatusFinanceiro;
 import com.paullomaggio.estevaoLanches.enums.TipoPedido;
 import com.paullomaggio.estevaoLanches.enums.FormaPagamento;
 import jakarta.persistence.*;
@@ -40,9 +41,15 @@ public class Pedido {
     @Column(nullable = false)
     private LocalDateTime dataHora = LocalDateTime.now();
 
+    // === STATUS OPERACIONAL ===
     @Enumerated(EnumType.STRING)
     @Column(nullable = false)
     private StatusPedido status;
+
+    // === STATUS FINANCEIRO (NOVO CAMPO) ===
+    @Enumerated(EnumType.STRING)
+    @Column(nullable = false)
+    private StatusFinanceiro statusFinanceiro = StatusFinanceiro.AGUARDANDO_PAGAMENTO;
 
     @Enumerated(EnumType.STRING)
     @Column(nullable = false)
@@ -57,7 +64,7 @@ public class Pedido {
     @Column(length = 255)
     private String observacaoGeral;
 
-    // CAMPOS DE PAGAMENTO ADICIONADOS
+    // CAMPOS DE PAGAMENTO ADICIONADOS (Agora podem nascer nulos para Mesa/Delivery)
     @Enumerated(EnumType.STRING)
     @Column(length = 20)
     private FormaPagamento formaPagamento;

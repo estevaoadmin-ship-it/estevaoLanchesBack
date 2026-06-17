@@ -2,7 +2,9 @@ package com.paullomaggio.estevaoLanches.dtos;
 
 import com.paullomaggio.estevaoLanches.entities.Pedido;
 import com.paullomaggio.estevaoLanches.enums.StatusPedido;
+import com.paullomaggio.estevaoLanches.enums.StatusFinanceiro;
 import com.paullomaggio.estevaoLanches.enums.TipoPedido;
+import com.paullomaggio.estevaoLanches.enums.FormaPagamento;
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
 import java.util.List;
@@ -15,6 +17,8 @@ public record PedidoResponseDTO(
         String clienteNome,
         LocalDateTime dataHora,
         StatusPedido status,
+        StatusFinanceiro statusFinanceiro, // NOVO
+        FormaPagamento formaPagamento,     // NOVO
         TipoPedido tipo,
         BigDecimal total,
         String enderecoEntrega,
@@ -26,10 +30,11 @@ public record PedidoResponseDTO(
         this(
                 pedido.getId(),
                 pedido.getNumeroPedido(),
-                // SEGURANÇA MÁXIMA: Se for cliente cadastrado pega o nome, se não, pega o nome temporário do balcão
                 pedido.getCliente() != null ? pedido.getCliente().getNome() : pedido.getNomeClienteBalcao(),
                 pedido.getDataHora(),
                 pedido.getStatus(),
+                pedido.getStatusFinanceiro(), // NOVO
+                pedido.getFormaPagamento(),   // NOVO
                 pedido.getTipo(),
                 pedido.getTotal(),
                 pedido.getEnderecoEntrega(),

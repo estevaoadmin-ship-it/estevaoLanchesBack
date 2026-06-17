@@ -21,7 +21,7 @@ public record CheckoutRequestDTO(
         String nomeClienteBalcao,
         String telefoneClienteBalcao,
 
-        @NotNull(message = "A forma de pagamento é obrigatória.")
+        // REMOVIDO O @NotNull
         FormaPagamento formaPagamento,
 
         BigDecimal valorRecebido,

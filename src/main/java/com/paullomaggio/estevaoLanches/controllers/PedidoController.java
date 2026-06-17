@@ -43,6 +43,14 @@ public class PedidoController {
         return ResponseEntity.ok(pedidoService.atualizarStatus(id, dto));
     }
 
+    // === NOVA ROTA: RECEBIMENTO FINANCEIRO ===
+    @PutMapping("/{id}/pagar")
+    public ResponseEntity<PedidoResponseDTO> receberPagamento(
+            @PathVariable UUID id,
+            @RequestBody @Valid PagamentoRequestDTO dto) {
+        return ResponseEntity.ok(pedidoService.receberPagamento(id, dto));
+    }
+
     @PutMapping("/{id}/cancelar")
     public ResponseEntity<PedidoResponseDTO> cancelarPedido(@PathVariable UUID id) {
         return ResponseEntity.ok(pedidoService.cancelarPedido(id));

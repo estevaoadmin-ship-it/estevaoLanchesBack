@@ -1,11 +1,9 @@
 package com.paullomaggio.estevaoLanches.services;
 
-import com.paullomaggio.estevaoLanches.dtos.CheckoutRequestDTO;
-import com.paullomaggio.estevaoLanches.dtos.ItemPedidoRequestDTO;
-import com.paullomaggio.estevaoLanches.dtos.PedidoResponseDTO;
-import com.paullomaggio.estevaoLanches.dtos.PedidoStatusRequestDTO;
+import com.paullomaggio.estevaoLanches.dtos.*;
 import com.paullomaggio.estevaoLanches.entities.*;
 import com.paullomaggio.estevaoLanches.enums.StatusCaixa;
+import com.paullomaggio.estevaoLanches.enums.StatusFinanceiro;
 import com.paullomaggio.estevaoLanches.enums.StatusPedido;
 import com.paullomaggio.estevaoLanches.exceptions.BusinessRuleException;
 import com.paullomaggio.estevaoLanches.exceptions.ResourceNotFoundException;
@@ -60,6 +58,13 @@ public class PedidoService {
         pedido.setFormaPagamento(dto.formaPagamento());
         pedido.setValorRecebido(dto.valorRecebido());
         pedido.setNomeClienteBalcao(dto.nomeClienteBalcao());
+
+        // === NOVA LOGICA FINANCEIRA ===
+        if (dto.formaPagamento() != null) {
+            pedido.setStatusFinanceiro(StatusFinanceiro.PAGO); // Pedido de Balcão (já pago)
+        } else {
+            pedido.setStatusFinanceiro(StatusFinanceiro.AGUARDANDO_PAGAMENTO); // Mesa ou Delivery (paga depois)
+        }
 
         if (pedido.getItens() == null) {
             pedido.setItens(new ArrayList<>());
@@ -140,6 +145,27 @@ public class PedidoService {
         return new PedidoResponseDTO(pedidoSalvo);
     }
 
+    // === NOVO METODO: RECEBER PAGAMENTO ===
+    @Transactional
+    public PedidoResponseDTO receberPagamento(UUID id, PagamentoRequestDTO dto) {
+        Pedido pedido = pedidoRepository.findById(id)
+                .orElseThrow(() -> new ResourceNotFoundException("Pedido nao encontrado."));
+
+        if (pedido.getStatusFinanceiro() == StatusFinanceiro.PAGO) {
+            throw new BusinessRuleException("Este pedido ja consta como PAGO.");
+        }
+
+        if (pedido.getStatus() == StatusPedido.CANCELADO) {
+            throw new BusinessRuleException("Nao e possivel receber pagamento de um pedido cancelado.");
+        }
+
+        pedido.setFormaPagamento(dto.formaPagamento());
+        pedido.setValorRecebido(dto.valorRecebido());
+        pedido.setStatusFinanceiro(StatusFinanceiro.PAGO);
+
+        return new PedidoResponseDTO(pedidoRepository.save(pedido));
+    }
+
     @Transactional(readOnly = true)
     public PedidoResponseDTO buscarPorId(UUID id) {
         Pedido pedido = pedidoRepository.findById(id)
@@ -163,7 +189,7 @@ public class PedidoService {
 
     @Transactional(readOnly = true)
     public List<PedidoResponseDTO> listarPedidosAtivosMonitor() {
-        List<StatusPedido> ativos = Arrays.asList(StatusPedido.RECEBIDO, StatusPedido.EM_PREPARO, StatusPedido.PRONTO, StatusPedido.EM_ROTA);
+        List<StatusPedido> ativos = Arrays.asList(StatusPedido.RECEBIDO, StatusPedido.EM_PREPARO, StatusPedido.PRONTO, StatusPedido.EM_ROTA, StatusPedido.SERVIDO);
         return pedidoRepository.findByStatusInOrderByDataHoraAsc(ativos).stream()
                 .map(PedidoResponseDTO::new)
                 .collect(Collectors.toList());
@@ -188,10 +214,18 @@ public class PedidoService {
                 .orElseThrow(() -> new ResourceNotFoundException("Pedido nao encontrado."));
 
         if (pedido.getStatus() == StatusPedido.FINALIZADO) {
-            throw new BusinessRuleException("Pedidos ja entregues (Finalizados) nao podem ser cancelados.");
+            throw new BusinessRuleException("Pedidos ja finalizados nao podem ser cancelados.");
         }
 
         pedido.setStatus(StatusPedido.CANCELADO);
+
+        // Ajuste financeiro no cancelamento
+        if (pedido.getStatusFinanceiro() == StatusFinanceiro.PAGO) {
+            pedido.setStatusFinanceiro(StatusFinanceiro.ESTORNADO);
+        } else {
+            pedido.setStatusFinanceiro(StatusFinanceiro.CANCELADO);
+        }
+
         return new PedidoResponseDTO(pedidoRepository.save(pedido));
     }
 
@@ -200,9 +234,7 @@ public class PedidoService {
         Pedido pedido = pedidoRepository.findById(pedidoId)
                 .orElseThrow(() -> new ResourceNotFoundException("Pedido nao encontrado."));
 
-        if (pedido.getStatus() == StatusPedido.FINALIZADO || pedido.getStatus() == StatusPedido.CANCELADO || pedido.getStatus() == StatusPedido.EM_ROTA) {
-            throw new BusinessRuleException("Nao e possivel adicionar itens a um pedido que ja esta em rota, finalizado ou cancelado.");
-        }
+        validarEdicaoPedido(pedido);
 
         Produto produto = produtoRepository.findById(dto.produtoId())
                 .orElseThrow(() -> new ResourceNotFoundException("Produto nao encontrado no cardapio."));
@@ -238,9 +270,7 @@ public class PedidoService {
         Pedido pedido = pedidoRepository.findById(pedidoId)
                 .orElseThrow(() -> new ResourceNotFoundException("Pedido nao encontrado."));
 
-        if (pedido.getStatus() == StatusPedido.FINALIZADO || pedido.getStatus() == StatusPedido.CANCELADO || pedido.getStatus() == StatusPedido.EM_ROTA) {
-            throw new BusinessRuleException("Nao e possivel alterar os itens de um pedido que ja esta em rota, finalizado ou cancelado.");
-        }
+        validarEdicaoPedido(pedido);
 
         ItemPedido itemParaRemover = pedido.getItens().stream()
                 .filter(item -> item.getId().equals(itemId))
@@ -265,14 +295,12 @@ public class PedidoService {
         Pedido pedido = pedidoRepository.findById(pedidoId)
                 .orElseThrow(() -> new ResourceNotFoundException("Pedido nao encontrado."));
 
+        validarEdicaoPedido(pedido);
+
         ItemPedido item = pedido.getItens().stream()
                 .filter(i -> i.getId().equals(itemId))
                 .findFirst()
                 .orElseThrow(() -> new ResourceNotFoundException("Item nao encontrado nesta comanda."));
-
-        if (pedido.getStatus() == StatusPedido.FINALIZADO || pedido.getStatus() == StatusPedido.CANCELADO || pedido.getStatus() == StatusPedido.EM_ROTA) {
-            throw new BusinessRuleException("Nao e possivel alterar os adicionais de um pedido que ja esta em rota, finalizado ou cancelado.");
-        }
 
         BigDecimal precoAdicionaisAntigos = item.getAdicionais().stream()
                 .map(Adicional::getPreco)
@@ -290,6 +318,16 @@ public class PedidoService {
         pedido.setTotal(pedido.getTotal().add(subtotalNovo));
 
         return new PedidoResponseDTO(pedidoRepository.save(pedido));
+    }
+
+    // Metodo auxiliar para centralizar as regras de bloqueio de edicao
+    private void validarEdicaoPedido(Pedido pedido) {
+        if (pedido.getStatusFinanceiro() == StatusFinanceiro.PAGO) {
+            throw new BusinessRuleException("Nao e possivel alterar os itens de um pedido que ja foi pago.");
+        }
+        if (pedido.getStatus() == StatusPedido.FINALIZADO || pedido.getStatus() == StatusPedido.CANCELADO || pedido.getStatus() == StatusPedido.EM_ROTA) {
+            throw new BusinessRuleException("Nao e possivel alterar itens de um pedido que ja esta em rota, finalizado ou cancelado.");
+        }
     }
 
     @Transactional

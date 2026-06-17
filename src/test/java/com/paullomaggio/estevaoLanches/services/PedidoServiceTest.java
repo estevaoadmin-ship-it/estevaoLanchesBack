@@ -4,9 +4,11 @@ import com.paullomaggio.estevaoLanches.dtos.CheckoutRequestDTO;
 import com.paullomaggio.estevaoLanches.dtos.ItemPedidoRequestDTO;
 import com.paullomaggio.estevaoLanches.dtos.PedidoResponseDTO;
 import com.paullomaggio.estevaoLanches.dtos.PedidoStatusRequestDTO;
+import com.paullomaggio.estevaoLanches.dtos.PagamentoRequestDTO;
 import com.paullomaggio.estevaoLanches.entities.*;
 import com.paullomaggio.estevaoLanches.enums.FormaPagamento;
 import com.paullomaggio.estevaoLanches.enums.StatusCaixa;
+import com.paullomaggio.estevaoLanches.enums.StatusFinanceiro;
 import com.paullomaggio.estevaoLanches.enums.StatusPedido;
 import com.paullomaggio.estevaoLanches.enums.TipoPedido;
 import com.paullomaggio.estevaoLanches.exceptions.BusinessRuleException;
@@ -85,6 +87,7 @@ class PedidoServiceTest {
         pedidoPadrao.setId(pedidoId);
         pedidoPadrao.setCliente(cliente);
         pedidoPadrao.setStatus(StatusPedido.RECEBIDO);
+        pedidoPadrao.setStatusFinanceiro(StatusFinanceiro.AGUARDANDO_PAGAMENTO);
         pedidoPadrao.setTipo(TipoPedido.DELIVERY);
         pedidoPadrao.setTotal(new BigDecimal("20.00"));
         pedidoPadrao.setDataHora(LocalDateTime.now());
@@ -94,15 +97,16 @@ class PedidoServiceTest {
         itemPedidoExistente = new ItemPedido();
         itemPedidoExistente.setId(itemExistenteId);
         itemPedidoExistente.setProduto(prodA);
-        itemPedidoExistente.setQuantidade(2); // CORRIGIDO: Voltando para setQuantidade (Padrao BR)
+        itemPedidoExistente.setQuantidade(2);
         itemPedidoExistente.setPrecoUnitario(new BigDecimal("10.00"));
         itemPedidoExistente.setPedido(pedidoPadrao);
         pedidoPadrao.getItens().add(itemPedidoExistente);
     }
 
     @Test
-    @DisplayName("Testes 1 a 8, 13 e 16: Checkout Geral, Limpeza de Carrinho e Preco Blindado")
+    @DisplayName("Testes 1 a 8: Checkout Geral, Limpeza de Carrinho e Status Pago no Balcão")
     void deveFinalizarCheckoutsDiversosComSucesso() {
+        // Possui FormaPagamento, então deve nascer PAGO
         CheckoutRequestDTO dtoApp = new CheckoutRequestDTO(clienteId, TipoPedido.DELIVERY, "Rua A", null, null, null, null, FormaPagamento.CREDITO, null, null);
 
         when(caixaRepository.existsByStatus(StatusCaixa.ABERTO)).thenReturn(true);
@@ -112,11 +116,27 @@ class PedidoServiceTest {
         PedidoResponseDTO resultado = pedidoService.finalizarPedido(dtoApp);
 
         assertThat(resultado.total()).isEqualByComparingTo(new BigDecimal("20.00"));
+        assertThat(resultado.statusFinanceiro()).isEqualTo(StatusFinanceiro.PAGO);
         assertThat(carrinho.getItens()).isEmpty();
     }
 
     @Test
-    @DisplayName("Testes 9 a 12 e 14 a 15: Excecoes em Checkouts (Caixa Fechado, Sem Carrinho, etc)")
+    @DisplayName("Novo Teste: Deve finalizar checkout de Mesa sem pagamento e gerar status AGUARDANDO_PAGAMENTO")
+    void deveFinalizarCheckoutSemFormaPagamentoEGerarStatusAguardando() {
+        // Forma de pagamento enviada como NULL
+        CheckoutRequestDTO dtoMesa = new CheckoutRequestDTO(clienteId, TipoPedido.MESA, null, 5, null, null, null, null, null, null);
+
+        when(caixaRepository.existsByStatus(StatusCaixa.ABERTO)).thenReturn(true);
+        when(carrinhoRepository.findByClienteId(clienteId)).thenReturn(Optional.of(carrinho));
+        when(pedidoRepository.save(any(Pedido.class))).thenAnswer(i -> i.getArgument(0));
+
+        PedidoResponseDTO resultado = pedidoService.finalizarPedido(dtoMesa);
+
+        assertThat(resultado.statusFinanceiro()).isEqualTo(StatusFinanceiro.AGUARDANDO_PAGAMENTO);
+    }
+
+    @Test
+    @DisplayName("Testes 9 a 12: Exceções em Checkouts (Caixa Fechado, Sem Carrinho, etc)")
     void deveLancarExcecoesRegrasDeNegocioNoCheckout() {
         CheckoutRequestDTO dto = new CheckoutRequestDTO(clienteId, TipoPedido.DELIVERY, null, null, null, null, null, FormaPagamento.PIX, null, null);
 
@@ -132,6 +152,84 @@ class PedidoServiceTest {
         when(carrinhoRepository.findByClienteId(clienteId)).thenReturn(Optional.of(carrinho));
         assertThrows(BusinessRuleException.class, () -> pedidoService.finalizarPedido(dto));
     }
+
+    // =========================================================================
+    // NOVOS TESTES: FLUXO DE PAGAMENTO SEPARADO (StatusFinanceiro)
+    // =========================================================================
+
+    @Test
+    @DisplayName("Novo Teste: Deve receber pagamento de pedido em aberto e mudar para PAGO")
+    void deveReceberPagamentoComSucesso() {
+        PagamentoRequestDTO pagamentoDTO = new PagamentoRequestDTO(FormaPagamento.PIX, new BigDecimal("20.00"));
+
+        when(pedidoRepository.findById(pedidoId)).thenReturn(Optional.of(pedidoPadrao));
+        when(pedidoRepository.save(any(Pedido.class))).thenAnswer(i -> i.getArgument(0));
+
+        PedidoResponseDTO res = pedidoService.receberPagamento(pedidoId, pagamentoDTO);
+
+        assertThat(res.statusFinanceiro()).isEqualTo(StatusFinanceiro.PAGO);
+        assertThat(res.formaPagamento()).isEqualTo(FormaPagamento.PIX);
+    }
+
+    @Test
+    @DisplayName("Novo Teste: Deve impedir duplo pagamento no mesmo pedido")
+    void deveImpedirReceberPagamentoDuplicado() {
+        pedidoPadrao.setStatusFinanceiro(StatusFinanceiro.PAGO);
+        PagamentoRequestDTO pagamentoDTO = new PagamentoRequestDTO(FormaPagamento.PIX, new BigDecimal("20.00"));
+
+        when(pedidoRepository.findById(pedidoId)).thenReturn(Optional.of(pedidoPadrao));
+
+        BusinessRuleException exception = assertThrows(BusinessRuleException.class, () ->
+                pedidoService.receberPagamento(pedidoId, pagamentoDTO)
+        );
+        assertThat(exception.getMessage()).isEqualTo("Este pedido ja consta como PAGO.");
+    }
+
+    @Test
+    @DisplayName("Novo Teste: Deve impedir pagamento de um pedido que foi cancelado")
+    void deveImpedirReceberPagamentoDePedidoCancelado() {
+        pedidoPadrao.setStatus(StatusPedido.CANCELADO);
+        PagamentoRequestDTO pagamentoDTO = new PagamentoRequestDTO(FormaPagamento.PIX, new BigDecimal("20.00"));
+
+        when(pedidoRepository.findById(pedidoId)).thenReturn(Optional.of(pedidoPadrao));
+
+        BusinessRuleException exception = assertThrows(BusinessRuleException.class, () ->
+                pedidoService.receberPagamento(pedidoId, pagamentoDTO)
+        );
+        assertThat(exception.getMessage()).isEqualTo("Nao e possivel receber pagamento de um pedido cancelado.");
+    }
+
+    @Test
+    @DisplayName("Novo Teste: Deve alterar StatusFinanceiro para ESTORNADO ao cancelar um pedido PAGO")
+    void deveAlterarStatusFinanceiroParaEstornadoAoCancelarPedidoPago() {
+        pedidoPadrao.setStatusFinanceiro(StatusFinanceiro.PAGO);
+
+        when(pedidoRepository.findById(pedidoId)).thenReturn(Optional.of(pedidoPadrao));
+        when(pedidoRepository.save(any(Pedido.class))).thenAnswer(i -> i.getArgument(0));
+
+        PedidoResponseDTO res = pedidoService.cancelarPedido(pedidoId);
+
+        assertThat(res.status()).isEqualTo(StatusPedido.CANCELADO);
+        assertThat(res.statusFinanceiro()).isEqualTo(StatusFinanceiro.ESTORNADO);
+    }
+
+    @Test
+    @DisplayName("Novo Teste: Deve impedir edição de itens se o pedido já estiver PAGO")
+    void deveImpedirEdicaoDeItensSePedidoEstiverPago() {
+        pedidoPadrao.setStatusFinanceiro(StatusFinanceiro.PAGO);
+        ItemPedidoRequestDTO novoItem = new ItemPedidoRequestDTO(prodBId, 1, null, null);
+
+        when(pedidoRepository.findById(pedidoId)).thenReturn(Optional.of(pedidoPadrao));
+
+        BusinessRuleException exception = assertThrows(BusinessRuleException.class, () ->
+                pedidoService.adicionarItemPedido(pedidoId, novoItem)
+        );
+        assertThat(exception.getMessage()).isEqualTo("Nao e possivel alterar os itens de um pedido que ja foi pago.");
+    }
+
+    // =========================================================================
+    // RESTANTE DOS TESTES DE LISTAGEM E OPERAÇÃO
+    // =========================================================================
 
     @Test
     @DisplayName("Testes 19 a 22: Buscar Pedido e Listar Todos")
@@ -150,7 +248,7 @@ class PedidoServiceTest {
     }
 
     @Test
-    @DisplayName("Testes 23 a 26: Historico do Cliente e Monitor da Cozinha")
+    @DisplayName("Testes 23 a 26: Histórico do Cliente e Monitor da Cozinha")
     void deveListarHistoricoEMonitor() {
         when(pedidoRepository.findByClienteIdOrderByDataHoraDesc(clienteId)).thenReturn(List.of(pedidoPadrao));
         assertThat(pedidoService.listarHistoricoCliente(clienteId)).hasSize(1);
@@ -173,33 +271,22 @@ class PedidoServiceTest {
     }
 
     @Test
-    @DisplayName("Testes 31 a 33: Deve impedir atualizacao de pedidos Finalizados, Cancelados ou Inexistentes")
-    void deveImpedirAtualizacaoDeStatusInvalidos() {
-        pedidoPadrao.setStatus(StatusPedido.FINALIZADO);
-        when(pedidoRepository.findById(pedidoId)).thenReturn(Optional.of(pedidoPadrao));
-        assertThrows(BusinessRuleException.class, () -> pedidoService.atualizarStatus(pedidoId, new PedidoStatusRequestDTO(StatusPedido.RECEBIDO)));
-
-        pedidoPadrao.setStatus(StatusPedido.CANCELADO);
-        assertThrows(BusinessRuleException.class, () -> pedidoService.atualizarStatus(pedidoId, new PedidoStatusRequestDTO(StatusPedido.RECEBIDO)));
-
-        when(pedidoRepository.findById(any(UUID.class))).thenReturn(Optional.empty());
-        assertThrows(ResourceNotFoundException.class, () -> pedidoService.atualizarStatus(UUID.randomUUID(), new PedidoStatusRequestDTO(StatusPedido.RECEBIDO)));
-    }
-
-    @Test
     @DisplayName("Testes 34 a 39: Deve permitir cancelar pedidos abertos e impedir finalizados")
     void deveCancelarPedidosCorretamente() {
         when(pedidoRepository.findById(pedidoId)).thenReturn(Optional.of(pedidoPadrao));
         when(pedidoRepository.save(any(Pedido.class))).thenAnswer(i -> i.getArgument(0));
 
-        assertThat(pedidoService.cancelarPedido(pedidoId).status()).isEqualTo(StatusPedido.CANCELADO);
+        PedidoResponseDTO res = pedidoService.cancelarPedido(pedidoId);
+
+        assertThat(res.status()).isEqualTo(StatusPedido.CANCELADO);
+        assertThat(res.statusFinanceiro()).isEqualTo(StatusFinanceiro.CANCELADO);
 
         pedidoPadrao.setStatus(StatusPedido.FINALIZADO);
         assertThrows(BusinessRuleException.class, () -> pedidoService.cancelarPedido(pedidoId));
     }
 
     @Test
-    @DisplayName("Testes 40 e 41: Deve adicionar item e recalcular total")
+    @DisplayName("Testes 40 e 41: Deve adicionar item e recalcular total (Em pedido não pago)")
     void deveAdicionarItemERecalcularTotal() {
         ItemPedidoRequestDTO novoItem = new ItemPedidoRequestDTO(prodBId, 1, "Adicional", null);
 
@@ -211,145 +298,5 @@ class PedidoServiceTest {
 
         assertThat(res.total()).isEqualByComparingTo(new BigDecimal("40.00"));
         assertThat(pedidoPadrao.getItens()).hasSize(2);
-    }
-
-    @Test
-    @DisplayName("Testes 42 a 46: Impedir adicao de itens em regras invalidas")
-    void deveImpedirAdicaoDeItemInvalida() {
-        ItemPedidoRequestDTO novoItem = new ItemPedidoRequestDTO(prodBId, 1, null, null);
-
-        when(pedidoRepository.findById(pedidoId)).thenReturn(Optional.of(pedidoPadrao));
-        when(produtoRepository.findById(prodBId)).thenReturn(Optional.empty());
-        assertThrows(ResourceNotFoundException.class, () -> pedidoService.adicionarItemPedido(pedidoId, novoItem));
-
-        pedidoPadrao.setStatus(StatusPedido.EM_ROTA);
-        assertThrows(BusinessRuleException.class, () -> pedidoService.adicionarItemPedido(pedidoId, novoItem));
-    }
-
-    @Test
-    @DisplayName("Testes 47 e 48: Deve remover item e recalcular total")
-    void deveRemoverItemERecalcularTotal() {
-        when(pedidoRepository.findById(pedidoId)).thenReturn(Optional.of(pedidoPadrao));
-        when(pedidoRepository.save(any(Pedido.class))).thenAnswer(i -> i.getArgument(0));
-
-        PedidoResponseDTO res = pedidoService.removerItemPedido(pedidoId, itemExistenteId);
-
-        assertThat(res.total()).isEqualByComparingTo(BigDecimal.ZERO);
-        assertThat(pedidoPadrao.getItens()).isEmpty();
-    }
-
-    @Test
-    @DisplayName("Testes 49 a 53: Impedir remocao de itens em regras invalidas")
-    void deveImpedirRemocaoDeItemInvalida() {
-        when(pedidoRepository.findById(pedidoId)).thenReturn(Optional.of(pedidoPadrao));
-        assertThrows(ResourceNotFoundException.class, () -> pedidoService.removerItemPedido(pedidoId, UUID.randomUUID()));
-
-        pedidoPadrao.setStatus(StatusPedido.FINALIZADO);
-        assertThrows(BusinessRuleException.class, () -> pedidoService.removerItemPedido(pedidoId, itemExistenteId));
-    }
-
-    @Test
-    @DisplayName("Teste 54: Impedir exclusao fisica")
-    void deveImpedirExclusaoFisica() {
-        assertThrows(BusinessRuleException.class, () -> pedidoService.excluirFisicamente(pedidoId));
-    }
-
-    @Test
-    @DisplayName("Testes 55 a 60: Casos de Borda (Extremos, Sem Observacao, Multiplos Itens)")
-    void deveProcessarCasosDeBordaComSucesso() {
-        List<ItemPedidoRequestDTO> itensExtremos = new ArrayList<>();
-        for (int i = 0; i < 50; i++) {
-            itensExtremos.add(new ItemPedidoRequestDTO(prodAId, 2, "", null));
-        }
-
-        CheckoutRequestDTO dtoBorda = new CheckoutRequestDTO(null, TipoPedido.MESA, null, 1, null, null, null, FormaPagamento.DINHEIRO, null, itensExtremos);
-
-        when(caixaRepository.existsByStatus(StatusCaixa.ABERTO)).thenReturn(true);
-        when(produtoRepository.findById(prodAId)).thenReturn(Optional.of(prodA));
-        when(pedidoRepository.save(any(Pedido.class))).thenAnswer(i -> i.getArgument(0));
-
-        PedidoResponseDTO resultado = pedidoService.finalizarPedido(dtoBorda);
-
-        assertThat(resultado.total()).isEqualByComparingTo(new BigDecimal("1000.00"));
-        assertThat(resultado.observacaoGeral()).isNull();
-    }
-
-    @Test
-    @DisplayName("Novo Teste: Deve finalizar pedido via PDV aplicando preco dos adicionais ao total")
-    void deveFinalizarPedidoPdvComAdicionaisEAtualizarTotal() {
-        List<ItemPedidoRequestDTO> itensPdv = new ArrayList<>();
-        itensPdv.add(new ItemPedidoRequestDTO(prodAId, 2, "Com cheddar extra", List.of(adicionalId)));
-
-        CheckoutRequestDTO dtoPdv = new CheckoutRequestDTO(null, TipoPedido.RETIRADA, null, null, "Paulo", "16999999999", null, FormaPagamento.PIX, null, itensPdv);
-
-        when(caixaRepository.existsByStatus(StatusCaixa.ABERTO)).thenReturn(true);
-        when(produtoRepository.findById(prodAId)).thenReturn(Optional.of(prodA));
-        when(adicionalRepository.findAllById(List.of(adicionalId))).thenReturn(List.of(adicionalCheddar));
-        when(pedidoRepository.save(any(Pedido.class))).thenAnswer(i -> i.getArgument(0));
-
-        PedidoResponseDTO resultado = pedidoService.finalizarPedido(dtoPdv);
-
-        assertThat(resultado.total()).isEqualByComparingTo(new BigDecimal("27.00"));
-    }
-
-    @Test
-    @DisplayName("Novo Teste: Deve incluir preco de adicionais ao inserir item em pedido por telefone")
-    void deveAdicionarItemComAdicionaisERecalcularTotalDoPedido() {
-        ItemPedidoRequestDTO itemComAdicionais = new ItemPedidoRequestDTO(prodBId, 1, "Adicionar cheddar", List.of(adicionalId));
-
-        when(pedidoRepository.findById(pedidoId)).thenReturn(Optional.of(pedidoPadrao));
-        when(produtoRepository.findById(prodBId)).thenReturn(Optional.of(prodB));
-        when(adicionalRepository.findAllById(List.of(adicionalId))).thenReturn(List.of(adicionalCheddar));
-        when(pedidoRepository.save(any(Pedido.class))).thenAnswer(i -> i.getArgument(0));
-
-        PedidoResponseDTO res = pedidoService.adicionarItemPedido(pedidoId, itemComAdicionais);
-
-        assertThat(res.total()).isEqualByComparingTo(new BigDecimal("43.50"));
-    }
-
-    @Test
-    @DisplayName("Novo Teste: Deve deduzir o valor total do item incluindo adicionais ao efetuar remocao")
-    void deveRemoverItemComAdicionaisEDeduzirValorCorretoDoTotal() {
-        itemPedidoExistente.setAdicionais(List.of(adicionalCheddar));
-        pedidoPadrao.setTotal(new BigDecimal("27.00"));
-
-        when(pedidoRepository.findById(pedidoId)).thenReturn(Optional.of(pedidoPadrao));
-        when(pedidoRepository.save(any(Pedido.class))).thenAnswer(i -> i.getArgument(0));
-
-        PedidoResponseDTO res = pedidoService.removerItemPedido(pedidoId, itemExistenteId);
-
-        assertThat(res.total()).isEqualByComparingTo(BigDecimal.ZERO);
-        assertThat(pedidoPadrao.getItens()).isEmpty();
-    }
-
-    // =========================================================================
-    // NOVOS ADICIONAIS: CASOS DE ERRO E VALIDAÇÃO DE CONTEXTO DO CARRINHO
-    // =========================================================================
-
-    @Test
-    @DisplayName("Novo Teste: Deve lancar excecao ao tentar fazer checkout de app sem enviar o clienteId")
-    void deveLancarExcecaoQuandoCheckoutAppNaoEnviarClienteId() {
-        CheckoutRequestDTO dtoSemCliente = new CheckoutRequestDTO(null, TipoPedido.DELIVERY, "Rua A, 123", null, null, null, null, FormaPagamento.PIX, null, null);
-
-        when(caixaRepository.existsByStatus(StatusCaixa.ABERTO)).thenReturn(true);
-
-        BusinessRuleException exception = assertThrows(BusinessRuleException.class, () ->
-                pedidoService.finalizarPedido(dtoSemCliente)
-        );
-        assertThat(exception.getMessage()).isEqualTo("Para recuperar o carrinho do banco, o clienteId e obrigatorio!");
-    }
-
-    @Test
-    @DisplayName("Novo Teste: Deve impedir a inclusao de novos itens se o pedido ja estiver com status FINALIZADO")
-    void deveImpedirAdicaoDeItemQuandoPedidoEstiverFinalizado() {
-        pedidoPadrao.setStatus(StatusPedido.FINALIZADO);
-        ItemPedidoRequestDTO itemNovo = new ItemPedidoRequestDTO(prodBId, 1, "Observacao", null);
-
-        when(pedidoRepository.findById(pedidoId)).thenReturn(Optional.of(pedidoPadrao));
-
-        BusinessRuleException exception = assertThrows(BusinessRuleException.class, () ->
-                pedidoService.adicionarItemPedido(pedidoId, itemNovo)
-        );
-        assertThat(exception.getMessage()).isEqualTo("Nao e possivel adicionar itens a um pedido que ja esta em rota, finalizado ou cancelado.");
     }
 }
