@@ -1,6 +1,7 @@
 package com.paullomaggio.estevaoLanches.entities;
 
-import com.fasterxml.jackson.annotation.JsonIgnore; // 🚨 Importação necessária
+import com.fasterxml.jackson.annotation.JsonIgnore;
+import com.paullomaggio.estevaoLanches.enums.StatusPagamento;
 import jakarta.persistence.*;
 import lombok.*;
 import java.math.BigDecimal;
@@ -22,7 +23,6 @@ public class ItemPedido {
     @EqualsAndHashCode.Include
     private UUID id;
 
-    // 🚨 A MÁGICA AQUI: O @JsonIgnore impede o loop infinito no JSON
     @JsonIgnore
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "pedido_id", nullable = false)
@@ -33,12 +33,19 @@ public class ItemPedido {
     private Produto produto;
 
     @Column(nullable = false)
-    private Integer quantidade; // Mantido o padrao BR
+    private Integer quantidade;
 
     @Column(nullable = false, precision = 10, scale = 2)
     private BigDecimal precoUnitario;
 
     private String observacaoItem;
+
+    @Column(name = "numero_conta", nullable = false)
+    private Integer numeroConta = 1;
+
+    @Column(name = "status_pagamento", nullable = false)
+    @Enumerated(EnumType.STRING)
+    private StatusPagamento statusPagamento = StatusPagamento.ABERTO;
 
     @ManyToMany(fetch = FetchType.LAZY)
     @JoinTable(
@@ -47,4 +54,14 @@ public class ItemPedido {
             inverseJoinColumns = @JoinColumn(name = "adicional_id")
     )
     private List<Adicional> adicionais = new ArrayList<>();
+
+    // Métodos explícitos para garantir a compilação caso o Lombok falhe
+    public Integer getNumeroConta() { return numeroConta; }
+    public void setNumeroConta(Integer numeroConta) { this.numeroConta = numeroConta; }
+
+    public StatusPagamento getStatusPagamento() { return statusPagamento; }
+    public void setStatusPagamento(StatusPagamento statusPagamento) { this.statusPagamento = statusPagamento; }
+
+    public BigDecimal getPrecoUnitario() { return precoUnitario; }
+    public Integer getQuantidade() { return quantidade; }
 }

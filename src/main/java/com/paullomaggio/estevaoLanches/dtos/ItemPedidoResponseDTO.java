@@ -12,7 +12,9 @@ public record ItemPedidoResponseDTO(
         Integer quantidade,
         BigDecimal precoUnitarioHistorico,
         String observacaoItem,
-        List<ItemPedidoResponseDTO.AdicionalInfo> adicionais
+        List<ItemPedidoResponseDTO.AdicionalInfo> adicionais,
+        Integer numeroConta,      // 👈 Informa ao Caixa/Tablet qual é a conta do item
+        String statusPagamento    // 👈 Informa se está ABERTO ou PAGO
 ) {
     public record AdicionalInfo(UUID id, String nome, BigDecimal preco) {}
 
@@ -25,7 +27,9 @@ public record ItemPedidoResponseDTO(
                 item.getObservacaoItem(),
                 item.getAdicionais().stream()
                         .map(a -> new AdicionalInfo(a.getId(), a.getNome(), a.getPreco()))
-                        .collect(Collectors.toList())
+                        .collect(Collectors.toList()),
+                item.getNumeroConta(),
+                item.getStatusPagamento() != null ? item.getStatusPagamento().name() : "ABERTO"
         );
     }
 }

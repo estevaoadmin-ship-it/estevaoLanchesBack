@@ -73,7 +73,13 @@ public class PedidoService {
             for (var itemDto : dto.itens()) {
                 Produto produto = produtoRepository.findById(itemDto.produtoId())
                         .orElseThrow(() -> new ResourceNotFoundException("Produto nao encontrado: " + itemDto.produtoId()));
+
                 ItemPedido itemPedido = criarItem(pedido, produto, itemDto.quantidade(), itemDto.observacao(), itemDto.adicionaisIds());
+
+                // 💳 Define a comanda filha informada no checkout (ex: tablet do garçom)
+                itemPedido.setNumeroConta(itemDto.numeroConta() != null ? itemDto.numeroConta() : 1);
+                itemPedido.setStatusPagamento(StatusPagamento.ABERTO);
+
                 total = total.add(calcularSubtotal(itemPedido));
                 pedido.getItens().add(itemPedido);
             }
@@ -87,6 +93,11 @@ public class PedidoService {
             pedido.setCliente(carrinho.getCliente());
             for (ItemCarrinho ic : carrinho.getItens()) {
                 ItemPedido itemPedido = criarItem(pedido, ic.getProduto(), ic.getQuantidade(), ic.getObservacao(), null);
+
+                // 💳 Padrão para carrinho convencional: cai na conta principal 1
+                itemPedido.setNumeroConta(1);
+                itemPedido.setStatusPagamento(StatusPagamento.ABERTO);
+
                 total = total.add(calcularSubtotal(itemPedido));
                 pedido.getItens().add(itemPedido);
             }
@@ -163,7 +174,6 @@ public class PedidoService {
 
     @Transactional(readOnly = true)
     public List<PedidoResponseDTO> listarPedidosAtivosMonitor() {
-        // 🛡️ FILTRO ANTIFANTASMA: Garante o fluxo produtivo real limpando o monitor da cozinha
         List<StatusPedido> ativos = Arrays.asList(StatusPedido.RECEBIDO, StatusPedido.EM_PREPARO, StatusPedido.PRONTO);
         return pedidoRepository.findByStatusInOrderByDataHoraAsc(ativos).stream()
                 .map(PedidoResponseDTO::new).collect(Collectors.toList());
@@ -190,8 +200,6 @@ public class PedidoService {
         if (pedido.getStatus() == StatusPedido.FINALIZADO) throw new BusinessRuleException("Pedidos ja finalizados nao podem ser cancelados.");
 
         pedido.setStatus(StatusPedido.CANCELADO);
-
-        // 🛡️ REGRA FINANCEIRA ANTIFANTASMA: Se abandonou sem pagar, cancela o faturamento. Se já pagou, gera estorno.
         pedido.setStatusFinanceiro(pedido.getStatusFinanceiro() == StatusFinanceiro.PAGO ? StatusFinanceiro.ESTORNADO : StatusFinanceiro.CANCELADO);
 
         return new PedidoResponseDTO(pedidoRepository.save(pedido));
@@ -203,10 +211,24 @@ public class PedidoService {
                 .orElseThrow(() -> new ResourceNotFoundException("Pedido nao encontrado."));
         validarEdicaoPedido(pedido);
 
+        // 💳 BLINDAGEM DA CONTA FRACIONADA: Valida se o grupo específico daquela conta filha já foi pago
+        boolean contaJaPaga = pedido.getItens().stream()
+                .filter(i -> i.getNumeroConta() != null && i.getNumeroConta().equals(dto.numeroConta()))
+                .anyMatch(i -> i.getStatusPagamento() == StatusPagamento.PAGO);
+
+        if (contaJaPaga) {
+            throw new BusinessRuleException("Operacao Negada! A comanda filha informada (Conta " + dto.numeroConta() + ") ja foi paga e encerrada no caixa.");
+        }
+
         Produto produto = produtoRepository.findById(dto.produtoId())
                 .orElseThrow(() -> new ResourceNotFoundException("Produto nao encontrado no cardapio."));
 
         ItemPedido novoItem = criarItem(pedido, produto, dto.quantidade(), dto.observacao(), dto.adicionaisIds());
+
+        // Assegura que o novo item receba as propriedades da conta fracionada
+        novoItem.setNumeroConta(dto.numeroConta() != null ? dto.numeroConta() : 1);
+        novoItem.setStatusPagamento(StatusPagamento.ABERTO);
+
         pedido.getItens().add(novoItem);
         pedido.setTotal(pedido.getTotal().add(calcularSubtotal(novoItem)));
 
@@ -223,6 +245,11 @@ public class PedidoService {
                 .filter(item -> item.getId().equals(itemId)).findFirst()
                 .orElseThrow(() -> new ResourceNotFoundException("Item nao encontrado nesta comanda."));
 
+        // Impedir a remoção de itens de uma subconta que já foi paga de forma isolada
+        if (itemParaRemover.getStatusPagamento() == StatusPagamento.PAGO) {
+            throw new BusinessRuleException("Nao e possivel remover um item de uma comanda filha que ja foi paga.");
+        }
+
         pedido.setTotal(pedido.getTotal().subtract(calcularSubtotal(itemParaRemover)));
         pedido.getItens().remove(itemParaRemover);
 
@@ -238,6 +265,10 @@ public class PedidoService {
         ItemPedido item = pedido.getItens().stream()
                 .filter(i -> i.getId().equals(itemId)).findFirst()
                 .orElseThrow(() -> new ResourceNotFoundException("Item nao encontrado nesta comanda."));
+
+        if (item.getStatusPagamento() == StatusPagamento.PAGO) {
+            throw new BusinessRuleException("Nao e possivel alterar os adicionais de um item pertencente a uma comanda filha ja paga.");
+        }
 
         pedido.setTotal(pedido.getTotal().subtract(calcularSubtotal(item)));
         item.setAdicionais(adicionalRepository.findAllById(adicionaisIds));

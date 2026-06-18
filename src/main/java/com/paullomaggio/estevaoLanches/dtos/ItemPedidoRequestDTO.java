@@ -15,5 +15,14 @@ public record ItemPedidoRequestDTO(
 
         String observacao,
 
-        List<UUID> adicionaisIds // Adicionado para permitir a insercao de adicionais na edicao por telefone
-) {}
+        List<UUID> adicionaisIds,
+
+        Integer numeroConta // 👈 Amarra o item à comanda filha no lançamento
+) {
+        // Construtor compacto para definir a Conta 1 como padrão caso venha nulo
+        public ItemPedidoRequestDTO {
+                if (numeroConta == null) {
+                        numeroConta = 1;
+                }
+        }
+}

@@ -8,6 +8,7 @@ import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
+import java.math.BigDecimal; // 👈 IMPORTAÇÃO QUE FALTAVA CORRIGIDA AQUI
 import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
@@ -45,7 +46,7 @@ public class CaixaController {
     }
 
     // ==========================================
-    // 🚀 NOVAS ROTAS DO LIVRO-RAZÃO E AUDITORIA
+    // 🚀 ROTAS DO LIVRO-RAZÃO E AUDITORIA
     // ==========================================
 
     @PostMapping("/sangria")
@@ -80,5 +81,20 @@ public class CaixaController {
         return ResponseEntity.ok(Map.of("message", "Caixa reaberto com sucesso pelo Administrador!"));
     }
 
-    // 💡 Dica: Se quiser depois, podemos criar o endpoint @GetMapping("/{id}/movimentacoes") para listar o extrato do dia!
+    // ==========================================
+    // 💳 ROTAS DE CONTAS FRACIONADAS
+    // ==========================================
+
+    @GetMapping("/pedido/{pedidoId}/conta/{numeroConta}/saldo")
+    public ResponseEntity<BigDecimal> obterSaldo(@PathVariable UUID pedidoId, @PathVariable Integer numeroConta) {
+        return ResponseEntity.ok(caixaService.calcularSaldoDevedorDaConta(pedidoId, numeroConta));
+    }
+
+    @PostMapping("/pedido/{pedidoId}/pagar-fracionado")
+    public ResponseEntity<Map<String, String>> pagarFracionado(
+            @PathVariable UUID pedidoId,
+            @RequestBody @Valid ContaPagamentoRequestDTO dto) {
+        caixaService.registrarPagamentoFracionado(pedidoId, dto);
+        return ResponseEntity.ok(Map.of("message", "Pagamento processado com sucesso!"));
+    }
 }

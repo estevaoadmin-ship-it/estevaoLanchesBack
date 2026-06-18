@@ -4,7 +4,6 @@ import com.paullomaggio.estevaoLanches.dtos.*;
 import com.paullomaggio.estevaoLanches.entities.*;
 import com.paullomaggio.estevaoLanches.enums.*;
 import com.paullomaggio.estevaoLanches.exceptions.BusinessRuleException;
-import com.paullomaggio.estevaoLanches.exceptions.ResourceNotFoundException;
 import com.paullomaggio.estevaoLanches.repositories.*;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -18,7 +17,6 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
-import java.util.Collections;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
@@ -35,8 +33,6 @@ class PedidoServiceTest {
     @Mock private CarrinhoRepository carrinhoRepository;
     @Mock private CaixaRepository caixaRepository;
     @Mock private ProdutoRepository produtoRepository;
-    @Mock private ClienteRepository clienteRepository;
-    @Mock private AdicionalRepository adicionalRepository;
     @Mock private FilaImpressaoRepository filaImpressaoRepository;
 
     @InjectMocks
@@ -86,6 +82,8 @@ class PedidoServiceTest {
         itemPedidoExistente.setQuantidade(2);
         itemPedidoExistente.setPrecoUnitario(new BigDecimal("10.00"));
         itemPedidoExistente.setPedido(pedidoPadrao);
+        itemPedidoExistente.setNumeroConta(1);
+        itemPedidoExistente.setStatusPagamento(StatusPagamento.ABERTO);
         pedidoPadrao.getItens().add(itemPedidoExistente);
     }
 
@@ -108,14 +106,13 @@ class PedidoServiceTest {
         assertThat(resultado.statusFinanceiro()).isEqualTo(StatusFinanceiro.PAGO);
         assertThat(carrinho.getItens()).isEmpty();
 
-        // Blindagem: Como já foi pago, deve mandar pra cozinha e gerar recibo
         verify(filaImpressaoRepository, times(2)).save(any(FilaImpressao.class));
     }
 
     @Test
     @DisplayName("Checkout Venda Rápida (Balcão): Deve gerar pedido ignorando o carrinho e enviando para impressão")
     void deveCriarRegistroNaFilaAoFinalizarVendaRapida() {
-        List<ItemPedidoRequestDTO> itensAvulsos = List.of(new ItemPedidoRequestDTO(prodAId, 1, null, null));
+        List<ItemPedidoRequestDTO> itensAvulsos = List.of(new ItemPedidoRequestDTO(prodAId, 1, null, null, 1));
         CheckoutRequestDTO dtoVendaRapida = new CheckoutRequestDTO(
                 null, TipoPedido.RETIRADA, null, null, null,
                 "Cliente Balcao", null, FormaPagamento.PIX, new BigDecimal("10.00"), itensAvulsos
@@ -130,9 +127,8 @@ class PedidoServiceTest {
         assertThat(resultado.statusFinanceiro()).isEqualTo(StatusFinanceiro.PAGO);
         assertThat(resultado.total()).isEqualByComparingTo(new BigDecimal("10.00"));
 
-        // Verifica se a fila foi chamada para salvar (Cozinha + Recibo por ser PAGO)
         verify(filaImpressaoRepository, times(2)).save(any(FilaImpressao.class));
-        verify(carrinhoRepository, never()).findByClienteId(any()); // Não pode ter tocado no carrinho
+        verify(carrinhoRepository, never()).findByClienteId(any());
     }
 
     @Test
@@ -147,7 +143,6 @@ class PedidoServiceTest {
         PedidoResponseDTO resultado = pedidoService.finalizarPedido(dtoMesa);
 
         assertThat(resultado.statusFinanceiro()).isEqualTo(StatusFinanceiro.AGUARDANDO_PAGAMENTO);
-        // Verifica se apenas 1 impressão foi gerada (Cozinha)
         verify(filaImpressaoRepository, times(1)).save(any(FilaImpressao.class));
     }
 
@@ -178,7 +173,6 @@ class PedidoServiceTest {
         assertThat(res.statusFinanceiro()).isEqualTo(StatusFinanceiro.PAGO);
         assertThat(res.formaPagamento()).isEqualTo(FormaPagamento.PIX);
 
-        // Blindagem: Garante que o recibo foi enviado para a fila
         verify(filaImpressaoRepository, times(1)).save(any(FilaImpressao.class));
     }
 
@@ -222,7 +216,6 @@ class PedidoServiceTest {
         assertThat(res.status()).isEqualTo(StatusPedido.CANCELADO);
         assertThat(res.statusFinanceiro()).isEqualTo(StatusFinanceiro.ESTORNADO);
 
-        // Blindagem: Cancelamento não deve cuspir papel na impressora
         verify(filaImpressaoRepository, never()).save(any(FilaImpressao.class));
     }
 
@@ -237,7 +230,6 @@ class PedidoServiceTest {
 
         PedidoResponseDTO res = pedidoService.cancelarPedido(pedidoId);
 
-        // Garante que some das queries de faturamento baseadas em StatusFinanceiro.PAGO
         assertThat(res.status()).isEqualTo(StatusPedido.CANCELADO);
         assertThat(res.statusFinanceiro()).isEqualTo(StatusFinanceiro.CANCELADO);
     }
@@ -259,7 +251,7 @@ class PedidoServiceTest {
     @Test
     @DisplayName("Adicionar Item: Deve recalcular o Total corretamente")
     void deveAdicionarItemERecalcularTotal() {
-        ItemPedidoRequestDTO novoItem = new ItemPedidoRequestDTO(prodBId, 1, "Adicional", null);
+        ItemPedidoRequestDTO novoItem = new ItemPedidoRequestDTO(prodBId, 1, "Adicional", null, 1);
 
         when(pedidoRepository.findById(pedidoId)).thenReturn(Optional.of(pedidoPadrao));
         when(produtoRepository.findById(prodBId)).thenReturn(Optional.of(prodB));
@@ -275,7 +267,7 @@ class PedidoServiceTest {
     @DisplayName("Adicionar Item Falha: Deve bloquear alteração de pedido ja PAGO")
     void deveImpedirEdicaoDeItensSePedidoEstiverPago() {
         pedidoPadrao.setStatusFinanceiro(StatusFinanceiro.PAGO);
-        ItemPedidoRequestDTO novoItem = new ItemPedidoRequestDTO(prodBId, 1, null, null);
+        ItemPedidoRequestDTO novoItem = new ItemPedidoRequestDTO(prodBId, 1, null, null, 1);
 
         when(pedidoRepository.findById(pedidoId)).thenReturn(Optional.of(pedidoPadrao));
 
@@ -317,12 +309,98 @@ class PedidoServiceTest {
 
         assertThat(resultado).hasSize(1);
 
-        // Garante que o monitor busca exatamente as etapas de produção física na cozinha
         List<StatusPedido> statusEnviados = statusCaptor.getValue();
         assertThat(statusEnviados).containsExactlyInAnyOrder(
                 StatusPedido.RECEBIDO,
                 StatusPedido.EM_PREPARO,
                 StatusPedido.PRONTO
         );
+    }
+
+    // =========================================================================
+    // 6. TESTES DE INTEGRAÇÃO E REGRAS DE CONTAS FRACIONADAS
+    // =========================================================================
+
+    @Test
+    @DisplayName("Contas Fracionadas: Deve permitir criar venda balcão com itens em comandas filhas diferentes")
+    void deveCriarPedidoComMultiplasContasNoCheckout() {
+        ItemPedidoRequestDTO itemJoao = new ItemPedidoRequestDTO(prodAId, 1, "Para o João", null, 1);
+        ItemPedidoRequestDTO itemPedro = new ItemPedidoRequestDTO(prodBId, 1, "Para o Pedro", null, 2);
+
+        List<ItemPedidoRequestDTO> itensAvulsos = List.of(itemJoao, itemPedro);
+        CheckoutRequestDTO dto = new CheckoutRequestDTO(
+                null, TipoPedido.RETIRADA, null, null, null,
+                "Pedro e Joao Balcao", null, FormaPagamento.PIX, new BigDecimal("30.00"), itensAvulsos
+        );
+
+        when(caixaRepository.existsByStatus(StatusCaixa.ABERTO)).thenReturn(true);
+        when(produtoRepository.findById(prodAId)).thenReturn(Optional.of(prodA));
+        when(produtoRepository.findById(prodBId)).thenReturn(Optional.of(prodB));
+        when(pedidoRepository.save(any(Pedido.class))).thenAnswer(i -> i.getArgument(0));
+
+        PedidoResponseDTO resultado = pedidoService.finalizarPedido(dto);
+
+        assertThat(resultado.statusFinanceiro()).isEqualTo(StatusFinanceiro.PAGO);
+        assertThat(resultado.total()).isEqualByComparingTo(new BigDecimal("30.00"));
+    }
+
+    @Test
+    @DisplayName("Contas Fracionadas: Deve adicionar item direcionando para a comanda filha informada")
+    void deveAdicionarItemEmContaEspecificaERecalcularTotalGeral() {
+        ItemPedidoRequestDTO novoItemPedro = new ItemPedidoRequestDTO(prodBId, 1, "Adicionar na Conta do Pedro", null, 2);
+
+        when(pedidoRepository.findById(pedidoId)).thenReturn(Optional.of(pedidoPadrao));
+        when(produtoRepository.findById(prodBId)).thenReturn(Optional.of(prodB));
+        when(pedidoRepository.save(any(Pedido.class))).thenAnswer(i -> i.getArgument(0));
+
+        PedidoResponseDTO res = pedidoService.adicionarItemPedido(pedidoId, novoItemPedro);
+
+        assertThat(res.total()).isEqualByComparingTo(new BigDecimal("40.00"));
+        assertThat(pedidoPadrao.getItens()).hasSize(2);
+    }
+
+    @Test
+    @DisplayName("Contas Fracionadas: Deve bloquear a adição de lanches caso a comanda filha informada já tenha sido quitada")
+    void deveImpedirAdicaoDeItemSeAqueleNumeroDeContaJaEstiverPago() {
+        itemPedidoExistente.setNumeroConta(1);
+        itemPedidoExistente.setStatusPagamento(StatusPagamento.PAGO);
+
+        ItemPedidoRequestDTO novoItemContaFechada = new ItemPedidoRequestDTO(prodBId, 1, "Burlar conta já paga", null, 1);
+
+
+        when(pedidoRepository.findById(pedidoId)).thenReturn(Optional.of(pedidoPadrao));
+
+        BusinessRuleException exception = assertThrows(BusinessRuleException.class, () ->
+                pedidoService.adicionarItemPedido(pedidoId, novoItemContaFechada)
+        );
+        assertThat(exception.getMessage()).containsIgnoringCase("paga");
+    }
+
+    @Test
+    @DisplayName("Contas Fracionadas: Deve impedir a remoção de um item caso a comanda filha já tenha sido paga")
+    void deveImpedirRemocaoDeItemSeContaJaEstiverPago() {
+        itemPedidoExistente.setNumeroConta(1);
+        itemPedidoExistente.setStatusPagamento(StatusPagamento.PAGO); // Conta já paga
+
+        when(pedidoRepository.findById(pedidoId)).thenReturn(Optional.of(pedidoPadrao));
+
+        BusinessRuleException exception = assertThrows(BusinessRuleException.class, () ->
+                pedidoService.removerItemPedido(pedidoId, itemPedidoExistente.getId())
+        );
+        assertThat(exception.getMessage()).containsIgnoringCase("paga");
+    }
+
+    @Test
+    @DisplayName("Contas Fracionadas: Deve impedir a atualização de adicionais se a comanda filha já tiver sido paga")
+    void deveImpedirAtualizacaoDeAdicionaisSeContaJaEstiverPago() {
+        itemPedidoExistente.setNumeroConta(1);
+        itemPedidoExistente.setStatusPagamento(StatusPagamento.PAGO); // Conta já paga
+
+        when(pedidoRepository.findById(pedidoId)).thenReturn(Optional.of(pedidoPadrao));
+
+        BusinessRuleException exception = assertThrows(BusinessRuleException.class, () ->
+                pedidoService.atualizarAdicionaisDoItem(pedidoId, itemPedidoExistente.getId(), List.of(UUID.randomUUID()))
+        );
+        assertThat(exception.getMessage()).containsIgnoringCase("paga");
     }
 }

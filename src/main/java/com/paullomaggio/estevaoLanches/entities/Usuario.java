@@ -64,4 +64,8 @@ public class Usuario implements UserDetails {
 
     @Override
     public boolean isEnabled() { return this.ativo; }
+
+    public void setLogin(String estevao) {
+
+    }
 }

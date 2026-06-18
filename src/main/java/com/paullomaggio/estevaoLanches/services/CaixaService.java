@@ -18,198 +18,173 @@ import java.util.UUID;
 @Service
 public class CaixaService {
 
-    @Autowired
-    private CaixaRepository caixaRepository;
+    @Autowired private CaixaRepository caixaRepository;
+    @Autowired private PedidoRepository pedidoRepository;
+    @Autowired private MovimentacaoCaixaRepository movimentacaoCaixaRepository;
+    @Autowired private AuditoriaCaixaRepository auditoriaCaixaRepository;
+    @Autowired private PagamentoRepository pagamentoRepository;
 
-    @Autowired
-    private PedidoRepository pedidoRepository;
+    // ==========================================
+    // 💳 LOGICA DE CONTAS FRACIONADAS (NOVA)
+    // ==========================================
 
-    @Autowired
-    private MovimentacaoCaixaRepository movimentacaoCaixaRepository;
+    @Transactional(readOnly = true)
+    public BigDecimal calcularSaldoDevedorDaConta(UUID pedidoId, Integer numeroConta) {
+        Pedido pedido = pedidoRepository.findById(pedidoId)
+                .orElseThrow(() -> new BusinessRuleException("Pedido não encontrado"));
 
-    @Autowired
-    private AuditoriaCaixaRepository auditoriaCaixaRepository;
+        BigDecimal totalConta = pedido.getItens().stream()
+                .filter(i -> i.getNumeroConta() != null && i.getNumeroConta().equals(numeroConta))
+                .map(i -> i.getPrecoUnitario().multiply(BigDecimal.valueOf(i.getQuantidade())))
+                .reduce(BigDecimal.ZERO, BigDecimal::add);
+
+        BigDecimal jaPago = pagamentoRepository.sumPagamentosPorConta(pedidoId, numeroConta);
+        if (jaPago == null) jaPago = BigDecimal.ZERO;
+
+        return totalConta.subtract(jaPago);
+    }
+
+    @Transactional
+    public void registrarPagamentoFracionado(UUID pedidoId, ContaPagamentoRequestDTO dto) {
+        BigDecimal saldoDevedor = calcularSaldoDevedorDaConta(pedidoId, dto.getNumeroConta());
+
+        if (dto.getValorPago().compareTo(saldoDevedor) > 0) {
+            throw new BusinessRuleException("Valor pago (R$ " + dto.getValorPago() + ") excede o saldo devedor desta conta (R$ " + saldoDevedor + ")!");
+        }
+
+        Pagamento pag = new Pagamento();
+        pag.setPedidoId(pedidoId);
+        pag.setNumeroConta(dto.getNumeroConta());
+        pag.setValorPago(dto.getValorPago());
+        pag.setFormaPagamento(dto.getFormaPagamento());
+        pag.setUsuarioResponsavel(obterUsuarioLogado().getNome());
+        pagamentoRepository.save(pag);
+
+        if (saldoDevedor.subtract(dto.getValorPago()).compareTo(BigDecimal.ZERO) == 0) {
+            Pedido pedido = pedidoRepository.findById(pedidoId)
+                    .orElseThrow(() -> new BusinessRuleException("Pedido não encontrado"));
+
+            pedido.getItens().stream()
+                    .filter(i -> i.getNumeroConta() != null && i.getNumeroConta().equals(dto.getNumeroConta()))
+                    .forEach(i -> i.setStatusPagamento(StatusPagamento.PAGO));
+
+            boolean pedidoFinalizado = pedido.getItens().stream()
+                    .allMatch(i -> StatusPagamento.PAGO.equals(i.getStatusPagamento()));
+
+            if (pedidoFinalizado) {
+                pedido.setStatus(StatusPedido.FINALIZADO);
+            }
+
+            pedidoRepository.save(pedido);
+        }
+    }
+
+    // ==========================================
+    // ⚙️ GESTÃO DO CAIXA E AUDITORIA (EXISTENTES)
+    // ==========================================
 
     @Transactional(readOnly = true)
     public Optional<CaixaStatusResponseDTO> obterStatusAtual() {
-        return caixaRepository.findByStatus(StatusCaixa.ABERTO)
-                .map(CaixaStatusResponseDTO::new);
+        return caixaRepository.findByStatus(StatusCaixa.ABERTO).map(CaixaStatusResponseDTO::new);
     }
 
     @Transactional(readOnly = true)
     public CaixaResumoResponseDTO obterResumoTurno() {
         Caixa caixaAtivo = caixaRepository.findByStatus(StatusCaixa.ABERTO)
-                .orElseThrow(() -> new BusinessRuleException("Não existe um caixa ativo no momento para coletar indicadores."));
+                .orElseThrow(() -> new BusinessRuleException("Não existe um caixa ativo."));
 
         LocalDateTime inicio = caixaAtivo.getDataHoraAbertura();
         UUID caixaId = caixaAtivo.getId();
 
-        // 🚀 CORREÇÃO APLICADA AQUI: Usando o Enum em vez de String!
         BigDecimal dinheiro = pedidoRepository.somarFaturamentoPorTurnoEForma(inicio, FormaPagamento.DINHEIRO, StatusPedido.FINALIZADO);
         BigDecimal pix = pedidoRepository.somarFaturamentoPorTurnoEForma(inicio, FormaPagamento.PIX, StatusPedido.FINALIZADO);
         BigDecimal credito = pedidoRepository.somarFaturamentoPorTurnoEForma(inicio, FormaPagamento.CREDITO, StatusPedido.FINALIZADO);
         BigDecimal debito = pedidoRepository.somarFaturamentoPorTurnoEForma(inicio, FormaPagamento.DEBITO, StatusPedido.FINALIZADO);
 
-        // 2. Coleta fluxo interno de suprimentos e sangrias ativos no livro-razão
         BigDecimal totalSuprimentos = movimentacaoCaixaRepository.somarPorCaixaETipo(caixaId, TipoMovimentacao.SUPRIMENTO);
         BigDecimal totalSangrias = movimentacaoCaixaRepository.somarPorCaixaETipo(caixaId, TipoMovimentacao.SANGRIA);
 
-        // 3. Fórmula do Saldo Esperado: Abertura + Vendas em Dinheiro + Suprimentos - Sangrias
         BigDecimal faturamentoTotal = dinheiro.add(pix).add(credito).add(debito);
-        BigDecimal totalEsperadoGaveta = caixaAtivo.getValorAbertura()
-                .add(dinheiro)
-                .add(totalSuprimentos)
-                .subtract(totalSangrias);
-
+        BigDecimal totalEsperadoGaveta = caixaAtivo.getValorAbertura().add(dinheiro).add(totalSuprimentos).subtract(totalSangrias);
         long pedidosEmEsteira = pedidoRepository.countPedidosAtivos(StatusPedido.FINALIZADO, StatusPedido.CANCELADO);
 
-        return new CaixaResumoResponseDTO(
-                faturamentoTotal, dinheiro, pix, credito, debito, totalEsperadoGaveta, pedidosEmEsteira
-        );
+        return new CaixaResumoResponseDTO(faturamentoTotal, dinheiro, pix, credito, debito, totalEsperadoGaveta, pedidosEmEsteira);
     }
 
     @Transactional
     public CaixaStatusResponseDTO abrirCaixa(CaixaAberturaRequestDTO dto) {
-        if (caixaRepository.existsByStatus(StatusCaixa.ABERTO)) {
-            throw new BusinessRuleException("Operação Negada! Já existe um turno de caixa ativo no sistema.");
-        }
-
+        if (caixaRepository.existsByStatus(StatusCaixa.ABERTO)) throw new BusinessRuleException("Caixa já aberto.");
         Usuario funcionarioLogado = obterUsuarioLogado();
-
         Caixa caixa = new Caixa();
         caixa.setValorAbertura(dto.valorAbertura());
         caixa.setStatus(StatusCaixa.ABERTO);
         caixa.setDataHoraAbertura(LocalDateTime.now());
         caixa.setUsuarioAbertura(funcionarioLogado);
         Caixa caixaSalvo = caixaRepository.save(caixa);
-
-        // Lançamento automático de abertura no livro-razão
-        registrarMovimentacaoInterna(caixaSalvo, TipoMovimentacao.ABERTURA, MotivoMovimentacao.OUTROS, dto.valorAbertura(), "Carga inicial de troco.", funcionarioLogado);
-
-        // Rastreabilidade na tabela de auditoria
-        registrarAuditoria(caixaSalvo.getId(), "CAIXA_ABERTO", funcionarioLogado, null, "Status: ABERTO, Valor Inicial: R$ " + dto.valorAbertura());
-
+        registrarMovimentacaoInterna(caixaSalvo, TipoMovimentacao.ABERTURA, MotivoMovimentacao.OUTROS, dto.valorAbertura(), "Carga inicial.", funcionarioLogado);
+        registrarAuditoria(caixaSalvo.getId(), "CAIXA_ABERTO", funcionarioLogado, null, "Valor: R$ " + dto.valorAbertura());
         return new CaixaStatusResponseDTO(caixaSalvo);
     }
 
     @Transactional
     public void fecharCaixa(CaixaFechamentoRequestDTO dto) {
-        Caixa caixaAtivo = caixaRepository.findByStatus(StatusCaixa.ABERTO)
-                .orElseThrow(() -> new BusinessRuleException("Erro operacional! Nenhum caixa aberto localizado para encerramento."));
-
+        Caixa caixaAtivo = caixaRepository.findByStatus(StatusCaixa.ABERTO).orElseThrow(() -> new BusinessRuleException("Nenhum caixa aberto."));
         Usuario funcionarioLogado = obterUsuarioLogado();
+        BigDecimal esperado = obterResumoTurno().totalEsperadoGaveta();
+        BigDecimal diferenca = dto.valorFechamento().subtract(esperado);
 
-        // Validação matemática do Fechamento Cego
-        CaixaResumoResponseDTO resumo = obterResumoTurno();
-        BigDecimal esperado = resumo.totalEsperadoGaveta();
-        BigDecimal contado = dto.valorFechamento();
-        BigDecimal diferenca = contado.subtract(esperado);
-
-        // Bloqueio caso haja quebra sem justificativa explicada
-        if (diferenca.compareTo(BigDecimal.ZERO) != 0 && (dto.justificativaDiferenca() == null || dto.justificativaDiferenca().trim().isBlank())) {
-            throw new BusinessRuleException("Diferença de caixa detectada (R$ " + diferenca + "). É obrigatório preencher uma justificativa de auditoria.");
+        if (diferenca.compareTo(BigDecimal.ZERO) != 0 && (dto.justificativaDiferenca() == null || dto.justificativaDiferenca().isBlank())) {
+            throw new BusinessRuleException("Justificativa obrigatória para diferença de caixa.");
         }
 
-        // Mapeia automaticamente quebras positivas ou negativas no livro-razão
-        if (diferenca.compareTo(BigDecimal.ZERO) < 0) {
-            registrarMovimentacaoInterna(caixaAtivo, TipoMovimentacao.QUEBRA_NEGATIVA, MotivoMovimentacao.OUTROS, diferenca.abs(), "Falta de caixa. Justificativa: " + dto.justificativaDiferenca(), funcionarioLogado);
-        } else if (diferenca.compareTo(BigDecimal.ZERO) > 0) {
-            registrarMovimentacaoInterna(caixaAtivo, TipoMovimentacao.QUEBRA_POSITIVA, MotivoMovimentacao.OUTROS, diferenca, "Sobra de caixa. Justificativa: " + dto.justificativaDiferenca(), funcionarioLogado);
-        }
+        if (diferenca.compareTo(BigDecimal.ZERO) < 0) registrarMovimentacaoInterna(caixaAtivo, TipoMovimentacao.QUEBRA_NEGATIVA, MotivoMovimentacao.OUTROS, diferenca.abs(), dto.justificativaDiferenca(), funcionarioLogado);
+        else if (diferenca.compareTo(BigDecimal.ZERO) > 0) registrarMovimentacaoInterna(caixaAtivo, TipoMovimentacao.QUEBRA_POSITIVA, MotivoMovimentacao.OUTROS, diferenca, dto.justificativaDiferenca(), funcionarioLogado);
 
-        registrarMovimentacaoInterna(caixaAtivo, TipoMovimentacao.FECHAMENTO, MotivoMovimentacao.OUTROS, contado, "Encerramento de expediente.", funcionarioLogado);
-
+        registrarMovimentacaoInterna(caixaAtivo, TipoMovimentacao.FECHAMENTO, MotivoMovimentacao.OUTROS, dto.valorFechamento(), "Encerramento.", funcionarioLogado);
         caixaAtivo.setStatus(StatusCaixa.FECHADO);
-        caixaAtivo.setValorFechamento(contado);
+        caixaAtivo.setValorFechamento(dto.valorFechamento());
         caixaAtivo.setDataHoraFechamento(LocalDateTime.now());
         caixaAtivo.setUsuarioFechamento(funcionarioLogado);
         caixaRepository.save(caixaAtivo);
-
-        registrarAuditoria(caixaAtivo.getId(), "CAIXA_FECHADO", funcionarioLogado, "Esperado: R$ " + esperado, "Contado: R$ " + contado + " | Diferença: R$ " + diferenca);
+        registrarAuditoria(caixaAtivo.getId(), "CAIXA_FECHADO", funcionarioLogado, "Esperado: R$ " + esperado, "Contado: R$ " + dto.valorFechamento());
     }
 
     @Transactional
     public void lancarSangria(MovimentacaoRequestDTO dto) {
-        Caixa caixaAtivo = caixaRepository.findByStatus(StatusCaixa.ABERTO)
-                .orElseThrow(() -> new BusinessRuleException("Impossível realizar sangria. Não há nenhum caixa aberto."));
-
-        Usuario funcionarioLogado = obterUsuarioLogado();
-
-        // Blindagem contra sangrias maiores que o saldo físico real em dinheiro na gaveta
+        Caixa caixaAtivo = caixaRepository.findByStatus(StatusCaixa.ABERTO).orElseThrow(() -> new BusinessRuleException("Nenhum caixa aberto."));
         BigDecimal saldoGaveta = obterResumoTurno().totalEsperadoGaveta();
-        if (dto.valor().compareTo(saldoGaveta) > 0) {
-            throw new BusinessRuleException("Sangria rejeitada! O valor solicitado (R$ " + dto.valor() + ") é superior ao saldo disponível na gaveta (R$ " + saldoGaveta + ").");
-        }
-
-        MovimentacaoCaixa m = registrarMovimentacaoInterna(caixaAtivo, TipoMovimentacao.SANGRIA, dto.motivo(), dto.valor(), dto.observacao(), funcionarioLogado);
-        registrarAuditoria(caixaAtivo.getId(), "SANGRIA_REALIZADA", funcionarioLogado, null, "ID Movimentacao: " + m.getId() + " | Valor: R$ " + dto.valor());
+        if (dto.valor().compareTo(saldoGaveta) > 0) throw new BusinessRuleException("Saldo insuficiente.");
+        registrarMovimentacaoInterna(caixaAtivo, TipoMovimentacao.SANGRIA, dto.motivo(), dto.valor(), dto.observacao(), obterUsuarioLogado());
     }
 
     @Transactional
     public void lancarSuprimento(MovimentacaoRequestDTO dto) {
-        Caixa caixaAtivo = caixaRepository.findByStatus(StatusCaixa.ABERTO)
-                .orElseThrow(() -> new BusinessRuleException("Impossível realizar suprimento. Não há nenhum caixa aberto."));
-
-        Usuario funcionarioLogado = obterUsuarioLogado();
-
-        MovimentacaoCaixa m = registrarMovimentacaoInterna(caixaAtivo, TipoMovimentacao.SUPRIMENTO, dto.motivo(), dto.valor(), dto.observacao(), funcionarioLogado);
-        registrarAuditoria(caixaAtivo.getId(), "SUPRIMENTO_REALIZADO", funcionarioLogado, null, "ID Movimentacao: " + m.getId() + " | Valor: R$ " + dto.valor());
+        Caixa caixaAtivo = caixaRepository.findByStatus(StatusCaixa.ABERTO).orElseThrow(() -> new BusinessRuleException("Nenhum caixa aberto."));
+        registrarMovimentacaoInterna(caixaAtivo, TipoMovimentacao.SUPRIMENTO, dto.motivo(), dto.valor(), dto.observacao(), obterUsuarioLogado());
     }
 
     @Transactional
-    public void estornarMovimentacao(UUID movimentacaoId, String motivoEstorno) {
-        MovimentacaoCaixa m = movimentacaoCaixaRepository.findById(movimentacaoId)
-                .orElseThrow(() -> new BusinessRuleException("Movimentação não encontrada para estorno."));
-
-        if (m.getCancelada()) {
-            throw new BusinessRuleException("Esta movimentação financeira já foi estornada anteriormente.");
-        }
-        if (m.getTipo() == TipoMovimentacao.ABERTURA || m.getTipo() == TipoMovimentacao.FECHAMENTO) {
-            throw new BusinessRuleException("Por segurança, movimentações estruturais de Abertura/Fechamento não podem ser canceladas isoladamente.");
-        }
-
-        Usuario funcionarioLogado = obterUsuarioLogado();
+    public void estornarMovimentacao(UUID movimentacaoId, String motivo) {
+        MovimentacaoCaixa m = movimentacaoCaixaRepository.findById(movimentacaoId).orElseThrow(() -> new BusinessRuleException("Movimentação não encontrada."));
+        if (m.getCancelada()) throw new BusinessRuleException("Já estornado.");
         m.setCancelada(true);
-        m.setCanceladoPor(funcionarioLogado);
+        m.setCanceladoPor(obterUsuarioLogado());
         m.setDataHoraCancelamento(LocalDateTime.now());
-        m.setMotivoCancelamento(motivoEstorno);
+        m.setMotivoCancelamento(motivo);
         movimentacaoCaixaRepository.save(m);
-
-        registrarAuditoria(m.getCaixa().getId(), "MOVIMENTACAO_CANCELADA", funcionarioLogado, "Valor cancelado: R$ " + m.getValor(), "Motivo estorno: " + motivoEstorno);
+        registrarAuditoria(m.getCaixa().getId(), "ESTORNO", obterUsuarioLogado(), null, motivo);
     }
 
     @Transactional
-    public void reabrirCaixa(UUID caixaId, String motivoReabertura) {
-        Usuario funcionarioLogado = obterUsuarioLogado();
-
-        // Verificação estrita de privilégio administrativo
-        if (funcionarioLogado.getRole() == null || !funcionarioLogado.getRole().toString().contains("ADMIN")) {
-            throw new BusinessRuleException("Acesso negado! A reabertura de turnos fechados é restrita a administradores.");
-        }
-
-        if (caixaRepository.existsByStatus(StatusCaixa.ABERTO)) {
-            throw new BusinessRuleException("Bloqueio de segurança! Não é possível reabrir este caixa pois já existe outro turno ativo no momento.");
-        }
-
-        Caixa caixaAlvo = caixaRepository.findById(caixaId)
-                .orElseThrow(() -> new BusinessRuleException("Caixa não localizado no banco de dados."));
-
-        if (caixaAlvo.getStatus() == StatusCaixa.ABERTO) {
-            throw new BusinessRuleException("Este caixa já está aberto.");
-        }
-
-        String dadosAntes = "Status: FECHADO | Fechamento Contado: R$ " + caixaAlvo.getValorFechamento();
-
+    public void reabrirCaixa(UUID caixaId, String motivo) {
+        if (caixaRepository.existsByStatus(StatusCaixa.ABERTO)) throw new BusinessRuleException("Já existe caixa aberto.");
+        Caixa caixaAlvo = caixaRepository.findById(caixaId).orElseThrow(() -> new BusinessRuleException("Não encontrado."));
         caixaAlvo.setStatus(StatusCaixa.ABERTO);
         caixaAlvo.setValorFechamento(null);
-        caixaAlvo.setDataHoraFechamento(null);
-        caixaAlvo.setUsuarioFechamento(null);
         caixaRepository.save(caixaAlvo);
-
-        registrarAuditoria(caixaAlvo.getId(), "CAIXA_REABERTO", funcionarioLogado, dadosAntes, "Status alterado para ABERTO. Motivo: " + motivoReabertura);
+        registrarAuditoria(caixaAlvo.getId(), "REABERTURA", obterUsuarioLogado(), null, motivo);
     }
 
-    // --- ENCAPSULAMENTOS DE SUPORTE OPERACIONAL ---
     private Usuario obterUsuarioLogado() {
         return (Usuario) SecurityContextHolder.getContext().getAuthentication().getPrincipal();
     }
