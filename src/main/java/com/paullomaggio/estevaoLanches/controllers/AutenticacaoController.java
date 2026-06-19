@@ -13,7 +13,7 @@ import org.springframework.web.bind.annotation.*;
 
 @RestController
 @RequestMapping("/api/auth")
-@CrossOrigin(origins = "http://localhost:4200")
+@CrossOrigin(origins = "*") // 🚀 AJUSTADO: Remove o bloqueio de CORS para o app do celular e mantém o PDV Web funcionando junto!
 public class AutenticacaoController {
 
     @Autowired

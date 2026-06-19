@@ -44,9 +44,12 @@ public class SecurityConfig {
                         .requestMatchers(HttpMethod.POST, "/api/auth/cliente/google").permitAll()
                         .requestMatchers("/error").permitAll()
 
-                        // 🚨 PONTE DE IMPRESSÃO LIBERADA (Deve vir ANTES das rotas de pedidos!)
+                        // PONTE DE IMPRESSÃO LIBERADA
                         .requestMatchers("/api/fila-impressao/**").permitAll()
                         .requestMatchers("/api/pedidos/fila-impressao/**").permitAll()
+
+                        // 🚀 ALTERADO: Nova porta independente criada para o gerenciamento de mesas no celular
+                        .requestMatchers("/api/comandas/**").hasAnyRole("ADMIN", "GARCOM")
 
                         // CONTROLE DO CAIXA
                         .requestMatchers(HttpMethod.GET, "/api/caixas/status").hasAnyRole("ADMIN", "GARCOM")
@@ -72,7 +75,8 @@ public class SecurityConfig {
     @Bean
     public CorsConfigurationSource corsConfigurationSource() {
         CorsConfiguration configuration = new CorsConfiguration();
-        configuration.setAllowedOrigins(List.of("http://localhost:4200"));
+
+        configuration.setAllowedOriginPatterns(List.of("*"));
         configuration.setAllowedMethods(List.of("GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"));
         configuration.setAllowedHeaders(List.of("Authorization", "Content-Type", "Cache-Control"));
         configuration.setAllowCredentials(true);
