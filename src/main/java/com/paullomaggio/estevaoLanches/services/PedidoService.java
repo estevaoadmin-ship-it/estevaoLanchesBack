@@ -6,6 +6,7 @@ import com.paullomaggio.estevaoLanches.enums.*;
 import com.paullomaggio.estevaoLanches.exceptions.*;
 import com.paullomaggio.estevaoLanches.repositories.*;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.messaging.simp.SimpMessagingTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -27,6 +28,7 @@ public class PedidoService {
     @Autowired private ClienteRepository clienteRepository;
     @Autowired private AdicionalRepository adicionalRepository;
     @Autowired private FilaImpressaoRepository filaImpressaoRepository;
+    @Autowired private SimpMessagingTemplate messagingTemplate;
 
     @Transactional
     public PedidoResponseDTO finalizarPedido(CheckoutRequestDTO dto) {
@@ -76,7 +78,6 @@ public class PedidoService {
 
                 ItemPedido itemPedido = criarItem(pedido, produto, itemDto.quantidade(), itemDto.observacao(), itemDto.adicionaisIds());
 
-                // 💳 Define a comanda filha informada no checkout (ex: tablet do garçom)
                 itemPedido.setNumeroConta(itemDto.numeroConta() != null ? itemDto.numeroConta() : 1);
                 itemPedido.setStatusPagamento(StatusPagamento.ABERTO);
 
@@ -94,7 +95,6 @@ public class PedidoService {
             for (ItemCarrinho ic : carrinho.getItens()) {
                 ItemPedido itemPedido = criarItem(pedido, ic.getProduto(), ic.getQuantidade(), ic.getObservacao(), null);
 
-                // 💳 Padrão para carrinho convencional: cai na conta principal 1
                 itemPedido.setNumeroConta(1);
                 itemPedido.setStatusPagamento(StatusPagamento.ABERTO);
 
@@ -211,7 +211,6 @@ public class PedidoService {
                 .orElseThrow(() -> new ResourceNotFoundException("Pedido nao encontrado."));
         validarEdicaoPedido(pedido);
 
-        // 💳 BLINDAGEM DA CONTA FRACIONADA: Valida se o grupo específico daquela conta filha já foi pago
         boolean contaJaPaga = pedido.getItens().stream()
                 .filter(i -> i.getNumeroConta() != null && i.getNumeroConta().equals(dto.numeroConta()))
                 .anyMatch(i -> i.getStatusPagamento() == StatusPagamento.PAGO);
@@ -225,7 +224,6 @@ public class PedidoService {
 
         ItemPedido novoItem = criarItem(pedido, produto, dto.quantidade(), dto.observacao(), dto.adicionaisIds());
 
-        // Assegura que o novo item receba as propriedades da conta fracionada
         novoItem.setNumeroConta(dto.numeroConta() != null ? dto.numeroConta() : 1);
         novoItem.setStatusPagamento(StatusPagamento.ABERTO);
 
@@ -245,7 +243,6 @@ public class PedidoService {
                 .filter(item -> item.getId().equals(itemId)).findFirst()
                 .orElseThrow(() -> new ResourceNotFoundException("Item nao encontrado nesta comanda."));
 
-        // Impedir a remoção de itens de uma subconta que já foi paga de forma isolada
         if (itemParaRemover.getStatusPagamento() == StatusPagamento.PAGO) {
             throw new BusinessRuleException("Nao e possivel remover um item de uma comanda filha que ja foi paga.");
         }
@@ -289,5 +286,105 @@ public class PedidoService {
     @Transactional
     public void excluirFisicamente(UUID id) {
         throw new BusinessRuleException("Por razoes financeiras e de auditoria, pedidos nao podem ser excluidos do banco de dados. Utilize a funcao de Cancelamento.");
+    }
+
+    /**
+     * 🚀 NOVO MÉTODO EXCLUSIVO DO MOBILE
+     * Adiciona em lote uma comanda filha nova ou complementar sem quebrar nada do PDV Web!
+     * 👥 INCLUÍDO: Captura e salvamento automático do cliente no banco PostgreSQL (Tabela cliente).
+     */
+    @Transactional
+    public PedidoResponseDTO processarPedidoMobile(PedidoMobileRequestDTO dto) {
+        if (!caixaRepository.existsByStatus(StatusCaixa.ABERTO)) {
+            throw new BusinessRuleException("O estabelecimento esta fechado. Abra o caixa para iniciar as vendas!");
+        }
+
+        Pedido pedido;
+        boolean ehNovoPedido = false;
+
+        // 1. Busca a comanda ativa existente ou cria uma nova se for o primeiro lote da mesa
+        if (dto.comandaId() != null) {
+            pedido = pedidoRepository.findById(dto.comandaId()).orElse(null);
+            if (pedido == null) {
+                pedido = new Pedido();
+                ehNovoPedido = true;
+            }
+        } else {
+            pedido = new Pedido();
+            ehNovoPedido = true;
+        }
+
+        // 2. Se for uma mesa recém-aberta, inicializa as propriedades estruturais obrigatórias
+        if (ehNovoPedido) {
+            pedido.setStatus(StatusPedido.RECEBIDO);
+            pedido.setTipo(TipoPedido.MESA);
+            pedido.setNumeroMesa(dto.numeroMesa());
+            pedido.setDataHora(LocalDateTime.now());
+            pedido.setStatusFinanceiro(StatusFinanceiro.AGUARDANDO_PAGAMENTO);
+            pedido.setItens(new ArrayList<>());
+            pedido.setTotal(BigDecimal.ZERO);
+
+            // 🎯 CAPTURA E SALVAMENTO AUTOMÁTICO DE CLIENTE
+            if (dto.cliente() != null && dto.cliente().telefone() != null && !dto.cliente().telefone().isBlank()) {
+                // Limpa máscaras (parênteses, espaços, traços) do número enviado pelo celular
+                String telefoneLimpo = dto.cliente().telefone().replaceAll("\\D", "");
+
+                // Se o cliente já existir com este telefone, vincula. Se não, salva um novo registro limpo no banco!
+                Cliente cliente = clienteRepository.findByNumero(telefoneLimpo)
+                        .orElseGet(() -> {
+                            Cliente novoCliente = new Cliente();
+                            novoCliente.setNome(dto.cliente().nome());
+                            novoCliente.setNumero(telefoneLimpo);
+                            novoCliente.setEnderecos(new ArrayList<>());
+                            return clienteRepository.save(novoCliente);
+                        });
+
+                pedido.setCliente(cliente);
+                pedido.setNomeClienteBalcao(cliente.getNome());
+            } else if (dto.cliente() != null) {
+                pedido.setNomeClienteBalcao(dto.cliente().nome());
+            }
+        } else {
+            // Se o pedido já existia, valida se ele não está em um estado bloqueado para edições
+            validarEdicaoPedido(pedido);
+        }
+
+        // 3. Processa e adiciona o lote de novos lanches enviados pelo garçom
+        BigDecimal totalNovosItens = BigDecimal.ZERO;
+
+        for (var itemDto : dto.itens()) {
+            Produto produto = produtoRepository.findById(itemDto.produtoId())
+                    .orElseThrow(() -> new ResourceNotFoundException("Produto nao encontrado: " + itemDto.produtoId()));
+
+            // Proteção extra: Valida se a subconta em questão já não foi fechada pelo caixa
+            boolean comandaFilhaJaPaga = pedido.getItens().stream()
+                    .filter(i -> i.getNumeroConta() != null && i.getNumeroConta().equals(dto.contaFilha()))
+                    .anyMatch(i -> i.getStatusPagamento() == StatusPagamento.PAGO);
+
+            if (comandaFilhaJaPaga) {
+                throw new BusinessRuleException("Operacao Negada! A comanda filha informada (Conta " + dto.contaFilha() + ") ja foi paga e encerrada no caixa.");
+            }
+
+            ItemPedido itemPedido = criarItem(pedido, produto, itemDto.quantidade(), itemDto.observacao(), itemDto.adicionaisIds());
+            itemPedido.setNumeroConta(dto.contaFilha());
+            itemPedido.setStatusPagamento(StatusPagamento.ABERTO);
+
+            totalNovosItens = totalNovosItens.add(calcularSubtotal(itemPedido));
+            pedido.getItens().add(itemPedido);
+        }
+
+        // 4. Soma o novo bloco e salva de forma segura
+        pedido.setTotal(pedido.getTotal().add(totalNovosItens));
+        Pedido pedidoSalvo = pedidoRepository.save(pedido);
+
+        // 5. Encaminha automaticamente para a Fila de Impressão térmica da Cozinha
+        adicionarNaFila(pedidoSalvo, FilaImpressao.DestinoImpressao.COZINHA);
+
+        // 🚀 CONVERSÃO E BROADCAST EM TEMPO REAL PARA O ECOSSISTEMA
+        PedidoResponseDTO response = new PedidoResponseDTO(pedidoSalvo);
+        messagingTemplate.convertAndSend("/topic/caixa", response);
+        messagingTemplate.convertAndSend("/topic/cozinha", response);
+
+        return response;
     }
 }

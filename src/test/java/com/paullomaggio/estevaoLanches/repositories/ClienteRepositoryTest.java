@@ -85,7 +85,7 @@ class ClienteRepositoryTest {
     @Test
     @DisplayName("Teste 7: Deve retornar true para CPF existente em outro cliente")
     void deveRetornarTrueParaCpfExistenteEmOutroCliente() {
-        Cliente clienteSalvo = clienteRepository.save(clientePadrao);
+        clienteRepository.save(clientePadrao);
         boolean existe = clienteRepository.existsByCpfAndIdNot("12345678901", UUID.randomUUID());
         assertThat(existe).isTrue();
     }
@@ -101,7 +101,7 @@ class ClienteRepositoryTest {
     @Test
     @DisplayName("Teste 9: Deve retornar true para e-mail existente em outro cliente")
     void deveRetornarTrueParaEmailExistenteEmOutroCliente() {
-        Cliente clienteSalvo = clienteRepository.save(clientePadrao);
+        clienteRepository.save(clientePadrao);
         boolean existe = clienteRepository.existsByEmailAndIdNot("joao@email.com", UUID.randomUUID());
         assertThat(existe).isTrue();
     }
@@ -112,5 +112,26 @@ class ClienteRepositoryTest {
         Cliente clienteSalvo = clienteRepository.save(clientePadrao);
         boolean existe = clienteRepository.existsByEmailAndIdNot("novo@email.com", clienteSalvo.getId());
         assertThat(existe).isFalse();
+    }
+
+    // =========================================================================
+    // 🆕 NOVOS TESTES: VALIDAÇÃO DO PRODUTO DERIVADO WHATSAPP (MÓVEL REAL)
+    // =========================================================================
+
+    @Test
+    @DisplayName("Teste Mobile 1: Deve encontrar com precisão o cliente pelo número limpo de WhatsApp")
+    void deveBuscarClientePorNumeroDeWhatsAppCadastrado() {
+        clienteRepository.save(clientePadrao);
+        Optional<Cliente> resultado = clienteRepository.findByNumero("11999999999");
+
+        assertThat(resultado).isPresent();
+        assertThat(resultado.get().getNome()).isEqualTo("João Silva");
+    }
+
+    @Test
+    @DisplayName("Teste Mobile 2: Deve retornar Optional vazio caso o número do lead não exista no PostgreSQL")
+    void deveRetornarVazioCasoWhatsAppNaoExista() {
+        Optional<Cliente> resultado = clienteRepository.findByNumero("16999995555");
+        assertThat(resultado).isEmpty();
     }
 }

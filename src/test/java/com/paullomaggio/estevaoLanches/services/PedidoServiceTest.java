@@ -13,6 +13,7 @@ import org.mockito.ArgumentCaptor;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.messaging.simp.SimpMessagingTemplate;
 
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
@@ -34,6 +35,9 @@ class PedidoServiceTest {
     @Mock private CaixaRepository caixaRepository;
     @Mock private ProdutoRepository produtoRepository;
     @Mock private FilaImpressaoRepository filaImpressaoRepository;
+    @Mock private AdicionalRepository adicionalRepository;
+    @Mock private ClienteRepository clienteRepository;
+    @Mock private SimpMessagingTemplate messagingTemplate;
 
     @InjectMocks
     private PedidoService pedidoService;
@@ -318,7 +322,7 @@ class PedidoServiceTest {
     }
 
     // =========================================================================
-    // 6. TESTES DE INTEGRAÇÃO E REGRAS DE CONTAS FRACIONADAS
+    // 6. TESTES DE REGRAS DE CONTAS FRACIONADAS (BALCÃO/CONVENCIONAL)
     // =========================================================================
 
     @Test
@@ -367,7 +371,6 @@ class PedidoServiceTest {
 
         ItemPedidoRequestDTO novoItemContaFechada = new ItemPedidoRequestDTO(prodBId, 1, "Burlar conta já paga", null, 1);
 
-
         when(pedidoRepository.findById(pedidoId)).thenReturn(Optional.of(pedidoPadrao));
 
         BusinessRuleException exception = assertThrows(BusinessRuleException.class, () ->
@@ -380,7 +383,7 @@ class PedidoServiceTest {
     @DisplayName("Contas Fracionadas: Deve impedir a remoção de um item caso a comanda filha já tenha sido paga")
     void deveImpedirRemocaoDeItemSeContaJaEstiverPago() {
         itemPedidoExistente.setNumeroConta(1);
-        itemPedidoExistente.setStatusPagamento(StatusPagamento.PAGO); // Conta já paga
+        itemPedidoExistente.setStatusPagamento(StatusPagamento.PAGO);
 
         when(pedidoRepository.findById(pedidoId)).thenReturn(Optional.of(pedidoPadrao));
 
@@ -394,7 +397,7 @@ class PedidoServiceTest {
     @DisplayName("Contas Fracionadas: Deve impedir a atualização de adicionais se a comanda filha já tiver sido paga")
     void deveImpedirAtualizacaoDeAdicionaisSeContaJaEstiverPago() {
         itemPedidoExistente.setNumeroConta(1);
-        itemPedidoExistente.setStatusPagamento(StatusPagamento.PAGO); // Conta já paga
+        itemPedidoExistente.setStatusPagamento(StatusPagamento.PAGO);
 
         when(pedidoRepository.findById(pedidoId)).thenReturn(Optional.of(pedidoPadrao));
 
@@ -402,5 +405,135 @@ class PedidoServiceTest {
                 pedidoService.atualizarAdicionaisDoItem(pedidoId, itemPedidoExistente.getId(), List.of(UUID.randomUUID()))
         );
         assertThat(exception.getMessage()).containsIgnoringCase("paga");
+    }
+
+    // =========================================================================
+    // 7. 🔥 TESTES EXCLUSIVOS DO NOVO FLUXO MOBILE (TEMPO REAL)
+    // =========================================================================
+
+    @Test
+    @DisplayName("Mobile: Deve processar e criar um novo pedido de mesa se comandaId for nulo")
+    void deveCriarNovoPedidoMobileComSucesso() {
+        ItemMobileRequestDTO itemDto = new ItemMobileRequestDTO(prodAId, 1, "Ponto ao ponto", null);
+        ClienteMobileRequestDTO clienteDto = new ClienteMobileRequestDTO("Renan Garçom", "16999881122");
+        PedidoMobileRequestDTO dto = new PedidoMobileRequestDTO(null, 25, 1, clienteDto, List.of(itemDto));
+
+        when(caixaRepository.existsByStatus(StatusCaixa.ABERTO)).thenReturn(true);
+        when(produtoRepository.findById(prodAId)).thenReturn(Optional.of(prodA));
+        when(pedidoRepository.save(any(Pedido.class))).thenAnswer(i -> i.getArgument(0));
+
+        when(clienteRepository.findByNumero("16999881122")).thenReturn(Optional.empty());
+        when(clienteRepository.save(any(Cliente.class))).thenAnswer(i -> i.getArgument(0));
+
+        PedidoResponseDTO res = pedidoService.processarPedidoMobile(dto);
+
+        assertThat(res.total()).isEqualByComparingTo(new BigDecimal("10.00"));
+        assertThat(res.status()).isEqualTo(StatusPedido.RECEBIDO);
+        assertThat(res.numeroMesa()).isEqualTo(25);
+
+        verify(filaImpressaoRepository, times(1)).save(any(FilaImpressao.class));
+        verify(messagingTemplate, times(1)).convertAndSend(eq("/topic/caixa"), any(PedidoResponseDTO.class));
+        verify(messagingTemplate, times(1)).convertAndSend(eq("/topic/cozinha"), any(PedidoResponseDTO.class));
+    }
+
+    @Test
+    @DisplayName("Mobile: Deve complementar com novos itens uma mesa/comanda já existente e disparar alertas")
+    void deveComplementarPedidoMobileExistenteERecalcular() {
+        ItemMobileRequestDTO itemDto = new ItemMobileRequestDTO(prodBId, 1, "Caprichar no molho", null);
+        PedidoMobileRequestDTO dto = new PedidoMobileRequestDTO(pedidoId, 25, 1, null, List.of(itemDto));
+
+        when(caixaRepository.existsByStatus(StatusCaixa.ABERTO)).thenReturn(true);
+        when(pedidoRepository.findById(pedidoId)).thenReturn(Optional.of(pedidoPadrao));
+        when(produtoRepository.findById(prodBId)).thenReturn(Optional.of(prodB));
+        when(pedidoRepository.save(any(Pedido.class))).thenAnswer(i -> i.getArgument(0));
+
+        PedidoResponseDTO res = pedidoService.processarPedidoMobile(dto);
+
+        assertThat(res.total()).isEqualByComparingTo(new BigDecimal("40.00"));
+        verify(messagingTemplate, times(1)).convertAndSend(eq("/topic/cozinha"), any(PedidoResponseDTO.class));
+    }
+
+    @Test
+    @DisplayName("Mobile Falha: Deve rejeitar o processamento se o estabelecimento estiver fechado")
+    void deveLancarExcecaoSeCaixaFechadoNoMobile() {
+        PedidoMobileRequestDTO dto = new PedidoMobileRequestDTO(null, 25, 1, null, List.of());
+        when(caixaRepository.existsByStatus(StatusCaixa.ABERTO)).thenReturn(false);
+
+        BusinessRuleException ex = assertThrows(BusinessRuleException.class, () -> pedidoService.processarPedidoMobile(dto));
+        assertThat(ex.getMessage()).containsIgnoringCase("fechado");
+    }
+
+    @Test
+    @DisplayName("Mobile Falha: Deve bloquear inserção se o garçom tentar lançar lanches em uma Conta Filha já quitada")
+    void deveImpedirLancamentoMobileSeContaFilhaJaEstiverPaga() {
+        itemPedidoExistente.setNumeroConta(1);
+        itemPedidoExistente.setStatusPagamento(StatusPagamento.PAGO);
+
+        ItemMobileRequestDTO itemDto = new ItemMobileRequestDTO(prodBId, 1, "Tentando Burlar", null);
+        PedidoMobileRequestDTO dto = new PedidoMobileRequestDTO(pedidoId, 25, 1, null, List.of(itemDto));
+
+        when(caixaRepository.existsByStatus(StatusCaixa.ABERTO)).thenReturn(true);
+        when(pedidoRepository.findById(pedidoId)).thenReturn(Optional.of(pedidoPadrao));
+        when(produtoRepository.findById(prodBId)).thenReturn(Optional.of(prodB));
+
+        BusinessRuleException exception = assertThrows(BusinessRuleException.class, () ->
+                pedidoService.processarPedidoMobile(dto)
+        );
+        assertThat(exception.getMessage()).containsIgnoringCase("paga");
+        verify(pedidoRepository, never()).save(any());
+    }
+
+    // =========================================================================
+    // 🆕 NOVOS TESTES: VALIDAÇÃO DA CAPTURA AUTOMÁTICA DE CLIENTES (LEADS)
+    // =========================================================================
+
+    @Test
+    @DisplayName("Mobile Captura: Deve cadastrar novo cliente de forma transparente caso o WhatsApp não exista no PostgreSQL")
+    void deveCadastrarNovoClienteAutomaticamenteSeNaoExistirNoBanco() {
+        ItemMobileRequestDTO itemDto = new ItemMobileRequestDTO(prodAId, 1, null, null);
+        ClienteMobileRequestDTO clienteDto = new ClienteMobileRequestDTO("Carlos Andrade", "(16) 99999-5555");
+        PedidoMobileRequestDTO dto = new PedidoMobileRequestDTO(null, 12, 1, clienteDto, List.of(itemDto));
+
+        when(caixaRepository.existsByStatus(StatusCaixa.ABERTO)).thenReturn(true);
+        when(produtoRepository.findById(prodAId)).thenReturn(Optional.of(prodA));
+        when(pedidoRepository.save(any(Pedido.class))).thenAnswer(i -> i.getArgument(0));
+
+        when(clienteRepository.findByNumero("16999995555")).thenReturn(Optional.empty());
+        when(clienteRepository.save(any(Cliente.class))).thenAnswer(i -> i.getArgument(0));
+
+        PedidoResponseDTO res = pedidoService.processarPedidoMobile(dto);
+
+        // 🚀 AJUSTADO: Usando .clienteNome() em conformidade com o record rígido original do PDV Web
+        assertThat(res.clienteNome()).isEqualTo("Carlos Andrade");
+
+        verify(clienteRepository, times(1)).findByNumero("16999995555");
+        verify(clienteRepository, times(1)).save(any(Cliente.class));
+    }
+
+    @Test
+    @DisplayName("Mobile Captura: Deve vincular e reaproveitar cliente já existente sem duplicar linhas no banco")
+    void deveVincularClienteExistenteEvitandoDuplicacaoDeLinhas() {
+        ItemMobileRequestDTO itemDto = new ItemMobileRequestDTO(prodAId, 1, null, null);
+        ClienteMobileRequestDTO clienteDto = new ClienteMobileRequestDTO("Maria Santos", "16999995555");
+        PedidoMobileRequestDTO dto = new PedidoMobileRequestDTO(null, 12, 1, clienteDto, List.of(itemDto));
+
+        Cliente clienteExistente = new Cliente();
+        clienteExistente.setId(UUID.randomUUID());
+        clienteExistente.setNome("Maria Santos");
+        clienteExistente.setNumero("16999995555");
+
+        when(caixaRepository.existsByStatus(StatusCaixa.ABERTO)).thenReturn(true);
+        when(produtoRepository.findById(prodAId)).thenReturn(Optional.of(prodA));
+        when(pedidoRepository.save(any(Pedido.class))).thenAnswer(i -> i.getArgument(0));
+
+        when(clienteRepository.findByNumero("16999995555")).thenReturn(Optional.of(clienteExistente));
+
+        PedidoResponseDTO res = pedidoService.processarPedidoMobile(dto);
+
+        // 🚀 AJUSTADO: Usando .clienteNome() em conformidade com o record rígido original do PDV Web
+        assertThat(res.clienteNome()).isEqualTo("Maria Santos");
+
+        verify(clienteRepository, times(1)).findByNumero("16999995555");
+        verify(clienteRepository, never()).save(any(Cliente.class));
     }
 }

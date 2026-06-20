@@ -2,12 +2,14 @@ package com.paullomaggio.estevaoLanches.repositories;
 
 import com.paullomaggio.estevaoLanches.entities.*;
 import com.paullomaggio.estevaoLanches.enums.*;
+import com.paullomaggio.estevaoLanches.dtos.ProdutoRankingDTO;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.orm.jpa.DataJpaTest;
 import org.springframework.boot.test.autoconfigure.orm.jpa.TestEntityManager;
+import org.springframework.data.domain.PageRequest;
 
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
@@ -74,10 +76,7 @@ class PedidoRepositoryTest {
         pedido.setCliente(clientePadrao);
         pedido.setDataHora(dataHora);
         pedido.setStatus(status);
-
-        // NOVO STATUS APLICADO NOS TESTES MOCKS:
         pedido.setStatusFinanceiro(forma != null ? StatusFinanceiro.PAGO : StatusFinanceiro.AGUARDANDO_PAGAMENTO);
-
         pedido.setTipo(TipoPedido.DELIVERY);
         pedido.setTotal(total);
         pedido.setNumeroPedido(numeroPedido);
@@ -198,5 +197,30 @@ class PedidoRepositoryTest {
 
         assertThat(relatorio).isNotEmpty();
         assertThat(pagamentos).isNotEmpty();
+    }
+
+    // =========================================================================
+    // 🆕 VALIDAÇÃO DO BI DO GRUPO (RANKING DE PRODUTOS CORRIGIDO)
+    // =========================================================================
+
+    @Test
+    @DisplayName("CT-REPO-BI-004: Deve processar o Ranking de Produtos via JPQL agregando os itens por agrupamento sem falhas de sintaxe")
+    void deveBuscarTopProdutosOrdenadosPorMaisVendidosSemErros() {
+        LocalDateTime inicio = LocalDateTime.now().minusDays(1);
+        LocalDateTime fim = LocalDateTime.now().plusDays(1);
+
+        criarPedido(LocalDateTime.now(), StatusPedido.FINALIZADO, "K1", FormaPagamento.PIX, new BigDecimal("25.00"), produtoQuePrepara);
+        criarPedido(LocalDateTime.now(), StatusPedido.FINALIZADO, "K2", FormaPagamento.PIX, new BigDecimal("25.00"), produtoQuePrepara);
+        criarPedido(LocalDateTime.now(), StatusPedido.FINALIZADO, "K3", FormaPagamento.PIX, new BigDecimal("6.00"), produtoProntoBalcao);
+
+        entityManager.flush();
+
+        List<ProdutoRankingDTO> ranking = pedidoRepository.buscarTopProdutosJPQL(inicio, fim, StatusPedido.FINALIZADO, PageRequest.of(0, 10));
+
+        assertThat(ranking).hasSize(2);
+
+        // 🚀 CORRIGIDO: Modificado de sintaxe de Record para Getters clássicos gerados pelo Lombok @Data
+        assertThat(ranking.get(0).getNomeProduto()).isEqualTo("X-Bacon");
+        assertThat(ranking.get(0).getQuantidadeVendida()).isEqualTo(2L);
     }
 }

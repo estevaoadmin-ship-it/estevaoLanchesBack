@@ -75,4 +75,14 @@ public class PedidoController {
             @RequestBody List<UUID> adicionaisIds) {
         return ResponseEntity.ok(pedidoService.atualizarAdicionaisDoItem(pedidoId, itemId, adicionaisIds));
     }
+
+    /**
+     * 🚀 ENDPOINT EXCLUSIVO PARA O APP MOBILE
+     * Recebe o payload do garçom e dispara os eventos para o Caixa e Cozinha simultaneamente
+     */
+    @PostMapping("/mobile")
+    public ResponseEntity<PedidoResponseDTO> finalizarPedidoMobile(@RequestBody @Valid PedidoMobileRequestDTO dto) {
+        // Dentro do seu PedidoService, esse método salvará no banco e fará o broadcast via WebSocket
+        return ResponseEntity.ok(pedidoService.processarPedidoMobile(dto));
+    }
 }
