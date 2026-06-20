@@ -21,6 +21,7 @@ import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 
 import java.time.LocalDateTime;
+import java.util.Map; // 🚀 INCLUÍDO: Necessário para a validação do novo formato JSON
 import java.util.Optional;
 import java.util.UUID;
 
@@ -93,6 +94,7 @@ class ComandaControllerTest {
         verify(mesaRepository, times(1)).save(mesaMockExistente);
     }
 
+    @SuppressWarnings("unchecked")
     @Test
     @DisplayName("Teste 3: Deve retornar a comanda existente (HTTP 200) sem criar novos registros se houver comanda aberta")
     void deveRetornarComandaExistenteCasoJaExistaUmaAberta() {
@@ -107,7 +109,13 @@ class ComandaControllerTest {
         ResponseEntity<?> response = comandaController.abrirComanda(8);
 
         assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
-        assertThat(response.getBody()).isEqualTo(comandaAtivaMock);
+
+        // 🚀 CORRIGIDO: Cast do corpo da resposta para o formato real Map mapeado no controller
+        Map<String, Object> resultadoMap = (Map<String, Object>) response.getBody();
+        assertThat(resultadoMap).isNotNull();
+        assertThat(resultadoMap.get("id")).isEqualTo(comandaAtivaMock.getId());
+        assertThat(resultadoMap.get("status")).isEqualTo(comandaAtivaMock.getStatus());
+        assertThat(resultadoMap.get("idJaExistia")).isEqualTo(true); // Garante que a trava do mobile continue funcionando
 
         verify(comandaRepository, never()).save(any(Comanda.class));
         verify(subcontaRepository, never()).save(any(Subconta.class));
@@ -305,7 +313,6 @@ class ComandaControllerTest {
         when(mesaRepository.findByNumero(8)).thenReturn(Optional.empty());
         when(comandaRepository.findByMesaNumeroAndStatus(8, StatusComanda.ABERTA)).thenReturn(Optional.empty());
 
-        // 🚀 CORRIGIDO: Stub adicionado para anular o NullPointerException e satisfazer a integridade do teste
         when(mesaRepository.save(any(Mesa.class))).thenAnswer(i -> i.getArgument(0));
         when(comandaRepository.save(any(Comanda.class))).thenAnswer(i -> i.getArgument(0));
 

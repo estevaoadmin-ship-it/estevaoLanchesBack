@@ -4,6 +4,7 @@ import com.paullomaggio.estevaoLanches.dtos.*;
 import com.paullomaggio.estevaoLanches.entities.*;
 import com.paullomaggio.estevaoLanches.enums.*;
 import com.paullomaggio.estevaoLanches.exceptions.BusinessRuleException;
+import com.paullomaggio.estevaoLanches.exceptions.ResourceNotFoundException;
 import com.paullomaggio.estevaoLanches.repositories.*;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -92,7 +93,7 @@ class PedidoServiceTest {
     }
 
     // =========================================================================
-    // 1. TESTES DE CHECKOUT E INTEGRAÇÃO COM FILA DE IMPRESSÃO
+    // 1. TESTES DE CHECKOUT E INTEGRAÇÃO COM FILA DE IMPRESSÃO (PDV CENTRAL)
     // =========================================================================
 
     @Test
@@ -408,7 +409,7 @@ class PedidoServiceTest {
     }
 
     // =========================================================================
-    // 7. 🔥 TESTES EXCLUSIVOS DO NOVO FLUXO MOBILE (TEMPO REAL)
+    // 7. TESTES EXCLUSIVOS DO NOVO FLUXO MOBILE (TEMPO REAL)
     // =========================================================================
 
     @Test
@@ -483,10 +484,6 @@ class PedidoServiceTest {
         verify(pedidoRepository, never()).save(any());
     }
 
-    // =========================================================================
-    // 🆕 NOVOS TESTES: VALIDAÇÃO DA CAPTURA AUTOMÁTICA DE CLIENTES (LEADS)
-    // =========================================================================
-
     @Test
     @DisplayName("Mobile Captura: Deve cadastrar novo cliente de forma transparente caso o WhatsApp não exista no PostgreSQL")
     void deveCadastrarNovoClienteAutomaticamenteSeNaoExistirNoBanco() {
@@ -503,7 +500,6 @@ class PedidoServiceTest {
 
         PedidoResponseDTO res = pedidoService.processarPedidoMobile(dto);
 
-        // 🚀 AJUSTADO: Usando .clienteNome() em conformidade com o record rígido original do PDV Web
         assertThat(res.clienteNome()).isEqualTo("Carlos Andrade");
 
         verify(clienteRepository, times(1)).findByNumero("16999995555");
@@ -530,10 +526,80 @@ class PedidoServiceTest {
 
         PedidoResponseDTO res = pedidoService.processarPedidoMobile(dto);
 
-        // 🚀 AJUSTADO: Usando .clienteNome() em conformidade com o record rígido original do PDV Web
         assertThat(res.clienteNome()).isEqualTo("Maria Santos");
 
         verify(clienteRepository, times(1)).findByNumero("16999995555");
         verify(clienteRepository, never()).save(any(Cliente.class));
+    }
+
+    // =========================================================================
+    // 🆕 8. NOVOS TESTES: VALIDAÇÃO DA FILA DE IMPRESSÃO MOBILE E WEBSOCKETS
+    // =========================================================================
+
+    @Test
+    @DisplayName("Mobile Impressão: Deve certificar que o lote mobile cria estritamente o cupom com destino COZINHA")
+    void deveGarantirQueDestinoImpressaoMobileSejaEstritamenteCozinha() {
+        ItemMobileRequestDTO itemDto = new ItemMobileRequestDTO(prodAId, 1, "Para Viagem", null);
+        PedidoMobileRequestDTO dto = new PedidoMobileRequestDTO(null, 10, 1, null, List.of(itemDto));
+
+        when(caixaRepository.existsByStatus(StatusCaixa.ABERTO)).thenReturn(true);
+        when(produtoRepository.findById(prodAId)).thenReturn(Optional.of(prodA));
+        when(pedidoRepository.save(any(Pedido.class))).thenAnswer(i -> i.getArgument(0));
+
+        pedidoService.processarPedidoMobile(dto);
+
+        // Captura o objeto gravado na tabela FilaImpressao
+        ArgumentCaptor<FilaImpressao> filaCaptor = ArgumentCaptor.forClass(FilaImpressao.class);
+        verify(filaImpressaoRepository, times(1)).save(filaCaptor.capture());
+
+        FilaImpressao itemFilaSalvo = filaCaptor.getValue();
+        assertThat(itemFilaSalvo.getDestino()).isEqualTo(FilaImpressao.DestinoImpressao.COZINHA); // 🖨️ Valida o contrato de roteamento
+        assertThat(itemFilaSalvo.getStatus()).isEqualTo(FilaImpressao.StatusImpressao.PENDENTE);  // Entra limpo para varredura do Node.js
+    }
+
+    @Test
+    @DisplayName("Mobile WebSockets: Deve certificar que o payload transmitido via WebSocket contém a árvore completa do Pedido")
+    void deveGarantirDadosIntegradosNoBroadcastDoWebSocket() {
+        ItemMobileRequestDTO itemDto = new ItemMobileRequestDTO(prodAId, 2, "Sem cebola", null);
+        PedidoMobileRequestDTO dto = new PedidoMobileRequestDTO(null, 15, 1, null, List.of(itemDto));
+
+        when(caixaRepository.existsByStatus(StatusCaixa.ABERTO)).thenReturn(true);
+        when(produtoRepository.findById(prodAId)).thenReturn(Optional.of(prodA));
+        when(pedidoRepository.save(any(Pedido.class))).thenAnswer(i -> i.getArgument(0));
+
+        pedidoService.processarPedidoMobile(dto);
+
+        // Captura os objetos enviados pelo messagingTemplate para checar se a árvore do JSON não vai vazia
+        ArgumentCaptor<PedidoResponseDTO> broadcastCaptor = ArgumentCaptor.forClass(PedidoResponseDTO.class);
+
+        verify(messagingTemplate).convertAndSend(eq("/topic/caixa"), broadcastCaptor.capture());
+        PedidoResponseDTO caixaPayload = broadcastCaptor.getValue();
+        assertThat(caixaPayload.numeroMesa()).isEqualTo(15);
+        assertThat(caixaPayload.total()).isEqualByComparingTo(new BigDecimal("20.00")); // 10.00 * 2 lanches
+
+        verify(messagingTemplate).convertAndSend(eq("/topic/cozinha"), broadcastCaptor.capture());
+        PedidoResponseDTO cozinhaPayload = broadcastCaptor.getValue();
+        assertThat(cozinhaPayload.numeroMesa()).isEqualTo(15);
+    }
+
+    @Test
+    @DisplayName("Mobile Falha Extrema: Deve tolerar e processar payloads anônimos (sem cliente) sem quebrar por NullPointerException")
+    void deveTolerarPayloadsSemClienteSemDispararNullPointerException() {
+        ItemMobileRequestDTO itemDto = new ItemMobileRequestDTO(prodAId, 1, null, null);
+        // Garçom enviou o objeto cliente completamento nulo pelo aparelho
+        PedidoMobileRequestDTO dto = new PedidoMobileRequestDTO(null, 99, 1, null, List.of(itemDto));
+
+        when(caixaRepository.existsByStatus(StatusCaixa.ABERTO)).thenReturn(true);
+        when(produtoRepository.findById(prodAId)).thenReturn(Optional.of(prodA));
+        when(pedidoRepository.save(any(Pedido.class))).thenAnswer(i -> i.getArgument(0));
+
+        PedidoResponseDTO res = pedidoService.processarPedidoMobile(dto);
+
+        assertThat(res).isNotNull();
+        assertThat(res.numeroMesa()).isEqualTo(99);
+        assertThat(res.clienteNome()).isNull(); // Salva de forma anônima com segurança
+
+        verify(clienteRepository, never()).save(any());
+        verify(pedidoRepository, times(1)).save(any(Pedido.class));
     }
 }

@@ -13,6 +13,8 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
 import java.time.LocalDateTime;
+import java.util.HashMap;
+import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -40,7 +42,19 @@ public class ComandaController {
 
         Optional<Comanda> comandaExistente = comandaRepository.findByMesaNumeroAndStatus(numeroMesa, StatusComanda.ABERTA);
         if (comandaExistente.isPresent()) {
-            return ResponseEntity.ok(comandaExistente.get());
+            Comanda comanda = comandaExistente.get();
+
+            // 🎯 SOLUÇÃO DA SINCRO: Serializa um mapa idêntico ao JSON da Comanda, injetando a flag que o Angular precisa ler
+            Map<String, Object> responseJson = new HashMap<>();
+            responseJson.put("id", comanda.getId());
+            responseJson.put("status", comanda.getStatus());
+            responseJson.put("abertaEm", comanda.getAbertaEm());
+            responseJson.put("empresaId", comanda.getEmpresaId());
+            responseJson.put("filialId", comanda.getFilialId());
+            responseJson.put("mesa", comanda.getMesa());
+            responseJson.put("idJaExistia", true); // 🔥 Conecta perfeitamente com o Alerta do Front-end!
+
+            return ResponseEntity.ok(responseJson);
         }
 
         mesa.setStatus(StatusMesa.OCUPADA);
@@ -49,8 +63,6 @@ public class ComandaController {
         Comanda comanda = new Comanda();
         comanda.setMesa(mesa);
         comanda.setStatus(StatusComanda.ABERTA);
-
-        // 🚀 CORRIGIDO: Alterado para casar com a propriedade real abertaEm mapeada no Hibernate
         comanda.setAbertaEm(LocalDateTime.now());
 
         comanda.setEmpresaId(UUID.fromString("11111111-1111-1111-1111-111111111111"));

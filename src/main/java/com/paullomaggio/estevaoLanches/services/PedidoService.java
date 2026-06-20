@@ -244,7 +244,7 @@ public class PedidoService {
                 .orElseThrow(() -> new ResourceNotFoundException("Item nao encontrado nesta comanda."));
 
         if (itemParaRemover.getStatusPagamento() == StatusPagamento.PAGO) {
-            throw new BusinessRuleException("Nao e possivel remover um item de uma comanda filha que ja foi paga.");
+            throw new BusinessRuleException("Nao e possivel remover un item de uma comanda filha que ja foi paga.");
         }
 
         pedido.setTotal(pedido.getTotal().subtract(calcularSubtotal(itemParaRemover)));
@@ -289,9 +289,7 @@ public class PedidoService {
     }
 
     /**
-     * 🚀 NOVO MÉTODO EXCLUSIVO DO MOBILE
-     * Adiciona em lote uma comanda filha nova ou complementar sem quebrar nada do PDV Web!
-     * 👥 INCLUÍDO: Captura e salvamento automático do cliente no banco PostgreSQL (Tabela cliente).
+     * 🚀 PROCESSAMENTO MOBILE ATUALIZADO COZINHA + CAIXA
      */
     @Transactional
     public PedidoResponseDTO processarPedidoMobile(PedidoMobileRequestDTO dto) {
@@ -302,7 +300,6 @@ public class PedidoService {
         Pedido pedido;
         boolean ehNovoPedido = false;
 
-        // 1. Busca a comanda ativa existente ou cria uma nova se for o primeiro lote da mesa
         if (dto.comandaId() != null) {
             pedido = pedidoRepository.findById(dto.comandaId()).orElse(null);
             if (pedido == null) {
@@ -314,7 +311,6 @@ public class PedidoService {
             ehNovoPedido = true;
         }
 
-        // 2. Se for uma mesa recém-aberta, inicializa as propriedades estruturais obrigatórias
         if (ehNovoPedido) {
             pedido.setStatus(StatusPedido.RECEBIDO);
             pedido.setTipo(TipoPedido.MESA);
@@ -324,12 +320,9 @@ public class PedidoService {
             pedido.setItens(new ArrayList<>());
             pedido.setTotal(BigDecimal.ZERO);
 
-            // 🎯 CAPTURA E SALVAMENTO AUTOMÁTICO DE CLIENTE
             if (dto.cliente() != null && dto.cliente().telefone() != null && !dto.cliente().telefone().isBlank()) {
-                // Limpa máscaras (parênteses, espaços, traços) do número enviado pelo celular
                 String telefoneLimpo = dto.cliente().telefone().replaceAll("\\D", "");
 
-                // Se o cliente já existir com este telefone, vincula. Se não, salva um novo registro limpo no banco!
                 Cliente cliente = clienteRepository.findByNumero(telefoneLimpo)
                         .orElseGet(() -> {
                             Cliente novoCliente = new Cliente();
@@ -345,18 +338,15 @@ public class PedidoService {
                 pedido.setNomeClienteBalcao(dto.cliente().nome());
             }
         } else {
-            // Se o pedido já existia, valida se ele não está em um estado bloqueado para edições
             validarEdicaoPedido(pedido);
         }
 
-        // 3. Processa e adiciona o lote de novos lanches enviados pelo garçom
         BigDecimal totalNovosItens = BigDecimal.ZERO;
 
         for (var itemDto : dto.itens()) {
             Produto produto = produtoRepository.findById(itemDto.produtoId())
                     .orElseThrow(() -> new ResourceNotFoundException("Produto nao encontrado: " + itemDto.produtoId()));
 
-            // Proteção extra: Valida se a subconta em questão já não foi fechada pelo caixa
             boolean comandaFilhaJaPaga = pedido.getItens().stream()
                     .filter(i -> i.getNumeroConta() != null && i.getNumeroConta().equals(dto.contaFilha()))
                     .anyMatch(i -> i.getStatusPagamento() == StatusPagamento.PAGO);
@@ -373,14 +363,13 @@ public class PedidoService {
             pedido.getItens().add(itemPedido);
         }
 
-        // 4. Soma o novo bloco e salva de forma segura
         pedido.setTotal(pedido.getTotal().add(totalNovosItens));
         Pedido pedidoSalvo = pedidoRepository.save(pedido);
 
-        // 5. Encaminha automaticamente para a Fila de Impressão térmica da Cozinha
+        // 🖨️ ADICIONA NA FILA: Salva o cupom na fila de impressão com destino para a cozinha
         adicionarNaFila(pedidoSalvo, FilaImpressao.DestinoImpressao.COZINHA);
 
-        // 🚀 CONVERSÃO E BROADCAST EM TEMPO REAL PARA O ECOSSISTEMA
+        // 🚀 WEBSOCKET BROADCAST: Atualiza instantaneamente a tela do painel do Caixa e do Monitor da Cozinha
         PedidoResponseDTO response = new PedidoResponseDTO(pedidoSalvo);
         messagingTemplate.convertAndSend("/topic/caixa", response);
         messagingTemplate.convertAndSend("/topic/cozinha", response);
