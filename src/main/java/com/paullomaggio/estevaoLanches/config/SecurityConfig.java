@@ -1,5 +1,6 @@
 package com.paullomaggio.estevaoLanches.config;
 
+import com.paullomaggio.estevaoLanches.config.SecurityFilter;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.http.HttpMethod;
@@ -15,7 +16,6 @@ import org.springframework.security.web.authentication.UsernamePasswordAuthentic
 import org.springframework.web.cors.CorsConfiguration;
 import org.springframework.web.cors.CorsConfigurationSource;
 import org.springframework.web.cors.UrlBasedCorsConfigurationSource;
-import org.springframework.web.cors.CorsUtils;
 
 import java.util.List;
 
@@ -36,36 +36,42 @@ public class SecurityConfig {
                 .csrf(csrf -> csrf.disable())
                 .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
                 .authorizeHttpRequests(authorize -> authorize
-                        // Libera as checagens automáticas do navegador (OPTIONS) sem exigir token JWT
-                        .requestMatchers(CorsUtils::isPreFlightRequest).permitAll()
+                        // 🎯 FIX REQUISIÇÕES OPTIONS: Removido o 'CorsUtils::isPreFlightRequest'
+                        // Como a configuração de CORS injetada abaixo já lida nativamente com o método OPTIONS,
+                        // declarar essa validação na esteira de requisições do filtro torna-se redundante.
 
-                        // Rotas públicas de Autenticação
+                        // 🔓 PORTAS PÚBLICAS: Autenticação do Ecossistema (Nativo + Delivery App)
                         .requestMatchers(HttpMethod.POST, "/api/auth/login").permitAll()
+                        .requestMatchers(HttpMethod.POST, "/api/auth/login/cliente").permitAll()
+                        .requestMatchers(HttpMethod.POST, "/api/auth/registrar").permitAll()
                         .requestMatchers(HttpMethod.POST, "/api/auth/cliente/google").permitAll()
                         .requestMatchers("/error").permitAll()
 
-                        // PONTE DE IMPRESSÃO LIBERADA
+                        // 🔓 PORTAS PÚBLICAS: Hubs da Ponte Física de Impressão Térmica
                         .requestMatchers("/api/fila-impressao/**").permitAll()
                         .requestMatchers("/api/pedidos/fila-impressao/**").permitAll()
 
-                        // 🚀 ALTERADO: Nova porta independente criada para o gerenciamento de mesas no celular
-                        .requestMatchers("/api/comandas/**").hasAnyRole("ADMIN", "GARCOM")
+                        // 🎯 FIX CRÍTICO: Canal de WebSocket totalmente liberado da verificação do filtro JWT.
+                        // O upgrade de protocolo HTTP para WebSocket não envia Headers Bearer tradicionais na largada.
+                        .requestMatchers("/ws-tevao/**").permitAll()
 
-                        // CONTROLE DO CAIXA
+                        // 👥 PAPEL MISTO (ADMIN ou GARÇOM): Operação em Tempo Real do Salão
+                        .requestMatchers("/api/comandas/**").hasAnyRole("ADMIN", "GARCOM")
                         .requestMatchers(HttpMethod.GET, "/api/caixas/status").hasAnyRole("ADMIN", "GARCOM")
                         .requestMatchers(HttpMethod.GET, "/api/caixas/resumo").hasAnyRole("ADMIN", "GARCOM")
-                        .requestMatchers("/api/caixas/**").hasRole("ADMIN")
+                        .requestMatchers("/api/pedidos/checkout").hasAnyRole("ADMIN", "GARCOM")
+                        .requestMatchers("/api/clientes/**").hasAnyRole("ADMIN", "GARCOM")
 
-                        // TRAVAS DO GERENTE (ADMIN)
+                        // 👥 PAPEL OPERACIONAL DA ESTEIRA: Produção de Cozinha e Expedição
+                        .requestMatchers("/api/pedidos/**").hasAnyRole("ADMIN", "GARCOM", "COZINHA")
+
+                        // 🔒 PAPEL EXCLUSIVO DO GERENTE (ADMIN): Auditoria e Configurações Sensíveis
+                        .requestMatchers("/api/caixas/**").hasRole("ADMIN")
                         .requestMatchers("/api/relatorios/**").hasRole("ADMIN")
                         .requestMatchers("/api/cardapio/**").hasRole("ADMIN")
                         .requestMatchers("/api/usuarios/**").hasRole("ADMIN")
 
-                        // ROTAS OPERACIONAIS
-                        .requestMatchers("/api/pedidos/checkout").hasAnyRole("ADMIN", "GARCOM")
-                        .requestMatchers("/api/pedidos/**").hasAnyRole("ADMIN", "GARCOM", "COZINHA")
-                        .requestMatchers("/api/clientes/**").hasAnyRole("ADMIN", "GARCOM")
-
+                        // Qualquer rota residual exige validação de token
                         .anyRequest().authenticated()
                 )
                 .addFilterBefore(securityFilter, UsernamePasswordAuthenticationFilter.class)

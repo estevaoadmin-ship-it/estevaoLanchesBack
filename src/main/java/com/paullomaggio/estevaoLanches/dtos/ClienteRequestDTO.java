@@ -16,18 +16,25 @@ public record ClienteRequestDTO(
         @CPF(message = "CPF inválido.")
         String cpf,
 
-        // Tiramos o @NotBlank daqui para tornar o e-mail opcional
         @Email(message = "E-mail inválido.")
         @Size(max = 100, message = "O e-mail não pode passar de 100 caracteres.")
         String email,
 
-        // Colocamos o @NotBlank aqui, pois agora o telefone é obrigatório
         @NotBlank(message = "O número de telefone/WhatsApp é obrigatório.")
         @Size(max = 20, message = "O número de telefone não pode passar de 20 caracteres.")
         String numero,
 
         LocalDate dataNascimento,
 
-        @Valid // Dispara a validação dos endereços enviados na lista
+        @Valid
         List<EnderecoRequestDTO> enderecos
-) {}
+) {
+        // 🎯 FIX MARGINAL: Construtor compacto para sanitização. Transforma "" em null
+        // Evita o Erro 422 Unprocessable Content sem alterar a arquitetura do banco
+        public ClienteRequestDTO {
+                if (cpf != null && cpf.trim().isEmpty()) cpf = null;
+                if (email != null && email.trim().isEmpty()) email = null;
+                if (numero != null) numero = numero.replaceAll("\\D", "");
+                if (nome != null) nome = nome.trim().toUpperCase();
+        }
+}

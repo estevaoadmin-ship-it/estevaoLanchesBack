@@ -288,25 +288,24 @@ public class PedidoService {
         throw new BusinessRuleException("Por razoes financeiras e de auditoria, pedidos nao podem ser excluidos do banco de dados. Utilize a funcao de Cancelamento.");
     }
 
-    /**
-     * 🚀 PROCESSAMENTO MOBILE ATUALIZADO COZINHA + CAIXA
-     */
+    // =========================================================================
+    // 📱 FLUXO MOBILE PURIFICADO: RESOLUÇÃO DO ERRO 400 E ROTEAMENTO DE IMPRESSÃO
+    // =========================================================================
     @Transactional
     public PedidoResponseDTO processarPedidoMobile(PedidoMobileRequestDTO dto) {
         if (!caixaRepository.existsByStatus(StatusCaixa.ABERTO)) {
             throw new BusinessRuleException("O estabelecimento esta fechado. Abra o caixa para iniciar as vendas!");
         }
 
-        Pedido pedido;
+        Pedido pedido = null;
         boolean ehNovoPedido = false;
 
+        // 🎯 FIX DO ERRO 400: Carrega de forma limpa e atômica o pedido pai existente no EntityManager
         if (dto.comandaId() != null) {
             pedido = pedidoRepository.findById(dto.comandaId()).orElse(null);
-            if (pedido == null) {
-                pedido = new Pedido();
-                ehNovoPedido = true;
-            }
-        } else {
+        }
+
+        if (pedido == null) {
             pedido = new Pedido();
             ehNovoPedido = true;
         }
@@ -319,29 +318,16 @@ public class PedidoService {
             pedido.setStatusFinanceiro(StatusFinanceiro.AGUARDANDO_PAGAMENTO);
             pedido.setItens(new ArrayList<>());
             pedido.setTotal(BigDecimal.ZERO);
-
-            if (dto.cliente() != null && dto.cliente().telefone() != null && !dto.cliente().telefone().isBlank()) {
-                String telefoneLimpo = dto.cliente().telefone().replaceAll("\\D", "");
-
-                Cliente cliente = clienteRepository.findByNumero(telefoneLimpo)
-                        .orElseGet(() -> {
-                            Cliente novoCliente = new Cliente();
-                            novoCliente.setNome(dto.cliente().nome());
-                            novoCliente.setNumero(telefoneLimpo);
-                            novoCliente.setEnderecos(new ArrayList<>());
-                            return clienteRepository.save(novoCliente);
-                        });
-
-                pedido.setCliente(cliente);
-                pedido.setNomeClienteBalcao(cliente.getNome());
-            } else if (dto.cliente() != null) {
-                pedido.setNomeClienteBalcao(dto.cliente().nome());
-            }
         } else {
             validarEdicaoPedido(pedido);
         }
 
+        if (dto.cliente() != null && dto.cliente().nome() != null && !dto.cliente().nome().isBlank()) {
+            pedido.setNomeClienteBalcao(dto.cliente().nome().trim().toUpperCase());
+        }
+
         BigDecimal totalNovosItens = BigDecimal.ZERO;
+        List<ItemPedido> itensDesteLoteParaFila = new ArrayList<>();
 
         for (var itemDto : dto.itens()) {
             Produto produto = produtoRepository.findById(itemDto.produtoId())
@@ -361,15 +347,30 @@ public class PedidoService {
 
             totalNovosItens = totalNovosItens.add(calcularSubtotal(itemPedido));
             pedido.getItens().add(itemPedido);
+            itensDesteLoteParaFila.add(itemPedido);
         }
 
         pedido.setTotal(pedido.getTotal().add(totalNovosItens));
-        Pedido pedidoSalvo = pedidoRepository.save(pedido);
 
-        // 🖨️ ADICIONA NA FILA: Salva o cupom na fila de impressão com destino para a cozinha
-        adicionarNaFila(pedidoSalvo, FilaImpressao.DestinoImpressao.COZINHA);
+        // 🎯 FIX DO ERRO 400: O saveAndFlush sincroniza o estado da transação de imediato, limpando colisões
+        Pedido pedidoSalvo = pedidoRepository.saveAndFlush(pedido);
 
-        // 🚀 WEBSOCKET BROADCAST: Atualiza instantaneamente a tela do painel do Caixa e do Monitor da Cozinha
+        // 🎯 FIM DA DUPLICAÇÃO COZINHA VS CAIXA: Avalia apenas os lanches quentes recém-enviados do lote atual
+        boolean possuiLancheParaCozinha = itensDesteLoteParaFila.stream().anyMatch(i -> {
+            String prodNome = i.getProduto().getNome() != null ? i.getProduto().getNome().toUpperCase() : "";
+            List<String> termosBebida = Arrays.asList("COCA", "SUCO", "GUARANA", "AGUA", "CERVEJA", "REFRIGERANTE", "LATA", "GARRAFA", "FINI");
+            boolean ehBebida = termosBebida.stream().anyMatch(prodNome::contains);
+            return !ehBebida && Boolean.TRUE.equals(i.getProduto().getPrecisaPreparo());
+        });
+
+        // Aloca uma linha na fila do Caixa para acompanhamento no Balcão (Sempre executado)
+        adicionarNaFila(pedidoSalvo, FilaImpressao.DestinoImpressao.RECIBO_CLIENTE);
+
+        // Aloca na fila da Cozinha APENAS se houver itens que necessitem de preparo
+        if (possuiLancheParaCozinha) {
+            adicionarNaFila(pedidoSalvo, FilaImpressao.DestinoImpressao.COZINHA);
+        }
+
         PedidoResponseDTO response = new PedidoResponseDTO(pedidoSalvo);
         messagingTemplate.convertAndSend("/topic/caixa", response);
         messagingTemplate.convertAndSend("/topic/cozinha", response);

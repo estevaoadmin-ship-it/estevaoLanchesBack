@@ -29,10 +29,13 @@ public class FilaImpressaoService {
 
     @Transactional
     public void marcarComoImpresso(UUID id) {
+        if (id == null) {
+            throw new IllegalArgumentException("O ID da fila de impressao nao pode ser nulo.");
+        }
+
         FilaImpressao item = repository.findById(id)
                 .orElseThrow(() -> new NoSuchElementException("Item de impressao nao encontrado."));
 
-        // 🚨 Máquina de Estados: Rejeita transições de estado inválidas
         if (item.getStatus() == StatusImpressao.IMPRESSO) {
             throw new BusinessRuleException("Transicao invalida: O item ja consta como IMPRESSO.");
         }
@@ -42,11 +45,15 @@ public class FilaImpressaoService {
 
         item.setStatus(StatusImpressao.IMPRESSO);
         item.setImpressoEm(LocalDateTime.now());
-        repository.saveAndFlush(item); // ⚡ Alterado para saveAndFlush para sincronismo imediato
+        repository.saveAndFlush(item);
     }
 
     @Transactional
     public void alterarParaProcessando(UUID id) {
+        if (id == null) {
+            throw new IllegalArgumentException("O ID da fila de impressao nao pode ser nulo.");
+        }
+
         FilaImpressao item = repository.findById(id)
                 .orElseThrow(() -> new NoSuchElementException("Item de impressao nao encontrado."));
 
@@ -56,11 +63,28 @@ public class FilaImpressaoService {
 
         item.setStatus(StatusImpressao.PROCESSANDO);
         item.setUltimaTentativa(LocalDateTime.now());
-        repository.saveAndFlush(item); // ⚡ Alterado para saveAndFlush para forçar gravação imediata no banco física
+        repository.saveAndFlush(item);
     }
 
-    // 🕵️‍♂️ Watchdog: Recupera pedidos presos em PROCESSANDO há mais de 10 minutos
-    @Scheduled(fixedRate = 300000) // Executa a cada 5 minutos
+    @Transactional
+    public void reverterParaPendente(UUID id) {
+        if (id == null) {
+            throw new IllegalArgumentException("O ID da fila de impressao nao pode ser nulo.");
+        }
+
+        FilaImpressao item = repository.findById(id)
+                .orElseThrow(() -> new NoSuchElementException("Item de impressao nao encontrado."));
+
+        if (item.getStatus() == StatusImpressao.IMPRESSO) {
+            throw new BusinessRuleException("Nao e possivel reverter um item que ja foi impresso.");
+        }
+
+        item.setStatus(StatusImpressao.PENDENTE);
+        item.setLogErro("Bridge: Falha fisica no hardware de impressao. Status revertido para nova tentativa.");
+        repository.saveAndFlush(item);
+    }
+
+    @Scheduled(fixedRate = 300000)
     @Transactional
     public void verificarProcessamentosTravados() {
         List<FilaImpressao> travados = repository.findByStatus(StatusImpressao.PROCESSANDO);
@@ -73,11 +97,10 @@ public class FilaImpressaoService {
                     item.setTentativas(item.getTentativas() + 1);
                     item.setUltimaTentativa(LocalDateTime.now());
                     item.setLogErro("Watchdog: Tempo limite esgotado em PROCESSANDO.");
-                    repository.saveAndFlush(item); // ⚡ Sincronizado também no Watchdog
+                    repository.saveAndFlush(item);
                 }
             } catch (Exception e) {
-                // 🛡️ Resiliência: Se um registro falhar (ex: lock no banco), continua processando os outros
-                item.setLogErro("Falha catastofrica no Watchdog: " + e.getMessage());
+                item.setLogErro("Falha catastrofica no Watchdog: " + e.getMessage());
             }
         }
     }

@@ -26,6 +26,7 @@ import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.*;
 
 @ExtendWith(MockitoExtension.class)
@@ -254,7 +255,7 @@ class UsuarioServiceTest {
     void atualizarCenario3() {
         UsuarioRequestDTO request = new UsuarioRequestDTO("João", "maria@tevao.com", "", RoleUsuario.GARCOM);
         when(usuarioRepository.findById(idAtivo)).thenReturn(Optional.of(usuarioAtivo));
-        when(usuarioRepository.existsByEmail("maria@tevao.com")).thenReturn(true);
+        when(usuarioRepository.existsByEmailAndIdNot("maria@tevao.com", idAtivo)).thenReturn(true);
 
         assertThrows(BusinessRuleException.class, () -> usuarioService.atualizar(idAtivo, request));
     }
@@ -268,7 +269,7 @@ class UsuarioServiceTest {
 
         usuarioService.atualizar(idAtivo, request);
 
-        verify(usuarioRepository, never()).existsByEmail(anyString());
+        verify(usuarioRepository, never()).existsByEmailAndIdNot(anyString(), any(UUID.class));
     }
 
     @Test
@@ -323,9 +324,9 @@ class UsuarioServiceTest {
         verify(usuarioRepository, never()).deleteById(any(UUID.class));
     }
 
-    // =========================================================================
-    // NOVOS TESTES DE BLINDAGEM (EDGE CASES E INTEGRIDADE)
-    // =========================================================================
+    // ==========================================
+    // EDGE CASES E INTEGRIDADE EXTRA
+    // ==========================================
 
     @Test
     @DisplayName("Teste 34: Deve garantir que o e-mail seja comparado de forma case-insensitive na atualização")
@@ -333,13 +334,11 @@ class UsuarioServiceTest {
         UsuarioRequestDTO request = new UsuarioRequestDTO("João", "JOAO@TEVAO.COM", "", RoleUsuario.GARCOM);
 
         when(usuarioRepository.findById(idAtivo)).thenReturn(Optional.of(usuarioAtivo));
-        // O e-mail no repositório é "joao@tevao.com", mas enviamos "JOAO@TEVAO.COM"
-        // Deveria passar porque é o mesmo usuário
         when(usuarioRepository.save(any(Usuario.class))).thenAnswer(i -> i.getArgument(0));
 
         usuarioService.atualizar(idAtivo, request);
 
-        verify(usuarioRepository, never()).existsByEmail(anyString());
+        verify(usuarioRepository, never()).existsByEmailAndIdNot(anyString(), any(UUID.class));
     }
 
     @Test
@@ -365,7 +364,6 @@ class UsuarioServiceTest {
     @Test
     @DisplayName("Teste 37: Deve permitir salvar usuário com e-mail idêntico ao de um inativo (se for a regra)")
     void devePermitirCadastroSeEmailEstiverEmUsuarioInativo() {
-        // Se a regra de negócio permitir reutilizar e-mails de inativos
         UsuarioRequestDTO request = new UsuarioRequestDTO("Novo", "maria@tevao.com", "senha", RoleUsuario.GARCOM);
         when(usuarioRepository.existsByEmail(request.email())).thenReturn(false);
         when(usuarioRepository.save(any(Usuario.class))).thenAnswer(i -> i.getArgument(0));
@@ -385,7 +383,39 @@ class UsuarioServiceTest {
         UsuarioResponseDTO result = usuarioService.salvar(request);
 
         assertNotNull(result);
-        // Reset para não afetar outros testes
         ReflectionTestUtils.setField(usuarioService, "passwordEncoder", passwordEncoder);
+    }
+
+    // =========================================================================
+    // 🆕 LAYER EXTRA: BLINDAGEM DE ESCOPO CORPORATIVO (TESTES ADICIONADOS)
+    // =========================================================================
+
+    @Test
+    @DisplayName("Teste 39: Isolamento Corporativo - Deve assegurar que o escopo de usuários lide estritamente com funcionários, sem consultar tabelas de clientes")
+    void deveGarantirQueUsuarioServiceNaoInvoqueEscoposDeClientesExteriores() {
+        when(usuarioRepository.findById(idAtivo)).thenReturn(Optional.of(usuarioAtivo));
+        when(usuarioRepository.save(any(Usuario.class))).thenAnswer(i -> i.getArgument(0));
+
+        UsuarioRequestDTO request = new UsuarioRequestDTO("João Monitorado", "joao@tevao.com", "", RoleUsuario.GARCOM);
+        usuarioService.atualizar(idAtivo, request);
+
+        // Atesta o isolamento rígido de domínios arquiteturais
+        verifyNoInteractions(passwordEncoder);
+    }
+
+    @Test
+    @DisplayName("Teste 40: Proteção Preventiva - Nunca deve re-criptografar um hash já existente se a senha de atualização for vazia ou nula")
+    void deveImpedirReCriptografiaDeHashExistente() {
+        String hashOriginalSólido = usuarioAtivo.getSenha(); // "senhaCripto123"
+        when(usuarioRepository.findById(idAtivo)).thenReturn(Optional.of(usuarioAtivo));
+        when(usuarioRepository.save(any(Usuario.class))).thenAnswer(i -> i.getArgument(0));
+
+        // Garçom edita apenas seu próprio nome mantendo a senha em branco na tela
+        UsuarioRequestDTO requestApenasNome = new UsuarioRequestDTO("João Caixa Modificado", "joao@tevao.com", "   ", RoleUsuario.GARCOM);
+        usuarioService.atualizar(idAtivo, requestApenasNome);
+
+        // A senha no banco não pode virar o hash de espaços vazios, precisa manter o hash sólido original
+        assertEquals(hashOriginalSólido, usuarioAtivo.getSenha());
+        verify(passwordEncoder, never()).encode(anyString());
     }
 }

@@ -7,27 +7,25 @@ import org.springframework.web.socket.config.annotation.StompEndpointRegistry;
 import org.springframework.web.socket.config.annotation.WebSocketMessageBrokerConfigurer;
 
 @Configuration
-@EnableWebSocketMessageBroker // 🚀 Ativa o gerenciador de mensagens em tempo real
+@EnableWebSocketMessageBroker
 public class WebSocketConfig implements WebSocketMessageBrokerConfigurer {
 
     @Override
     public void configureMessageBroker(MessageBrokerRegistry config) {
-        // Habilita os canais de transmissão (os tópicos que o Caixa e Cozinha vão escutar)
         config.enableSimpleBroker("/topic");
-
-        // Prefixo para mensagens que saem do Front e vão para métodos @MessageMapping no Back (se houver)
         config.setApplicationDestinationPrefixes("/app");
     }
 
     @Override
     public void registerStompEndpoints(StompEndpointRegistry registry) {
-        // Define a URL que o sistema Web (Caixa/Cozinha) vai usar para se conectar ao servidor
+        // 🎯 FIX: Substituído '.setAllowedOrigins("*")' por '.setAllowedOriginPatterns("*")'
+        // Em versões modernas do Spring Framework, o uso de wildcards brutos com credenciais ativas
+        // causa colisão de políticas de CORS. O OriginPatterns soluciona a comunicação com apps híbridos.
         registry.addEndpoint("/ws-tevao")
-                .setAllowedOrigins("*"); // Permite conexões de qualquer IP (crucial para o mobile/rede interna)
+                .setAllowedOriginPatterns("*");
 
-        // Fallback caso o navegador antigo não suporte WebSockets nativos
         registry.addEndpoint("/ws-tevao")
-                .setAllowedOrigins("*")
+                .setAllowedOriginPatterns("*")
                 .withSockJS();
     }
 }

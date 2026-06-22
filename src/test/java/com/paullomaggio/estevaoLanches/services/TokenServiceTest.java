@@ -4,6 +4,7 @@ import com.auth0.jwt.JWT;
 import com.auth0.jwt.algorithms.Algorithm;
 import com.auth0.jwt.interfaces.DecodedJWT;
 import com.paullomaggio.estevaoLanches.entities.Cliente;
+import com.paullomaggio.estevaoLanches.entities.ContaDelivery; // 🎯 INCLUSÃO: Nova entidade digital
 import com.paullomaggio.estevaoLanches.entities.Usuario;
 import com.paullomaggio.estevaoLanches.enums.RoleUsuario;
 import org.junit.jupiter.api.BeforeEach;
@@ -21,6 +22,7 @@ class TokenServiceTest {
     private TokenService tokenService;
     private Usuario usuario;
     private Cliente cliente;
+    private ContaDelivery contaDelivery; // 🎯 INCLUSÃO: Instância para acoplamento digital seguro
     private final String segredoPadrao = "ChaveSecretaEstevaoLanches2026!";
 
     @BeforeEach
@@ -35,11 +37,25 @@ class TokenServiceTest {
         usuario.setRole(RoleUsuario.ADMIN);
         usuario.setAtivo(true);
 
+        // 1. Setup da Identidade Comercial do Cliente (Salão/Fidelidade)
         cliente = new Cliente();
         cliente.setId(UUID.randomUUID());
         cliente.setNome("José Antônio d'Ávila");
         cliente.setEmail("jose.cliente+ifood@gmail.com");
+
+        // 2. 🎯 AJUSTADO: Setup da nova Identidade Digital exigida pelo Spring Security
+        contaDelivery = new ContaDelivery();
+        contaDelivery.setId(UUID.randomUUID());
+        contaDelivery.setEmail("jose.cliente+ifood@gmail.com");
+        contaDelivery.setSenha("$2a$10$eO0Vbt9L2g.gL77L88dZ3.HDeN2H1YfW5m9H");
+        contaDelivery.setAtivo(true);
+        contaDelivery.setRole("ROLE_CLIENTE");
+        contaDelivery.setCliente(cliente); // Elo bidirecional entre as duas entidades
     }
+
+    // ==========================================
+    // MÉTODOS DE EMISSÃO E ESTRUTURA
+    // ==========================================
 
     @Test
     @DisplayName("Garantia de Emissão: Deve estruturar um JWT preenchido e assinado")
@@ -66,20 +82,23 @@ class TokenServiceTest {
     }
 
     @Test
-    @DisplayName("CRÍTICO: Deve gerar token exclusivo para Cliente")
+    @DisplayName("CRÍTICO: Deve gerar token exclusivo para Cliente usando a ContaDelivery")
     void deveGerarTokenParaClienteComClaimsCorretas() {
-        String token = tokenService.gerarTokenCliente(cliente);
+        // 🎯 AJUSTADO: Agora passa a ContaDelivery conforme o novo contrato do service
+        String token = tokenService.gerarTokenCliente(contaDelivery);
         DecodedJWT jwt = JWT.decode(token);
 
+        assertEquals(contaDelivery.getEmail(), jwt.getSubject());
         assertEquals("CLIENTE", jwt.getClaim("tipo_conta").asString());
-        assertEquals("CLIENTE", jwt.getClaim("role").asString());
+        assertEquals("ROLE_CLIENTE", jwt.getClaim("role").asString());
     }
 
     @Test
     @DisplayName("Deve extrair corretamente tipo de conta COLABORADOR e CLIENTE")
     void deveExtrairTipoContaCorretamente() {
         assertEquals("COLABORADOR", tokenService.extrairTipoConta(tokenService.gerarToken(usuario)));
-        assertEquals("CLIENTE", tokenService.extrairTipoConta(tokenService.gerarTokenCliente(cliente)));
+        // 🎯 AJUSTADO: Passando o objeto digital ContaDelivery
+        assertEquals("CLIENTE", tokenService.extrairTipoConta(tokenService.gerarTokenCliente(contaDelivery)));
     }
 
     @Test
@@ -99,6 +118,10 @@ class TokenServiceTest {
         assertNull(tokenService.extrairTipoConta("token.invalido.abc"));
         assertNull(tokenService.extrairTipoConta(null));
     }
+
+    // ==========================================
+    // VALIDACAO E SEGURANÇA (BLINDAGEM HACKER)
+    // ==========================================
 
     @Test
     @DisplayName("Validação: Deve retornar e-mail correto para token legítimo")
@@ -153,17 +176,13 @@ class TokenServiceTest {
     @Test
     @DisplayName("Blindagem: Deve rejeitar tokens com Claims manipuladas (ex: Role trocada)")
     void deveRejeitarTokenComClaimsManipuladas() {
-        // Criamos um token, mas tentamos forçar que um CLIENTE tenha role ADMIN via estrutura manual
         String tokenMalicioso = JWT.create()
                 .withIssuer("estevao-lanches-api")
                 .withSubject("hacker@gmail.com")
-                .withClaim("role", "ADMIN") // Tentativa de escalação de privilégio
+                .withClaim("role", "ADMIN")
                 .withClaim("tipo_conta", "CLIENTE")
                 .sign(Algorithm.HMAC256(segredoPadrao));
 
-        // Embora o token seja assinado, o seu sistema no SecurityFilter
-        // deve validar a consistência.
-        // O teste aqui garante que o serviço de extração não falha ao ler claims estranhas.
         assertEquals("CLIENTE", tokenService.extrairTipoConta(tokenMalicioso));
     }
 
@@ -206,5 +225,32 @@ class TokenServiceTest {
                 .sign(Algorithm.HMAC256(segredoPadrao));
 
         assertEquals("", tokenService.validarToken(tokenErrado));
+    }
+
+    // =========================================================================
+    // 🆕 NOVOS TESTES EXCLUSIVOS: VERIFICAÇÃO DE INTEGRALIDADE DOS DOIS NÍVEIS
+    // =========================================================================
+
+    @Test
+    @DisplayName("Blindagem Digital: O token gerado para a conta deve extrair o Nome Comercial do cliente de forma íntegra")
+    void deveExtrairNomeComercialDoClienteNoTokenDigital() {
+        String token = tokenService.gerarTokenCliente(contaDelivery);
+        DecodedJWT jwt = JWT.decode(token);
+
+        // Certifica que a Claim 'nome' do token digital carrega o nome cadastrado no prontuário físico do salão
+        assertNotNull(jwt.getClaim("nome").asString());
+        assertEquals("José Antônio d'Ávila", jwt.getClaim("nome").asString());
+    }
+
+    @Test
+    @DisplayName("Blindagem Digital: Deve aceitar a geração de tokens mesmo se a Conta Delivery possuir Roles customizadas")
+    void deveGerarTokenComRolesCustomizadasDaContaDelivery() {
+        contaDelivery.setRole("ROLE_CLIENTE_VIP");
+
+        String token = tokenService.gerarTokenCliente(contaDelivery);
+        DecodedJWT jwt = JWT.decode(token);
+
+        assertEquals("ROLE_CLIENTE_VIP", jwt.getClaim("role").asString());
+        assertEquals("CLIENTE", jwt.getClaim("tipo_conta").asString());
     }
 }

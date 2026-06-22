@@ -34,4 +34,11 @@ public class FilaImpressaoController {
         service.marcarComoImpresso(id);
         return ResponseEntity.noContent().build();
     }
+
+    // 🎯 FIX CRÍTICO: Rota de segurança chamada pela Bridge Node.js para evitar perda de cupons quando a impressora apagar
+    @PatchMapping("/{id}/reverter")
+    public ResponseEntity<Void> reverterParaPendente(@PathVariable UUID id) {
+        service.reverterParaPendente(id);
+        return ResponseEntity.noContent().build();
+    }
 }

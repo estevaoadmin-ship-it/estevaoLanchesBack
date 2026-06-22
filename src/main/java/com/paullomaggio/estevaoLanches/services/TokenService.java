@@ -3,7 +3,7 @@ package com.paullomaggio.estevaoLanches.services;
 import com.auth0.jwt.JWT;
 import com.auth0.jwt.algorithms.Algorithm;
 import com.auth0.jwt.interfaces.DecodedJWT;
-import com.paullomaggio.estevaoLanches.entities.Cliente;
+import com.paullomaggio.estevaoLanches.entities.ContaDelivery;
 import com.paullomaggio.estevaoLanches.entities.Usuario;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
@@ -28,12 +28,13 @@ public class TokenService {
                 .sign(Algorithm.HMAC256(secret));
     }
 
-    public String gerarTokenCliente(Cliente cliente) {
+    // 🎯 ALTERADO: Assinatura adaptada para receber a ContaDelivery isolada
+    public String gerarTokenCliente(ContaDelivery conta) {
         return JWT.create()
                 .withIssuer("estevao-lanches-api")
-                .withSubject(cliente.getEmail())
-                .withClaim("role", "CLIENTE")
-                .withClaim("nome", cliente.getNome())
+                .withSubject(conta.getEmail())
+                .withClaim("role", conta.getRole())
+                .withClaim("nome", conta.getCliente().getNome()) // Preserva o nome comercial no token
                 .withClaim("tipo_conta", "CLIENTE")
                 .withExpiresAt(gerarDataExpiracao())
                 .sign(Algorithm.HMAC256(secret));

@@ -1,13 +1,12 @@
 package com.paullomaggio.estevaoLanches.config;
 
-import com.paullomaggio.estevaoLanches.repositories.ClienteRepository;
+import com.paullomaggio.estevaoLanches.repositories.ContaDeliveryRepository;
 import com.paullomaggio.estevaoLanches.repositories.UsuarioRepository;
 import com.paullomaggio.estevaoLanches.services.TokenService;
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.security.core.userdetails.UserDetails;
@@ -19,14 +18,30 @@ import java.io.IOException;
 @Component
 public class SecurityFilter extends OncePerRequestFilter {
 
-    @Autowired
-    private TokenService tokenService;
+    private final TokenService tokenService;
+    private final UsuarioRepository usuarioRepository;
+    private final ContaDeliveryRepository contaDeliveryRepository;
 
-    @Autowired
-    private UsuarioRepository usuarioRepository;
+    public SecurityFilter(TokenService tokenService,
+                          UsuarioRepository usuarioRepository,
+                          ContaDeliveryRepository contaDeliveryRepository) {
+        this.tokenService = tokenService;
+        this.usuarioRepository = usuarioRepository;
+        this.contaDeliveryRepository = contaDeliveryRepository;
+    }
 
-    @Autowired
-    private ClienteRepository clienteRepository;
+    // 🎯 O FILTRO DE BARREIRA: Diz ao Spring quais rotas estão terminantemente dispensadas de validação JWT
+    @Override
+    protected boolean shouldNotFilter(HttpServletRequest request) throws ServletException {
+        String path = request.getServletPath();
+
+        // Bloqueia a execução do filtro para as portas públicas de autenticação, ponte de impressão e WebSocket
+        return path.startsWith("/api/auth/")
+                || path.startsWith("/api/fila-impressao")
+                || path.startsWith("/api/pedidos/fila-impressao")
+                || path.startsWith("/ws-tevao")
+                || path.equals("/error");
+    }
 
     @Override
     protected void doFilterInternal(HttpServletRequest request, HttpServletResponse response, FilterChain filterChain)
@@ -38,7 +53,6 @@ public class SecurityFilter extends OncePerRequestFilter {
             String email = tokenService.validarToken(token);
             String tipoConta = tokenService.extrairTipoConta(token);
 
-            // Ajuste: Adicionado verificação de nulo no email por segurança extra
             if (email != null && !email.isEmpty() && tipoConta != null) {
                 UserDetails userDetails = buscarUsuarioPorTipo(email, tipoConta);
 
@@ -52,14 +66,11 @@ public class SecurityFilter extends OncePerRequestFilter {
         filterChain.doFilter(request, response);
     }
 
-    // Estratégia de Roteamento O(1)
     private UserDetails buscarUsuarioPorTipo(String email, String tipoConta) {
-        // Nota: Esta sintaxe de switch (com ->) exige Java 14 ou superior.
-        // Como o Spring Boot 3 usa Java 17+, funcionará perfeitamente.
         return switch (tipoConta) {
             case "COLABORADOR" -> usuarioRepository.findByEmail(email).orElse(null);
-            case "CLIENTE" -> clienteRepository.findByEmail(email).orElse(null);
-            default -> null; // Facilmente extensível no futuro (ex: MOTOBOY)
+            case "CLIENTE" -> contaDeliveryRepository.findByEmail(email).orElse(null);
+            default -> null;
         };
     }
 

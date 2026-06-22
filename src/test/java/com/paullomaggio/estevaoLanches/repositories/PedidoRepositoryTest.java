@@ -2,6 +2,7 @@ package com.paullomaggio.estevaoLanches.repositories;
 
 import com.paullomaggio.estevaoLanches.entities.*;
 import com.paullomaggio.estevaoLanches.enums.*;
+import com.paullomaggio.estevaoLanches.dtos.MeioPagamentoItemDTO;
 import com.paullomaggio.estevaoLanches.dtos.ProdutoRankingDTO;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -52,7 +53,7 @@ class PedidoRepositoryTest {
         produtoQuePrepara.setNome("X-Bacon");
         produtoQuePrepara.setDescricao("Lanche");
         produtoQuePrepara.setPreco(new BigDecimal("25.00"));
-        produtoQuePrepara.setStatus(StatusProduto.values()[0]);
+        produtoQuePrepara.setStatus(StatusProduto.DISPONIVEL);
         produtoQuePrepara.setIsCombo(false);
         produtoQuePrepara.setPrecisaPreparo(true);
         produtoQuePrepara.setCategoria(categoria);
@@ -61,7 +62,7 @@ class PedidoRepositoryTest {
         produtoProntoBalcao.setNome("Coca Lata");
         produtoProntoBalcao.setDescricao("Bebida");
         produtoProntoBalcao.setPreco(new BigDecimal("6.00"));
-        produtoProntoBalcao.setStatus(StatusProduto.values()[0]);
+        produtoProntoBalcao.setStatus(StatusProduto.DISPONIVEL);
         produtoProntoBalcao.setIsCombo(false);
         produtoProntoBalcao.setPrecisaPreparo(false);
         produtoProntoBalcao.setCategoria(categoria);
@@ -88,9 +89,10 @@ class PedidoRepositoryTest {
         item.setQuantidade(1);
         item.setPrecoUnitario(total);
         item.setPedido(pedido);
+        item.setNumeroConta(1);
+        item.setStatusPagamento(StatusPagamento.ABERTO);
 
         pedido.getItens().add(item);
-
         return pedidoRepository.save(pedido);
     }
 
@@ -192,16 +194,12 @@ class PedidoRepositoryTest {
         entityManager.flush();
 
         List<Pedido> relatorio = pedidoRepository.buscarPedidosParaRelatorio(inicio, fim);
-        List<com.paullomaggio.estevaoLanches.dtos.MeioPagamentoItemDTO> pagamentos =
+        List<MeioPagamentoItemDTO> pagamentos =
                 pedidoRepository.somarFaturamentoPorMeioPagamento(inicio, fim, StatusPedido.FINALIZADO);
 
         assertThat(relatorio).isNotEmpty();
         assertThat(pagamentos).isNotEmpty();
     }
-
-    // =========================================================================
-    // 🆕 VALIDAÇÃO DO BI DO GRUPO (RANKING DE PRODUTOS CORRIGIDO)
-    // =========================================================================
 
     @Test
     @DisplayName("CT-REPO-BI-004: Deve processar o Ranking de Produtos via JPQL agregando os itens por agrupamento sem falhas de sintaxe")
@@ -218,8 +216,6 @@ class PedidoRepositoryTest {
         List<ProdutoRankingDTO> ranking = pedidoRepository.buscarTopProdutosJPQL(inicio, fim, StatusPedido.FINALIZADO, PageRequest.of(0, 10));
 
         assertThat(ranking).hasSize(2);
-
-        // 🚀 CORRIGIDO: Modificado de sintaxe de Record para Getters clássicos gerados pelo Lombok @Data
         assertThat(ranking.get(0).getNomeProduto()).isEqualTo("X-Bacon");
         assertThat(ranking.get(0).getQuantidadeVendida()).isEqualTo(2L);
     }

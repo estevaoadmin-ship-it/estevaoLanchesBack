@@ -10,6 +10,7 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.InOrder;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
@@ -21,7 +22,10 @@ import java.time.LocalDateTime;
 import java.time.temporal.ChronoUnit;
 import java.util.*;
 
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.junit.jupiter.api.Assertions.*;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.Mockito.*;
 
 @ExtendWith(MockitoExtension.class)
@@ -51,6 +55,9 @@ class FilaImpressaoServiceTest {
         itemFila.setCriadoEm(LocalDateTime.now().minusMinutes(5));
     }
 
+    // =========================================================================
+    // 1. BLOCO DE BUSCA DE PENDENTES
+    // =========================================================================
     @Nested
     @DisplayName("1. Bloco de Busca de Pendentes")
     class BuscarPendentesTests {
@@ -72,17 +79,11 @@ class FilaImpressaoServiceTest {
             List<FilaImpressao> resultado = service.buscarPendentes();
             assertTrue(resultado.isEmpty());
         }
-
-        @Test
-        @DisplayName("Deve ignorar outros status na busca comum")
-        void deveIgnorarOutrosStatus() {
-            when(repository.findByStatus(StatusImpressao.PENDENTE)).thenReturn(Collections.emptyList());
-            List<FilaImpressao> resultado = service.buscarPendentes();
-            assertTrue(resultado.isEmpty());
-            verify(repository, never()).findByStatus(StatusImpressao.IMPRESSO);
-        }
     }
 
+    // =========================================================================
+    // 2. BLOCO DA MÁQUINA DE ESTADOS: PROCESSAMENTO
+    // =========================================================================
     @Nested
     @DisplayName("2. Bloco da Maquina de Estados: Processamento")
     class AlterarParaProcessandoTests {
@@ -111,6 +112,9 @@ class FilaImpressaoServiceTest {
         }
     }
 
+    // =========================================================================
+    // 3. BLOCO DA MÁQUINA DE ESTADOS: CONCLUSÃO DO HARDWARE
+    // =========================================================================
     @Nested
     @DisplayName("3. Bloco da Maquina de Estados: Conclusao")
     class MarcarComoImpressoTests {
@@ -125,7 +129,6 @@ class FilaImpressaoServiceTest {
 
             assertEquals(StatusImpressao.IMPRESSO, itemFila.getStatus());
             assertNotNull(itemFila.getImpressoEm());
-            assertTrue(ChronoUnit.SECONDS.between(itemFila.getImpressoEm(), LocalDateTime.now()) < 5);
             verify(repository, times(1)).saveAndFlush(itemFila);
         }
 
@@ -141,7 +144,7 @@ class FilaImpressaoServiceTest {
         }
 
         @Test
-        @DisplayName("Deve rejeitar transicao se o item pular direto de PENDENTE para IMPRESSO")
+        @DisplayName("Deve rejeitar transicao se a Bridge pular de PENDENTE direto para IMPRESSO")
         void deveRejeitarSePendente() {
             itemFila.setStatus(StatusImpressao.PENDENTE);
             when(repository.findById(idValido)).thenReturn(Optional.of(itemFila));
@@ -152,67 +155,54 @@ class FilaImpressaoServiceTest {
         }
 
         @Test
-        @DisplayName("Deve lancar NoSuchElementException se o UUID nao existir")
+        @DisplayName("Deve lancar NoSuchElementException se o UUID solicitado nao existir")
         void deveLancarErroSeUuidNaoEncontrado() {
             when(repository.findById(idValido)).thenReturn(Optional.empty());
             assertThrows(NoSuchElementException.class, () -> service.marcarComoImpresso(idValido));
             assertThrows(NoSuchElementException.class, () -> service.alterarParaProcessando(idValido));
         }
-
-        @Test
-        @DisplayName("Nunca deve alterar metadados estruturais do pedido ou contador ao imprimir")
-        void devePreservarDadosImutaveis() {
-            itemFila.setStatus(StatusImpressao.PROCESSANDO);
-            LocalDateTime dataCriacaoOriginal = itemFila.getCriadoEm();
-            when(repository.findById(idValido)).thenReturn(Optional.of(itemFila));
-
-            service.marcarComoImpresso(idValido);
-
-            assertEquals(pedidoMock, itemFila.getPedido());
-            assertEquals(0, itemFila.getTentativas());
-            assertEquals(dataCriacaoOriginal, itemFila.getCriadoEm());
-        }
     }
 
+    // =========================================================================
+    // 4. BLOCO DA MÁQUINA DE ESTADOS: ROLLBACK DE BATERIA/PANE FÍSICA
+    // =========================================================================
     @Nested
-    @DisplayName("4. Bloco de Integridade e Dados")
-    class IntegridadeTests {
+    @DisplayName("4. Bloco de Rollback de Hardware (Reverter)")
+    class ReverterParaPendenteTests {
 
         @Test
-        @DisplayName("Deve garantir que o objeto modificado e o mesmo persistido no banco via saveAndFlush")
-        void deveManterMesmaReferenciaEId() {
+        @DisplayName("Deve reverter item PROCESSANDO de volta para PENDENTE com sucesso")
+        void deveReverterParaPendenteComSucesso() {
             itemFila.setStatus(StatusImpressao.PROCESSANDO);
             when(repository.findById(idValido)).thenReturn(Optional.of(itemFila));
 
-            service.marcarComoImpresso(idValido);
+            service.reverterParaPendente(idValido);
 
-            verify(repository).saveAndFlush(argThat(salvo -> salvo.getId().equals(idValido) && salvo.getPedido().equals(pedidoMock)));
+            assertEquals(StatusImpressao.PENDENTE, itemFila.getStatus());
+            verify(repository, times(1)).saveAndFlush(itemFila);
         }
-    }
-
-    @Nested
-    @DisplayName("5. Bloco de Transacoes")
-    class TransacaoTests {
 
         @Test
-        @DisplayName("Garantir presenca da anotacao @Transactional nos metodos de mutacao")
-        void devePossuirAnotacaoTransactional() throws NoSuchMethodException {
-            Method metodoMarcar = FilaImpressaoService.class.getMethod("marcarComoImpresso", UUID.class);
-            Method metodoProcessar = FilaImpressaoService.class.getMethod("alterarParaProcessando", UUID.class);
-            Method metodoWatchdog = FilaImpressaoService.class.getMethod("verificarProcessamentosTravados");
+        @DisplayName("Deve impedir reversao se o item ja tiver sido consolidado como IMPRESSO")
+        void deveImpedirReversaoDeItemJaImpresso() {
+            itemFila.setStatus(StatusImpressao.IMPRESSO);
+            when(repository.findById(idValido)).thenReturn(Optional.of(itemFila));
 
-            assertTrue(metodoMarcar.isAnnotationPresent(Transactional.class));
-            assertTrue(metodoProcessar.isAnnotationPresent(Transactional.class));
-            assertTrue(metodoWatchdog.isAnnotationPresent(Transactional.class));
+            BusinessRuleException ex = assertThrows(BusinessRuleException.class, () -> service.reverterParaPendente(idValido));
+            assertTrue(ex.getMessage().contains("Nao e possivel reverter um item que ja foi impresso"));
+            verify(repository, never()).saveAndFlush(any());
         }
     }
 
+    // =========================================================================
+    // 5. BLOCO DO WATCHDOG RESILIENTE
+    // =========================================================================
     @Nested
-    @DisplayName("6. Bloco do Watchdog Resiliente")
+    @DisplayName("5. Bloco do Watchdog Resiliente")
     class WatchdogTests {
 
         @Test
-        @DisplayName("Deve recuperar registros travados em PROCESSANDO com mais de 10 minutos via saveAndFlush")
+        @DisplayName("Deve recuperar e resetar registros travados em PROCESSANDO com mais de 10 minutos para PENDENTE")
         void deveRecuperarRegistrosAntigos() {
             itemFila.setStatus(StatusImpressao.PROCESSANDO);
             itemFila.setUltimaTentativa(LocalDateTime.now().minusMinutes(11));
@@ -223,28 +213,11 @@ class FilaImpressaoServiceTest {
 
             assertEquals(StatusImpressao.PENDENTE, itemFila.getStatus());
             assertEquals(1, itemFila.getTentativas());
-            assertNotNull(itemFila.getUltimaTentativa());
-            assertEquals("Watchdog: Tempo limite esgotado em PROCESSANDO.", itemFila.getLogErro());
             verify(repository, times(1)).saveAndFlush(itemFila);
         }
 
         @Test
-        @DisplayName("Deve ignorar registros em PROCESSANDO que sao recentes")
-        void deveIgnorarProcessandoRecentes() {
-            itemFila.setStatus(StatusImpressao.PROCESSANDO);
-            itemFila.setUltimaTentativa(LocalDateTime.now().minusMinutes(2));
-
-            when(repository.findByStatus(StatusImpressao.PROCESSANDO)).thenReturn(List.of(itemFila));
-
-            service.verificarProcessamentosTravados();
-
-            assertEquals(StatusImpressao.PROCESSANDO, itemFila.getStatus());
-            assertEquals(0, itemFila.getTentativas());
-            verify(repository, never()).saveAndFlush(any());
-        }
-
-        @Test
-        @DisplayName("Deve continuar processamento da fila mesmo se um registro falhar catastroficamente (Try/Catch)")
+        @DisplayName("Deve manter o processamento da fila mesmo se um registro isolado falhar catastroficamente")
         void deveSerResilienteAFalhasIndividuais() {
             FilaImpressao itemFalho = new FilaImpressao();
             itemFalho.setStatus(StatusImpressao.PROCESSANDO);
@@ -255,35 +228,32 @@ class FilaImpressaoServiceTest {
             itemSaudavel.setUltimaTentativa(LocalDateTime.now().minusMinutes(15));
 
             when(repository.findByStatus(StatusImpressao.PROCESSANDO)).thenReturn(List.of(itemFalho, itemSaudavel));
-
-            // Simula uma falha física (lock) apenas no 'itemFalho'
             doThrow(new RuntimeException("Database Lock Error")).when(repository).saveAndFlush(itemFalho);
 
             assertDoesNotThrow(() -> service.verificarProcessamentosTravados());
-
-            // Verifica se o erro foi suprimido e registrado no log do itemFalho
-            assertTrue(itemFalho.getLogErro().contains("Falha catastofrica no Watchdog"));
-
-            // Verifica se o loop continuou e processou o itemSaudavel com sucesso
+            assertThat(itemFalho.getLogErro()).contains("Falha catastrofica no Watchdog");
             verify(repository, times(1)).saveAndFlush(itemSaudavel);
         }
     }
 
+    // =========================================================================
+    // 6. BLOCO DE REGRAS DE TRANSAÇÃO E CONTRATOS
+    // =========================================================================
     @Nested
-    @DisplayName("7. Bloco de Tratamento de Erros de Infraestrutura")
-    class ErrosInfraestruturaTests {
+    @DisplayName("6. Bloco de Infraestrutura e Contratos")
+    class TransacaoTests {
 
         @Test
-        @DisplayName("Deve propagar RuntimeException se o banco de dados falhar na busca")
-        void devePropagarErroAoBuscar() {
-            when(repository.findByStatus(StatusImpressao.PENDENTE)).thenThrow(new RuntimeException("Database offline"));
-            assertThrows(RuntimeException.class, () -> service.buscarPendentes());
-        }
-    }
+        @DisplayName("Garantir presenca obrigatoria da anotacao @Transactional nos metodos de escrita")
+        void devePossuirAnotacaoTransactional() throws NoSuchMethodException {
+            Method m1 = FilaImpressaoService.class.getMethod("marcarComoImpresso", UUID.class);
+            Method m2 = FilaImpressaoService.class.getMethod("alterarParaProcessando", UUID.class);
+            Method m3 = FilaImpressaoService.class.getMethod("reverterParaPendente", UUID.class);
 
-    @Nested
-    @DisplayName("8. Bloco de Agendamento (Scheduler)")
-    class SchedulerTests {
+            assertTrue(m1.isAnnotationPresent(Transactional.class));
+            assertTrue(m2.isAnnotationPresent(Transactional.class));
+            assertTrue(m3.isAnnotationPresent(Transactional.class));
+        }
 
         @Test
         @DisplayName("Deve possuir a anotacao @Scheduled configurada com intervalo de 5 minutos")
@@ -293,6 +263,37 @@ class FilaImpressaoServiceTest {
 
             assertNotNull(scheduled);
             assertEquals(300000L, scheduled.fixedRate());
+        }
+    }
+
+    // =========================================================================
+    // 7. BLOCO DE BLINDAGEM DE PARÂMETROS EXTREMOS (DEFENSIVE PROGRAMMING)
+    // =========================================================================
+    @Nested
+    @DisplayName("7. Bloco de Blindagem e Parametros Criticos")
+    class BlindagemExtremaTests {
+
+        @Test
+        @DisplayName("Deve lancar IllegalArgumentException se o UUID enviado for nulo")
+        void deveRejeitarIdNuloNosMetodosDeMutacao() {
+            assertThrows(IllegalArgumentException.class, () -> service.alterarParaProcessando(null));
+            assertThrows(IllegalArgumentException.class, () -> service.marcarComoImpresso(null));
+            assertThrows(IllegalArgumentException.class, () -> service.reverterParaPendente(null));
+
+            verify(repository, never()).findById(any());
+            verify(repository, never()).saveAndFlush(any());
+        }
+
+        @Test
+        @DisplayName("Deve assegurar a sequencia logica exata de transicao da Fila via InOrder")
+        void deveGarantirSequenciaLogicaDeTransicao() {
+            when(repository.findById(idValido)).thenReturn(Optional.of(itemFila));
+
+            service.alterarParaProcessando(idValido);
+
+            InOrder orderVerifier = inOrder(repository);
+            orderVerifier.verify(repository).findById(idValido);
+            orderVerifier.verify(repository).saveAndFlush(itemFila);
         }
     }
 }

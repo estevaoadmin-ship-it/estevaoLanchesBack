@@ -159,15 +159,15 @@ class ClienteServiceTest {
     // ==========================================
 
     @Test
-    @DisplayName("Teste 19: Deve salvar cliente com sucesso")
+    @DisplayName("Teste 19: Deve salvar cliente com sucesso padronizando caixa alta")
     void deveSalvarClienteComSucesso() {
         when(clienteRepository.findByCpf(any())).thenReturn(Optional.empty());
         when(clienteRepository.findByEmail(any())).thenReturn(Optional.empty());
-        when(clienteRepository.save(any())).thenReturn(clienteMock);
+        when(clienteRepository.save(any(Cliente.class))).thenAnswer(i -> i.getArgument(0));
 
         ClienteResponseDTO resultado = clienteService.salvar(requestDTOMock);
 
-        assertThat(resultado.nome()).isEqualTo("Carlos Silva");
+        assertThat(resultado.nome()).isEqualTo("CARLOS SILVA");
         verify(clienteRepository, times(1)).save(any(Cliente.class));
     }
 
@@ -195,16 +195,16 @@ class ClienteServiceTest {
     // ==========================================
 
     @Test
-    @DisplayName("Teste 22: Deve atualizar cliente com sucesso")
+    @DisplayName("Teste 22: Deve atualizar cliente com sucesso convertendo o nome para MAIÚSCULO")
     void deveAtualizarClienteComSucesso() {
         when(clienteRepository.findById(clienteId)).thenReturn(Optional.of(clienteMock));
         when(clienteRepository.existsByCpfAndIdNot(any(), any())).thenReturn(false);
         when(clienteRepository.existsByEmailAndIdNot(any(), any())).thenReturn(false);
-        when(clienteRepository.save(any())).thenReturn(clienteMock);
+        when(clienteRepository.save(any(Cliente.class))).thenAnswer(i -> i.getArgument(0));
 
         ClienteResponseDTO resultado = clienteService.atualizar(clienteId, requestDTOMock);
 
-        assertThat(resultado.nome()).isEqualTo("Carlos Silva");
+        assertThat(resultado.nome()).isEqualTo("CARLOS SILVA");
     }
 
     @Test
@@ -278,7 +278,7 @@ class ClienteServiceTest {
 
         ClienteResponseDTO resultado = clienteService.atualizar(clienteId, requestDTOMock);
 
-        assertThat(resultado.nome()).isEqualTo(requestDTOMock.nome());
+        assertThat(resultado.nome()).isEqualTo("CARLOS SILVA");
         assertThat(resultado.enderecos()).hasSize(1);
         assertThat(resultado.enderecos().get(0).logradouro()).isEqualTo("Rua A");
     }
@@ -314,7 +314,6 @@ class ClienteServiceTest {
     void deveGarantirVinculoBidirecional() {
         when(clienteRepository.findByCpf(any())).thenReturn(Optional.empty());
         when(clienteRepository.findByEmail(any())).thenReturn(Optional.empty());
-
         when(clienteRepository.save(any(Cliente.class))).thenAnswer(i -> {
             Cliente c = i.getArgument(0);
             assertThat(c.getEnderecos().get(0).getCliente()).isEqualTo(c);
@@ -334,7 +333,7 @@ class ClienteServiceTest {
         ClienteRequestDTO dtoSemCpf = new ClienteRequestDTO("Carlos Google", null, "google@email.com", "11999999999", null, null);
 
         when(clienteRepository.findByEmail("google@email.com")).thenReturn(Optional.empty());
-        when(clienteRepository.save(any(Cliente.class))).thenReturn(clienteMock);
+        when(clienteRepository.save(any(Cliente.class))).thenAnswer(i -> i.getArgument(0));
 
         clienteService.salvar(dtoSemCpf);
 
@@ -348,7 +347,7 @@ class ClienteServiceTest {
         ClienteRequestDTO dtoSemEmail = new ClienteRequestDTO("Carlos Zap", "11122233344", "   ", "11999999999", null, null);
 
         when(clienteRepository.findByCpf("11122233344")).thenReturn(Optional.empty());
-        when(clienteRepository.save(any(Cliente.class))).thenReturn(clienteMock);
+        when(clienteRepository.save(any(Cliente.class))).thenAnswer(i -> i.getArgument(0));
 
         clienteService.salvar(dtoSemEmail);
 
@@ -363,7 +362,7 @@ class ClienteServiceTest {
 
         when(clienteRepository.findById(clienteId)).thenReturn(Optional.of(clienteMock));
         when(clienteRepository.existsByEmailAndIdNot("google@email.com", clienteId)).thenReturn(false);
-        when(clienteRepository.save(any(Cliente.class))).thenReturn(clienteMock);
+        when(clienteRepository.save(any(Cliente.class))).thenAnswer(i -> i.getArgument(0));
 
         clienteService.atualizar(clienteId, dtoSemCpf);
 
@@ -378,9 +377,70 @@ class ClienteServiceTest {
 
         when(clienteRepository.findById(clienteId)).thenReturn(Optional.of(clienteMock));
         when(clienteRepository.existsByCpfAndIdNot("11122233344", clienteId)).thenReturn(false);
-        when(clienteRepository.save(any(Cliente.class))).thenReturn(clienteMock);
+        when(clienteRepository.save(any(Cliente.class))).thenAnswer(i -> i.getArgument(0));
 
         clienteService.atualizar(clienteId, dtoSemEmail);
+
+        verify(clienteRepository, never()).existsByEmailAndIdNot(any(), any());
+        verify(clienteRepository, times(1)).save(any(Cliente.class));
+    }
+
+    // =========================================================================
+    // ⚙️ VALIDAÇÃO DAS REGRAS DE SANITIZAÇÃO DO DTO
+    // =========================================================================
+
+    @Test
+    @DisplayName("Teste 38: Deve certificar que o DTO remove máscaras e caracteres não numéricos do WhatsApp")
+    void deveRemoverMascarasDoTelefoneNoDTO() {
+        ClienteRequestDTO dtoComMascara = new ClienteRequestDTO("Marta Silva", null, null, "(16) 99999-8888", null, null);
+
+        assertThat(dtoComMascara.numero()).isEqualTo("16999998888");
+    }
+
+    @Test
+    @DisplayName("Teste 39: Deve certificar que e-mails e CPFs vazios ou cheios de espaços viram NULL para não explodir o Bean Validation")
+    void deveConverterCamposEmBrancoParaNullNoDTO() {
+        ClienteRequestDTO dtoVazio = new ClienteRequestDTO("Marta Silva", "   ", "  ", "11988887777", null, null);
+
+        assertThat(dtoVazio.cpf()).isNull();
+        assertThat(dtoVazio.email()).isNull();
+    }
+
+    // =========================================================================
+    // 🆕 NOVOS TESTES EXCLUSIVOS DE PROTEÇÃO DO ECOSSISTEMA MESA/BALCÃO
+    // =========================================================================
+
+    @Test
+    @DisplayName("Teste 40: Deve permitir salvar cliente com e-mail nulo absoluto sem disparar validação de duplicidade")
+    void deveSalvarClienteComEmailNuloSemEstourarValidacaoDeDuplicidade() {
+        ClienteRequestDTO dtoMesaSalão = new ClienteRequestDTO("Paulo Da Mesa 10", null, null, "16993939957", null, null);
+
+        when(clienteRepository.save(any(Cliente.class))).thenAnswer(i -> i.getArgument(0));
+
+        ClienteResponseDTO resultado = clienteService.salvar(dtoMesaSalão);
+
+        assertThat(resultado.nome()).isEqualTo("PAULO DA MESA 10");
+        assertThat(resultado.email()).isNull();
+
+        // Garante que o repositório nunca gastou processamento buscando e-mails nulos compartilhados
+        verify(clienteRepository, never()).findByEmail(any());
+        verify(clienteRepository, times(1)).save(any(Cliente.class));
+    }
+
+    @Test
+    @DisplayName("Teste 41: Deve permitir atualizar dados de cliente mantendo o e-mail como nulo com segurança")
+    void deveAtualizarClienteMantendoEmailNulo() {
+        clienteMock.setEmail(null); // Estado vindo do banco sem e-mail (garçom criou)
+        ClienteRequestDTO dtoAtualizacao = new ClienteRequestDTO("Carlos Silva Alterado", "11122233344", null, "11999999999", null, null);
+
+        when(clienteRepository.findById(clienteId)).thenReturn(Optional.of(clienteMock));
+        when(clienteRepository.existsByCpfAndIdNot("11122233344", clienteId)).thenReturn(false);
+        when(clienteRepository.save(any(Cliente.class))).thenAnswer(i -> i.getArgument(0));
+
+        ClienteResponseDTO resultado = clienteService.atualizar(clienteId, dtoAtualizacao);
+
+        assertThat(resultado.nome()).isEqualTo("CARLOS SILVA ALTERADO");
+        assertThat(resultado.email()).isNull();
 
         verify(clienteRepository, never()).existsByEmailAndIdNot(any(), any());
         verify(clienteRepository, times(1)).save(any(Cliente.class));

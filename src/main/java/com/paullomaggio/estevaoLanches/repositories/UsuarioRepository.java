@@ -17,6 +17,9 @@ public interface UsuarioRepository extends JpaRepository<Usuario, UUID> {
     // Validador rápido de existência para evitar consultas pesadas no banco
     boolean existsByEmail(String email);
 
+    // 🎯 FIX: Adicionado método para validar duplicidade de e-mail de colaboradores durante atualizações cadastrais
+    boolean existsByEmailAndIdNot(String email, UUID id);
+
     // Lista apenas os funcionários que estão trabalhando ativamente no momento
     List<Usuario> findByAtivoTrue();
 }

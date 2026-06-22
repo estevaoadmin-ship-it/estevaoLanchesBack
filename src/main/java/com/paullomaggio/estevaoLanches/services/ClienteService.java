@@ -53,12 +53,10 @@ public class ClienteService {
 
     @Transactional
     public ClienteResponseDTO salvar(ClienteRequestDTO dto) {
-        // Só verifica CPF se ele foi preenchido
         if (dto.cpf() != null && !dto.cpf().isBlank() && clienteRepository.findByCpf(dto.cpf()).isPresent()) {
             throw new BusinessRuleException("Já existe um cliente cadastrado com este CPF.");
         }
 
-        // Só verifica E-mail se ele foi preenchido (Evita conflito de e-mails vazios)
         if (dto.email() != null && !dto.email().isBlank() && clienteRepository.findByEmail(dto.email()).isPresent()) {
             throw new BusinessRuleException("Já existe um cliente cadastrado com este e-mail.");
         }
@@ -104,7 +102,6 @@ public class ClienteService {
         cliente.setNumero(dto.numero());
         cliente.setDataNascimento(dto.dataNascimento());
 
-        // Atualização segura dos endereços (Orphan Removal)
         cliente.getEnderecos().clear();
         if (dto.enderecos() != null) {
             List<Endereco> novosEnderecos = dto.enderecos().stream().map(endDto -> {
@@ -117,7 +114,7 @@ public class ClienteService {
                 endereco.setCidade(endDto.city());
                 endereco.setUf(endDto.uf());
                 endereco.setCep(endDto.cep());
-                endereco.setCliente(cliente); // Vínculo bidirecional obrigatório
+                endereco.setCliente(cliente);
                 return endereco;
             }).collect(Collectors.toList());
 

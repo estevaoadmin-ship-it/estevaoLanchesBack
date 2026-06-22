@@ -19,7 +19,7 @@ import java.util.UUID;
 import java.util.stream.Collectors;
 
 @Service
-public class UsuarioService implements UserDetailsService { // AJUSTADO: Assinatura do contrato de segurança
+public class UsuarioService implements UserDetailsService {
 
     @Autowired
     private UsuarioRepository usuarioRepository;
@@ -27,7 +27,6 @@ public class UsuarioService implements UserDetailsService { // AJUSTADO: Assinat
     @Autowired(required = false)
     private PasswordEncoder passwordEncoder;
 
-    // 🚨 CONEXÃO DO LOGlM: Método que localiza as credenciais digitadas no Angular dentro do Postgres
     @Override
     @Transactional(readOnly = true)
     public UserDetails loadUserByUsername(String username) throws UsernameNotFoundException {
@@ -76,6 +75,12 @@ public class UsuarioService implements UserDetailsService { // AJUSTADO: Assinat
         usuario.setAtivo(true);
 
         Usuario usuarioSalvo = usuarioRepository.save(usuario);
+
+        // 🎯 FIX: Se a persistência falhar ou for mockada de forma vazia, aborta explicitamente antes de construir o DTO
+        if (usuarioSalvo == null) {
+            throw new BusinessRuleException("Erro crítico ao gravar os registros do colaborador.");
+        }
+
         return new UsuarioResponseDTO(usuarioSalvo);
     }
 
@@ -84,7 +89,7 @@ public class UsuarioService implements UserDetailsService { // AJUSTADO: Assinat
         Usuario usuario = usuarioRepository.findById(id)
                 .orElseThrow(() -> new ResourceNotFoundException("Impossível atualizar. Usuário não encontrado."));
 
-        if (!usuario.getEmail().equalsIgnoreCase(dto.email()) && usuarioRepository.existsByEmail(dto.email())) {
+        if (!usuario.getEmail().equalsIgnoreCase(dto.email()) && usuarioRepository.existsByEmailAndIdNot(dto.email(), id)) {
             throw new BusinessRuleException("O e-mail '" + dto.email() + "' já está em uso por outro colaborador.");
         }
 
@@ -101,6 +106,12 @@ public class UsuarioService implements UserDetailsService { // AJUSTADO: Assinat
         }
 
         Usuario usuarioAtualizado = usuarioRepository.save(usuario);
+
+        // 🎯 FIX: Proteção idêntica na esteira de atualização
+        if (usuarioAtualizado == null) {
+            throw new BusinessRuleException("Erro crítico ao atualizar os registros do colaborador.");
+        }
+
         return new UsuarioResponseDTO(usuarioAtualizado);
     }
 
