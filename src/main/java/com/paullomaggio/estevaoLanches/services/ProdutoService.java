@@ -55,7 +55,6 @@ public class ProdutoService {
     public ProdutoResponseDTO salvar(ProdutoRequestDTO dto) {
         Produto produto = new Produto();
         copiarDtoParaEntidade(dto, produto);
-
         Produto produtoGuardado = produtoRepository.save(produto);
         return new ProdutoResponseDTO(produtoGuardado);
     }
@@ -64,9 +63,7 @@ public class ProdutoService {
     public ProdutoResponseDTO atualizar(UUID id, ProdutoRequestDTO dto) {
         Produto produto = produtoRepository.findById(id)
                 .orElseThrow(() -> new ResourceNotFoundException("Não é possível editar. Produto não encontrado!"));
-
         copiarDtoParaEntidade(dto, produto);
-
         Produto produtoAtualizado = produtoRepository.save(produto);
         return new ProdutoResponseDTO(produtoAtualizado);
     }
@@ -86,14 +83,12 @@ public class ProdutoService {
         produto.setUrlImagem(dto.urlImagem());
         produto.setStatus(dto.status());
         produto.setIsCombo(dto.isCombo());
-        produto.setPrecisaPreparo(dto.precisaPreparo()); // 🚀 CORRIGIDO: Vincula a flag à entidade persistida
+        produto.setPrecisaPreparo(dto.precisaPreparo());
 
-        // Vincula a Categoria
         Categoria categoria = categoriaRepository.findById(dto.categoriaId())
                 .orElseThrow(() -> new BusinessRuleException("A Categoria informada para o produto não existe!"));
         produto.setCategoria(categoria);
 
-        // Vincula os Adicionais
         if (dto.adicionaisIds() != null && !dto.adicionaisIds().isEmpty()) {
             List<Adicional> adicionais = adicionalRepository.findAllById(dto.adicionaisIds());
             produto.setAdicionais(adicionais);

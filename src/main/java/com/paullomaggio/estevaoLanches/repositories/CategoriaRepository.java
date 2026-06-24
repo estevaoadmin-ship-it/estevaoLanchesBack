@@ -12,12 +12,10 @@ import java.util.UUID;
 @Repository
 public interface CategoriaRepository extends JpaRepository<Categoria, UUID> {
 
-    // Busca pelo nome ignorando maiúsculas/minúsculas e ordena de forma inteligente para o painel
     @Query("SELECT c FROM Categoria c " +
             "WHERE LOWER(c.nome) LIKE LOWER(CONCAT('%', :nome, '%')) " +
             "ORDER BY c.ordemExibicao ASC")
     List<Categoria> buscarPorNome(@Param("nome") String nome);
 
-    // Lista todas as categorias por ordem padrão de exibição
     List<Categoria> findAllByOrderByOrdemExibicaoAsc();
 }

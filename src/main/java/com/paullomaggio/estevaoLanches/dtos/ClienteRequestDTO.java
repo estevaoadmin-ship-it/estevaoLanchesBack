@@ -1,5 +1,6 @@
 package com.paullomaggio.estevaoLanches.dtos;
 
+import com.paullomaggio.estevaoLanches.enums.StatusCliente;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.Email;
 import jakarta.validation.constraints.NotBlank;
@@ -26,15 +27,16 @@ public record ClienteRequestDTO(
 
         LocalDate dataNascimento,
 
+        StatusCliente status,
+
         @Valid
         List<EnderecoRequestDTO> enderecos
 ) {
-        // 🎯 FIX MARGINAL: Construtor compacto para sanitização. Transforma "" em null
-        // Evita o Erro 422 Unprocessable Content sem alterar a arquitetura do banco
         public ClienteRequestDTO {
                 if (cpf != null && cpf.trim().isEmpty()) cpf = null;
                 if (email != null && email.trim().isEmpty()) email = null;
                 if (numero != null) numero = numero.replaceAll("\\D", "");
                 if (nome != null) nome = nome.trim().toUpperCase();
+                if (status == null) status = StatusCliente.ATIVO;
         }
 }

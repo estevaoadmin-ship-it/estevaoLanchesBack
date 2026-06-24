@@ -66,10 +66,8 @@ public class CategoriaService {
         if (!categoriaRepository.existsById(id)) {
             throw new ResourceNotFoundException("Não é possível excluir. Categoria não encontrada!");
         }
-
-        // Deleta todos os lanches que pertencem a essa categoria primeiro (Cascade manual)
+        // Cascade manual de segurança operacional para limpar produtos órfãos
         produtoRepository.deletarPorCategoriaId(id);
-
         categoriaRepository.deleteById(id);
     }
 
@@ -77,7 +75,7 @@ public class CategoriaService {
         categoria.setNome(dto.nome());
         categoria.setDescricao(dto.descricao());
         categoria.setUrlImagem(dto.urlImagem());
-        categoria.setOrdemExibicao(dto.ordemExibicao() != null ? dto.ordemExibicao() : 0);
-        categoria.setAtivo(dto.ativo() != null ? dto.ativo() : true);
+        categoria.setOrdemExibicao(dto.ordemExibicao());
+        categoria.setAtivo(dto.ativo());
     }
 }

@@ -22,8 +22,6 @@ public class ProdutoController {
     @Autowired
     private ProdutoService produtoService;
 
-    // PADRÃO REST: Um único endpoint GET para a coleção.
-    // Se passar ?termo=X ele busca, se não passar, lista todos.
     @GetMapping
     public ResponseEntity<List<ProdutoResponseDTO>> listar(@RequestParam(required = false) String termo) {
         if (termo != null && !termo.isBlank()) {

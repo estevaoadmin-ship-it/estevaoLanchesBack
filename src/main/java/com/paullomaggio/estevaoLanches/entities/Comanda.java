@@ -1,5 +1,6 @@
 package com.paullomaggio.estevaoLanches.entities;
 
+import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.paullomaggio.estevaoLanches.enums.StatusComanda;
 import jakarta.persistence.*;
 import lombok.*;
@@ -8,6 +9,10 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
 
+/**
+ * Entidade que representa a Sessão Mestre de atendimento de uma mesa no salão.
+ * Governa diretamente a coleção de Contas (subcontas) geradas para o atendimento.
+ */
 @Entity
 @Table(name = "comanda")
 @Getter
@@ -15,6 +20,7 @@ import java.util.UUID;
 @NoArgsConstructor
 @AllArgsConstructor
 @EqualsAndHashCode(onlyExplicitlyIncluded = true)
+@JsonIgnoreProperties({"hibernateLazyInitializer", "handler"})
 public class Comanda {
 
     @Id
@@ -30,6 +36,7 @@ public class Comanda {
 
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "mesa_id", nullable = false)
+    @JsonIgnoreProperties({"hibernateLazyInitializer", "handler", "comandas"})
     private Mesa mesa;
 
     @Enumerated(EnumType.STRING)
@@ -41,9 +48,16 @@ public class Comanda {
 
     private LocalDateTime fechadaEm;
 
+    /**
+     * 🎯 ARQUITETURA PURISTA:
+     * A comanda governa exclusivamente as Contas.
+     * Ela não enxerga os Pedidos diretamente, o acesso se dá navegando pela Conta.
+     */
     @OneToMany(mappedBy = "comanda", cascade = CascadeType.ALL, orphanRemoval = true)
-    private List<Subconta> subcontas = new ArrayList<>();
+    @JsonIgnoreProperties("comanda")
+    private List<Conta> contas = new ArrayList<>();
 
     public void setDataHoraAbertura(LocalDateTime now) {
+        this.abertaEm = now;
     }
 }

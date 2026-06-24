@@ -36,11 +36,7 @@ public class SecurityConfig {
                 .csrf(csrf -> csrf.disable())
                 .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
                 .authorizeHttpRequests(authorize -> authorize
-                        // 🎯 FIX REQUISIÇÕES OPTIONS: Removido o 'CorsUtils::isPreFlightRequest'
-                        // Como a configuração de CORS injetada abaixo já lida nativamente com o método OPTIONS,
-                        // declarar essa validação na esteira de requisições do filtro torna-se redundante.
-
-                        // 🔓 PORTAS PÚBLICAS: Autenticação do Ecossistema (Nativo + Delivery App)
+                        // 🔓 PORTAS PÚBLICAS: Autenticação do Ecossistema
                         .requestMatchers(HttpMethod.POST, "/api/auth/login").permitAll()
                         .requestMatchers(HttpMethod.POST, "/api/auth/login/cliente").permitAll()
                         .requestMatchers(HttpMethod.POST, "/api/auth/registrar").permitAll()
@@ -51,8 +47,7 @@ public class SecurityConfig {
                         .requestMatchers("/api/fila-impressao/**").permitAll()
                         .requestMatchers("/api/pedidos/fila-impressao/**").permitAll()
 
-                        // 🎯 FIX CRÍTICO: Canal de WebSocket totalmente liberado da verificação do filtro JWT.
-                        // O upgrade de protocolo HTTP para WebSocket não envia Headers Bearer tradicionais na largada.
+                        // 🎯 Rota do WebSocket liberada
                         .requestMatchers("/ws-tevao/**").permitAll()
 
                         // 👥 PAPEL MISTO (ADMIN ou GARÇOM): Operação em Tempo Real do Salão
@@ -65,13 +60,12 @@ public class SecurityConfig {
                         // 👥 PAPEL OPERACIONAL DA ESTEIRA: Produção de Cozinha e Expedição
                         .requestMatchers("/api/pedidos/**").hasAnyRole("ADMIN", "GARCOM", "COZINHA")
 
-                        // 🔒 PAPEL EXCLUSIVO DO GERENTE (ADMIN): Auditoria e Configurações Sensíveis
+                        // 🔒 PAPEL EXCLUSIVO DO GERENTE (ADMIN)
                         .requestMatchers("/api/caixas/**").hasRole("ADMIN")
                         .requestMatchers("/api/relatorios/**").hasRole("ADMIN")
                         .requestMatchers("/api/cardapio/**").hasRole("ADMIN")
                         .requestMatchers("/api/usuarios/**").hasRole("ADMIN")
 
-                        // Qualquer rota residual exige validação de token
                         .anyRequest().authenticated()
                 )
                 .addFilterBefore(securityFilter, UsernamePasswordAuthenticationFilter.class)
@@ -82,10 +76,15 @@ public class SecurityConfig {
     public CorsConfigurationSource corsConfigurationSource() {
         CorsConfiguration configuration = new CorsConfiguration();
 
+        // 🎯 FIX MESTRE DE CORS: Abre de forma segura para os padrões wildcard permitindo subredes locais
         configuration.setAllowedOriginPatterns(List.of("*"));
         configuration.setAllowedMethods(List.of("GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"));
-        configuration.setAllowedHeaders(List.of("Authorization", "Content-Type", "Cache-Control"));
+
+        // 🎯 AJUSTE CRÍTICO: Permitido "*" nos headers para não quebrar requisições contendo "X-Requested-With" do Android WebView
+        configuration.setAllowedHeaders(List.of("*"));
+        configuration.setExposedHeaders(List.of("Authorization"));
         configuration.setAllowCredentials(true);
+        configuration.setMaxAge(3600L);
 
         UrlBasedCorsConfigurationSource source = new UrlBasedCorsConfigurationSource();
         source.registerCorsConfiguration("/**", configuration);

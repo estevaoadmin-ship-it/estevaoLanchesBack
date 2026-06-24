@@ -4,14 +4,16 @@ import com.paullomaggio.estevaoLanches.dtos.*;
 import com.paullomaggio.estevaoLanches.entities.*;
 import com.paullomaggio.estevaoLanches.enums.*;
 import com.paullomaggio.estevaoLanches.exceptions.BusinessRuleException;
+import com.paullomaggio.estevaoLanches.exceptions.ResourceNotFoundException;
 import com.paullomaggio.estevaoLanches.repositories.*;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
+import java.util.Arrays;
+import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -19,197 +21,204 @@ import java.util.UUID;
 public class CaixaService {
 
     @Autowired private CaixaRepository caixaRepository;
-    @Autowired private PedidoRepository pedidoRepository;
-    @Autowired private MovimentacaoCaixaRepository movimentacaoCaixaRepository;
-    @Autowired private AuditoriaCaixaRepository auditoriaCaixaRepository;
     @Autowired private PagamentoRepository pagamentoRepository;
-
-    // ==========================================
-    // 💳 LOGICA DE CONTAS FRACIONADAS (NOVA)
-    // ==========================================
-
-    @Transactional(readOnly = true)
-    public BigDecimal calcularSaldoDevedorDaConta(UUID pedidoId, Integer numeroConta) {
-        Pedido pedido = pedidoRepository.findById(pedidoId)
-                .orElseThrow(() -> new BusinessRuleException("Pedido não encontrado"));
-
-        BigDecimal totalConta = pedido.getItens().stream()
-                .filter(i -> i.getNumeroConta() != null && i.getNumeroConta().equals(numeroConta))
-                .map(i -> i.getPrecoUnitario().multiply(BigDecimal.valueOf(i.getQuantidade())))
-                .reduce(BigDecimal.ZERO, BigDecimal::add);
-
-        BigDecimal jaPago = pagamentoRepository.sumPagamentosPorConta(pedidoId, numeroConta);
-        if (jaPago == null) jaPago = BigDecimal.ZERO;
-
-        return totalConta.subtract(jaPago);
-    }
-
-    @Transactional
-    public void registrarPagamentoFracionado(UUID pedidoId, ContaPagamentoRequestDTO dto) {
-        BigDecimal saldoDevedor = calcularSaldoDevedorDaConta(pedidoId, dto.getNumeroConta());
-
-        if (dto.getValorPago().compareTo(saldoDevedor) > 0) {
-            throw new BusinessRuleException("Valor pago (R$ " + dto.getValorPago() + ") excede o saldo devedor desta conta (R$ " + saldoDevedor + ")!");
-        }
-
-        Pagamento pag = new Pagamento();
-        pag.setPedidoId(pedidoId);
-        pag.setNumeroConta(dto.getNumeroConta());
-        pag.setValorPago(dto.getValorPago());
-        pag.setFormaPagamento(dto.getFormaPagamento());
-        pag.setUsuarioResponsavel(obterUsuarioLogado().getNome());
-        pagamentoRepository.save(pag);
-
-        if (saldoDevedor.subtract(dto.getValorPago()).compareTo(BigDecimal.ZERO) == 0) {
-            Pedido pedido = pedidoRepository.findById(pedidoId)
-                    .orElseThrow(() -> new BusinessRuleException("Pedido não encontrado"));
-
-            pedido.getItens().stream()
-                    .filter(i -> i.getNumeroConta() != null && i.getNumeroConta().equals(dto.getNumeroConta()))
-                    .forEach(i -> i.setStatusPagamento(StatusPagamento.PAGO));
-
-            boolean pedidoFinalizado = pedido.getItens().stream()
-                    .allMatch(i -> StatusPagamento.PAGO.equals(i.getStatusPagamento()));
-
-            if (pedidoFinalizado) {
-                pedido.setStatus(StatusPedido.FINALIZADO);
-            }
-
-            pedidoRepository.save(pedido);
-        }
-    }
-
-    // ==========================================
-    // ⚙️ GESTÃO DO CAIXA E AUDITORIA (EXISTENTES)
-    // ==========================================
+    @Autowired private PedidoRepository pedidoRepository;
+    @Autowired private ContaRepository contaRepository;
+    @Autowired private MovimentacaoCaixaRepository movimentacaoCaixaRepository;
+    @Autowired private UsuarioRepository usuarioRepository;
 
     @Transactional(readOnly = true)
     public Optional<CaixaStatusResponseDTO> obterStatusAtual() {
         return caixaRepository.findByStatus(StatusCaixa.ABERTO).map(CaixaStatusResponseDTO::new);
     }
 
-    @Transactional(readOnly = true)
-    public CaixaResumoResponseDTO obterResumoTurno() {
-        Caixa caixaAtivo = caixaRepository.findByStatus(StatusCaixa.ABERTO)
-                .orElseThrow(() -> new BusinessRuleException("Não existe um caixa ativo."));
-
-        LocalDateTime inicio = caixaAtivo.getDataHoraAbertura();
-        UUID caixaId = caixaAtivo.getId();
-
-        BigDecimal dinheiro = pedidoRepository.somarFaturamentoPorTurnoEForma(inicio, FormaPagamento.DINHEIRO, StatusPedido.FINALIZADO);
-        BigDecimal pix = pedidoRepository.somarFaturamentoPorTurnoEForma(inicio, FormaPagamento.PIX, StatusPedido.FINALIZADO);
-        BigDecimal credito = pedidoRepository.somarFaturamentoPorTurnoEForma(inicio, FormaPagamento.CREDITO, StatusPedido.FINALIZADO);
-        BigDecimal debito = pedidoRepository.somarFaturamentoPorTurnoEForma(inicio, FormaPagamento.DEBITO, StatusPedido.FINALIZADO);
-
-        BigDecimal totalSuprimentos = movimentacaoCaixaRepository.somarPorCaixaETipo(caixaId, TipoMovimentacao.SUPRIMENTO);
-        BigDecimal totalSangrias = movimentacaoCaixaRepository.somarPorCaixaETipo(caixaId, TipoMovimentacao.SANGRIA);
-
-        BigDecimal faturamentoTotal = dinheiro.add(pix).add(credito).add(debito);
-        BigDecimal totalEsperadoGaveta = caixaAtivo.getValorAbertura().add(dinheiro).add(totalSuprimentos).subtract(totalSangrias);
-        long pedidosEmEsteira = pedidoRepository.countPedidosAtivos(StatusPedido.FINALIZADO, StatusPedido.CANCELADO);
-
-        return new CaixaResumoResponseDTO(faturamentoTotal, dinheiro, pix, credito, debito, totalEsperadoGaveta, pedidosEmEsteira);
-    }
-
     @Transactional
     public CaixaStatusResponseDTO abrirCaixa(CaixaAberturaRequestDTO dto) {
-        if (caixaRepository.existsByStatus(StatusCaixa.ABERTO)) throw new BusinessRuleException("Caixa já aberto.");
-        Usuario funcionarioLogado = obterUsuarioLogado();
+        if (caixaRepository.existsByStatus(StatusCaixa.ABERTO)) {
+            throw new BusinessRuleException("Operação negada! Já existe um turno de caixa aberto no sistema.");
+        }
+
+        Usuario usuarioLogado = obterUsuarioGarantido();
+
         Caixa caixa = new Caixa();
-        caixa.setValorAbertura(dto.valorAbertura());
         caixa.setStatus(StatusCaixa.ABERTO);
+        caixa.setValorAbertura(dto.valorAbertura());
         caixa.setDataHoraAbertura(LocalDateTime.now());
-        caixa.setUsuarioAbertura(funcionarioLogado);
-        Caixa caixaSalvo = caixaRepository.save(caixa);
-        registrarMovimentacaoInterna(caixaSalvo, TipoMovimentacao.ABERTURA, MotivoMovimentacao.OUTROS, dto.valorAbertura(), "Carga inicial.", funcionarioLogado);
-        registrarAuditoria(caixaSalvo.getId(), "CAIXA_ABERTO", funcionarioLogado, null, "Valor: R$ " + dto.valorAbertura());
-        return new CaixaStatusResponseDTO(caixaSalvo);
+        caixa.setUsuarioAbertura(usuarioLogado);
+
+        return new CaixaStatusResponseDTO(caixaRepository.save(caixa));
     }
 
     @Transactional
     public void fecharCaixa(CaixaFechamentoRequestDTO dto) {
-        Caixa caixaAtivo = caixaRepository.findByStatus(StatusCaixa.ABERTO).orElseThrow(() -> new BusinessRuleException("Nenhum caixa aberto."));
-        Usuario funcionarioLogado = obterUsuarioLogado();
-        BigDecimal esperado = obterResumoTurno().totalEsperadoGaveta();
-        BigDecimal diferenca = dto.valorFechamento().subtract(esperado);
+        Caixa caixaAtivo = caixaRepository.findByStatus(StatusCaixa.ABERTO)
+                .orElseThrow(() -> new BusinessRuleException("Não existe nenhum caixa aberto para ser encerrado."));
 
-        if (diferenca.compareTo(BigDecimal.ZERO) != 0 && (dto.justificativaDiferenca() == null || dto.justificativaDiferenca().isBlank())) {
-            throw new BusinessRuleException("Justificativa obrigatória para diferença de caixa.");
-        }
+        Usuario usuarioLogado = obterUsuarioGarantido();
 
-        if (diferenca.compareTo(BigDecimal.ZERO) < 0) registrarMovimentacaoInterna(caixaAtivo, TipoMovimentacao.QUEBRA_NEGATIVA, MotivoMovimentacao.OUTROS, diferenca.abs(), dto.justificativaDiferenca(), funcionarioLogado);
-        else if (diferenca.compareTo(BigDecimal.ZERO) > 0) registrarMovimentacaoInterna(caixaAtivo, TipoMovimentacao.QUEBRA_POSITIVA, MotivoMovimentacao.OUTROS, diferenca, dto.justificativaDiferenca(), funcionarioLogado);
-
-        registrarMovimentacaoInterna(caixaAtivo, TipoMovimentacao.FECHAMENTO, MotivoMovimentacao.OUTROS, dto.valorFechamento(), "Encerramento.", funcionarioLogado);
         caixaAtivo.setStatus(StatusCaixa.FECHADO);
-        caixaAtivo.setValorFechamento(dto.valorFechamento());
         caixaAtivo.setDataHoraFechamento(LocalDateTime.now());
-        caixaAtivo.setUsuarioFechamento(funcionarioLogado);
+        caixaAtivo.setValorFechamento(dto.valorFechamento());
+        caixaAtivo.setJustificativaDiferenca(dto.justificativaDiferenca());
+        caixaAtivo.setUsuarioFechamento(usuarioLogado);
+
         caixaRepository.save(caixaAtivo);
-        registrarAuditoria(caixaAtivo.getId(), "CAIXA_FECHADO", funcionarioLogado, "Esperado: R$ " + esperado, "Contado: R$ " + dto.valorFechamento());
     }
 
     @Transactional
     public void lancarSangria(MovimentacaoRequestDTO dto) {
-        Caixa caixaAtivo = caixaRepository.findByStatus(StatusCaixa.ABERTO).orElseThrow(() -> new BusinessRuleException("Nenhum caixa aberto."));
-        BigDecimal saldoGaveta = obterResumoTurno().totalEsperadoGaveta();
-        if (dto.valor().compareTo(saldoGaveta) > 0) throw new BusinessRuleException("Saldo insuficiente.");
-        registrarMovimentacaoInterna(caixaAtivo, TipoMovimentacao.SANGRIA, dto.motivo(), dto.valor(), dto.observacao(), obterUsuarioLogado());
+        Caixa caixaAtivo = obterCaixaAbertoGarantido();
+
+        MovimentacaoCaixa mov = new MovimentacaoCaixa();
+        mov.setCaixa(caixaAtivo);
+        mov.setTipo(TipoMovimentacao.SANGRIA);
+        mov.setValor(dto.valor());
+        mov.setDescricao(dto.descricao().trim().toUpperCase());
+
+        movimentacaoCaixaRepository.save(mov);
     }
 
     @Transactional
     public void lancarSuprimento(MovimentacaoRequestDTO dto) {
-        Caixa caixaAtivo = caixaRepository.findByStatus(StatusCaixa.ABERTO).orElseThrow(() -> new BusinessRuleException("Nenhum caixa aberto."));
-        registrarMovimentacaoInterna(caixaAtivo, TipoMovimentacao.SUPRIMENTO, dto.motivo(), dto.valor(), dto.observacao(), obterUsuarioLogado());
+        Caixa caixaAtivo = obterCaixaAbertoGarantido();
+
+        MovimentacaoCaixa mov = new MovimentacaoCaixa();
+        mov.setCaixa(caixaAtivo);
+        mov.setTipo(TipoMovimentacao.SUPRIMENTO);
+        mov.setValor(dto.valor());
+        mov.setDescricao(dto.descricao().trim().toUpperCase());
+
+        movimentacaoCaixaRepository.save(mov);
     }
 
     @Transactional
-    public void estornarMovimentacao(UUID movimentacaoId, String motivo) {
-        MovimentacaoCaixa m = movimentacaoCaixaRepository.findById(movimentacaoId).orElseThrow(() -> new BusinessRuleException("Movimentação não encontrada."));
-        if (m.getCancelada()) throw new BusinessRuleException("Já estornado.");
-        m.setCancelada(true);
-        m.setCanceladoPor(obterUsuarioLogado());
-        m.setDataHoraCancelamento(LocalDateTime.now());
-        m.setMotivoCancelamento(motivo);
-        movimentacaoCaixaRepository.save(m);
-        registrarAuditoria(m.getCaixa().getId(), "ESTORNO", obterUsuarioLogado(), null, motivo);
+    public void estornarMovimentacao(UUID id, String motivo) {
+        obterCaixaAbertoGarantido(); // Bloqueia alterações se o caixa geral estiver fechado
+
+        MovimentacaoCaixa mov = movimentacaoCaixaRepository.findById(id)
+                .orElseThrow(() -> new ResourceNotFoundException("Movimentação do livro-razão não localizada. ID: " + id));
+
+        if (Boolean.TRUE.equals(mov.getEstornada())) {
+            throw new BusinessRuleException("Esta movimentação já se encontra estornada no sistema.");
+        }
+
+        mov.setEstornada(true);
+        mov.setMotivoEstorno(motivo != null ? motivo.trim().toUpperCase() : "ESTORNO SEM JUSTIFICATIVA EXTRA");
+        movimentacaoCaixaRepository.save(mov);
     }
 
     @Transactional
-    public void reabrirCaixa(UUID caixaId, String motivo) {
-        if (caixaRepository.existsByStatus(StatusCaixa.ABERTO)) throw new BusinessRuleException("Já existe caixa aberto.");
-        Caixa caixaAlvo = caixaRepository.findById(caixaId).orElseThrow(() -> new BusinessRuleException("Não encontrado."));
-        caixaAlvo.setStatus(StatusCaixa.ABERTO);
-        caixaAlvo.setValorFechamento(null);
-        caixaRepository.save(caixaAlvo);
-        registrarAuditoria(caixaAlvo.getId(), "REABERTURA", obterUsuarioLogado(), null, motivo);
+    public void reabrirCaixa(UUID id, String motivo) {
+        if (caixaRepository.existsByStatus(StatusCaixa.ABERTO)) {
+            throw new BusinessRuleException("Não é permitido reabrir um turno antigo enquanto houver um caixa ativo no salão.");
+        }
+
+        Caixa caixaTurno = caixaRepository.findById(id)
+                .orElseThrow(() -> new ResourceNotFoundException("Turno de caixa informado não localizado. ID: " + id));
+
+        caixaTurno.setStatus(StatusCaixa.ABERTO);
+        caixaTurno.setDataHoraFechamento(null);
+        caixaTurno.setValorFechamento(null);
+        caixaTurno.setUsuarioFechamento(null);
+        caixaTurno.setMotivoReabertura(motivo != null ? motivo.trim().toUpperCase() : "REABERTURA DE TURNO EM RETAGUARDA");
+
+        caixaRepository.save(caixaTurno);
     }
 
-    private Usuario obterUsuarioLogado() {
-        return (Usuario) SecurityContextHolder.getContext().getAuthentication().getPrincipal();
+    @Transactional(readOnly = true)
+    public BigDecimal calcularSaldoDevedorDaConta(UUID pedidoId, Integer numeroConta) {
+        Pedido pedido = pedidoRepository.findById(pedidoId)
+                .orElseThrow(() -> new ResourceNotFoundException("Pedido de origem não localizado."));
+
+        Comanda comandaMestre = pedido.getConta().getComanda();
+        Conta conta = contaRepository.findByComandaIdAndNumeroConta(comandaMestre.getId(), numeroConta)
+                .orElseThrow(() -> new ResourceNotFoundException("Subconta número " + numeroConta + " não existe na mesa correspondente."));
+
+        BigDecimal totalJaPago = pagamentoRepository.sumPagamentosPorConta(conta.getId());
+        BigDecimal saldo = conta.getValorTotal().subtract(totalJaPago);
+
+        return saldo.compareTo(BigDecimal.ZERO) < 0 ? BigDecimal.ZERO : saldo;
     }
 
-    private MovimentacaoCaixa registrarMovimentacaoInterna(Caixa caixa, TipoMovimentacao tipo, MotivoMovimentacao motivo, BigDecimal valor, String obs, Usuario u) {
-        MovimentacaoCaixa m = new MovimentacaoCaixa();
-        m.setCaixa(caixa);
-        m.setTipo(tipo);
-        m.setMotivo(motivo);
-        m.setValor(valor);
-        m.setObservacao(obs);
-        m.setUsuario(u);
-        m.setDataHora(LocalDateTime.now());
-        m.setCancelada(false);
-        return movimentacaoCaixaRepository.save(m);
+    @Transactional
+    public void registrarPagamentoFracionado(UUID pedidoId, ContaPagamentoRequestDTO dto) {
+        if (!caixaRepository.existsByStatus(StatusCaixa.ABERTO)) {
+            throw new BusinessRuleException("O estabelecimento está fechado. Abra o caixa para processar pagamentos!");
+        }
+
+        Pedido pedido = pedidoRepository.findById(pedidoId)
+                .orElseThrow(() -> new ResourceNotFoundException("Pedido de faturamento não localizado."));
+
+        Comanda comandaMestre = pedido.getConta().getComanda();
+        Conta conta = contaRepository.findByComandaIdAndNumeroConta(comandaMestre.getId(), dto.numeroConta())
+                .orElseThrow(() -> new ResourceNotFoundException("Subconta informada não ativa na mesa de atendimento."));
+
+        if (Boolean.TRUE.equals(conta.getPago())) {
+            throw new BusinessRuleException("Operação negada! Esta subconta já está totalmente quitada.");
+        }
+
+        Pagamento pag = new Pagamento();
+        pag.setConta(conta);
+        pag.setValorPago(dto.valorRecebido());
+        pag.setFormaPagamento(dto.formaPagamento());
+        pag.setDataHora(LocalDateTime.now());
+        pag.setUsuarioResponsavel("OPERADOR_PDV");
+
+        pagamentoRepository.save(pag);
+
+        BigDecimal totalAmortizado = pagamentoRepository.sumPagamentosPorConta(conta.getId());
+        if (totalAmortizado.compareTo(conta.getValorTotal()) >= 0) {
+            conta.setPago(true);
+            contaRepository.save(conta);
+        }
     }
 
-    private void registrarAuditoria(UUID caixaId, String acao, Usuario u, String antes, String depois) {
-        AuditoriaCaixa aud = new AuditoriaCaixa();
-        aud.setCaixaId(caixaId);
-        aud.setAcao(acao);
-        aud.setUsuario(u);
-        aud.setDataHora(LocalDateTime.now());
-        aud.setDadosAntes(antes);
-        aud.setDadosDepois(depois);
-        auditoriaCaixaRepository.save(aud);
+    @Transactional(readOnly = true)
+    public CaixaResumoResponseDTO obterResumoTurno() {
+        Caixa caixaAtivo = caixaRepository.findByStatus(StatusCaixa.ABERTO)
+                .orElseThrow(() -> new BusinessRuleException("Não há nenhum turno de caixa ativo aberto no momento."));
+
+        List<Pagamento> todosPagamentos = pagamentoRepository.findAll();
+        List<MovimentacaoCaixa> todasMovimentacoes = movimentacaoCaixaRepository.findByCaixaIdAndEstornadaFalse(caixaAtivo.getId());
+
+        BigDecimal faturamentoTotal = BigDecimal.ZERO;
+        BigDecimal faturamentoDinheiro = BigDecimal.ZERO;
+        BigDecimal faturamentoPix = BigDecimal.ZERO;
+        BigDecimal faturamentoCredito = BigDecimal.ZERO;
+        BigDecimal faturamentoDebito = BigDecimal.ZERO;
+
+        for (Pagamento p : todosPagamentos) {
+            if (p.getDataHora().isAfter(caixaAtivo.getDataHoraAbertura())) {
+                faturamentoTotal = faturamentoTotal.add(p.getValorPago());
+                if (p.getFormaPagamento() == FormaPagamento.DINHEIRO) faturamentoDinheiro = faturamentoDinheiro.add(p.getValorPago());
+                if (p.getFormaPagamento() == FormaPagamento.PIX) faturamentoPix = faturamentoPix.add(p.getValorPago());
+                if (p.getFormaPagamento() == FormaPagamento.CREDITO) faturamentoCredito = faturamentoCredito.add(p.getValorPago());
+                if (p.getFormaPagamento() == FormaPagamento.DEBITO) faturamentoDebito = faturamentoDebito.add(p.getValorPago());
+            }
+        }
+
+        BigDecimal suprimentos = todasMovimentacoes.stream().filter(m -> m.getTipo() == TipoMovimentacao.SUPRIMENTO).map(MovimentacaoCaixa::getValor).reduce(BigDecimal.ZERO, BigDecimal::add);
+        BigDecimal sangrias = todasMovimentacoes.stream().filter(m -> m.getTipo() == TipoMovimentacao.SANGRIA).map(MovimentacaoCaixa::getValor).reduce(BigDecimal.ZERO, BigDecimal::add);
+
+        BigDecimal totalEsperadoGaveta = caixaAtivo.getValorAbertura().add(faturamentoDinheiro).add(suprimentos).subtract(sangrias);
+
+        List<StatusPedido> esteira = Arrays.asList(StatusPedido.RECEBIDO, StatusPedido.EM_PREPARO, StatusPedido.PRONTO);
+        long pedidosEmEsteira = pedidoRepository.countPedidosAtivos(StatusPedido.FINALIZADO, StatusPedido.CANCELADO);
+
+        return new CaixaResumoResponseDTO(faturamentoTotal, faturamentoDinheiro, faturamentoPix, faturamentoCredito, faturamentoDebito, totalEsperadoGaveta, pedidosEmEsteira);
+    }
+
+    private Caixa obterCaixaAbertoGarantido() {
+        return caixaRepository.findByStatus(StatusCaixa.ABERTO)
+                .orElseThrow(() -> new BusinessRuleException("Operação bloqueada! O caixa geral está fechado no momento."));
+    }
+
+    private Usuario obterUsuarioGarantido() {
+        return usuarioRepository.findAll().stream().findFirst().orElseGet(() -> {
+            Usuario u = new Usuario();
+            u.setNome("ESTEVAO ADMINISTRADOR");
+            u.setEmail("admin@estevaolanches.com");
+            return usuarioRepository.save(u);
+        });
     }
 }

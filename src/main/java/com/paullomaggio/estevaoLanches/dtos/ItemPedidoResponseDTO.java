@@ -8,28 +8,36 @@ import java.util.stream.Collectors;
 
 public record ItemPedidoResponseDTO(
         UUID id,
+        UUID produtoId,
         String produtoNome,
         Integer quantidade,
         BigDecimal precoUnitarioHistorico,
         String observacaoItem,
         List<ItemPedidoResponseDTO.AdicionalInfo> adicionais,
-        Integer numeroConta,      // 👈 Informa ao Caixa/Tablet qual é a conta do item
-        String statusPagamento    // 👈 Informa se está ABERTO ou PAGO
+        Integer numeroConta,
+        String statusPagamento,
+        String statusEnvio,        // 🎯 NOVO: Transmite 'AGUARDANDO_ENVIO' ou 'ENVIADO' para o Angular
+        boolean enviado            // 🎯 NOVO: Flag boleana direta que o Front lê para pintar de cinza fosco
 ) {
+
+
     public record AdicionalInfo(UUID id, String nome, BigDecimal preco) {}
 
     public ItemPedidoResponseDTO(ItemPedido item) {
         this(
                 item.getId(),
-                item.getProduto().getNome(),
+                item.getProduto() != null ? item.getProduto().getId() : null,
+                item.getProduto() != null ? item.getProduto().getNome() : "Produto Indefinido",
                 item.getQuantidade(),
                 item.getPrecoUnitario(),
                 item.getObservacaoItem(),
-                item.getAdicionais().stream()
+                item.getAdicionais() != null ? item.getAdicionais().stream()
                         .map(a -> new AdicionalInfo(a.getId(), a.getNome(), a.getPreco()))
-                        .collect(Collectors.toList()),
+                        .collect(Collectors.toList()) : List.of(),
                 item.getNumeroConta(),
-                item.getStatusPagamento() != null ? item.getStatusPagamento().name() : "ABERTO"
+                item.getStatusPagamento() != null ? item.getStatusPagamento().name() : "ABERTO",
+                item.getStatusEnvio() != null ? item.getStatusEnvio().name() : "AGUARDANDO_ENVIO",
+                item.getStatusEnvio() == com.paullomaggio.estevaoLanches.enums.StatusEnvioItem.ENVIADO
         );
     }
 }

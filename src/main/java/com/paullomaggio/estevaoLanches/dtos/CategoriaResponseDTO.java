@@ -8,7 +8,8 @@ public record CategoriaResponseDTO(
         String nome,
         String descricao,
         Integer ordemExibicao,
-        Boolean ativo
+        Boolean ativo,
+        String urlImagem
 ) {
     public CategoriaResponseDTO(Categoria categoria) {
         this(
@@ -16,7 +17,8 @@ public record CategoriaResponseDTO(
                 categoria.getNome(),
                 categoria.getDescricao(),
                 categoria.getOrdemExibicao(),
-                categoria.getAtivo()
+                categoria.getAtivo(),
+                categoria.getUrlImagem()
         );
     }
 }

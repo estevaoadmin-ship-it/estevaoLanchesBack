@@ -3,7 +3,7 @@ package com.paullomaggio.estevaoLanches.controllers;
 import com.paullomaggio.estevaoLanches.dtos.*;
 import com.paullomaggio.estevaoLanches.services.PedidoService;
 import jakarta.validation.Valid;
-import org.springframework.beans.factory.annotation.Autowired;
+import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
@@ -13,10 +13,10 @@ import java.util.UUID;
 @RestController
 @RequestMapping("/api/pedidos")
 @CrossOrigin(origins = "*")
+@RequiredArgsConstructor
 public class PedidoController {
 
-    @Autowired
-    private PedidoService pedidoService;
+    private final PedidoService pedidoService;
 
     @PostMapping("/checkout")
     public ResponseEntity<PedidoResponseDTO> finalizarPedido(@RequestBody @Valid CheckoutRequestDTO dto) {
@@ -76,13 +76,13 @@ public class PedidoController {
         return ResponseEntity.ok(pedidoService.atualizarAdicionaisDoItem(pedidoId, itemId, adicionaisIds));
     }
 
-    /**
-     * 🚀 ENDPOINT EXCLUSIVO PARA O APP MOBILE
-     * Recebe o payload do garçom e dispara os eventos para o Caixa e Cozinha simultaneamente
-     */
     @PostMapping("/mobile")
     public ResponseEntity<PedidoResponseDTO> finalizarPedidoMobile(@RequestBody @Valid PedidoMobileRequestDTO dto) {
-        // Dentro do seu PedidoService, esse método salvará no banco e fará o broadcast via WebSocket
         return ResponseEntity.ok(pedidoService.processarPedidoMobile(dto));
+    }
+
+    @GetMapping("/comanda/{comandaId}")
+    public ResponseEntity<List<ItemComandaMobileResponseDTO>> buscarItensPorComanda(@PathVariable UUID comandaId) {
+        return ResponseEntity.ok(pedidoService.buscarItensPorComandaMestre(comandaId));
     }
 }

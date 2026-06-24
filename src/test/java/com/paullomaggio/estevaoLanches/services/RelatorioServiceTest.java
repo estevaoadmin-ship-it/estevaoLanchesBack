@@ -29,6 +29,7 @@ import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.when;
 
 @ExtendWith(MockitoExtension.class)
+@DisplayName("🧪 Suíte de Testes — RelatorioService")
 class RelatorioServiceTest {
 
     @Mock
@@ -85,7 +86,7 @@ class RelatorioServiceTest {
         when(pedidoRepository.somarFaturamentoPorMeioPagamento(any(), any(), any())).thenReturn(Collections.emptyList());
         when(pedidoRepository.buscarTopProdutosJPQL(any(), any(), any(), any())).thenReturn(Collections.emptyList());
 
-        DashboardDataDTO resultado = relatorioService.gerarDashboard(inicio, fim, null);
+        DashboardDataDTO resultado = relatorioService.gerarDashboard(inicio, fim, null); // Sincronizado ao método físico do service
 
         assertThat(resultado.getKpis().getTicketMedio()).isEqualByComparingTo(BigDecimal.ZERO);
     }
@@ -94,6 +95,9 @@ class RelatorioServiceTest {
     @DisplayName("CT-REL-003: Deve tratar as Strings vazias")
     void deveSanitizarIdDoOperadorParaQuery() {
         when(pedidoRepository.buscarPedidosParaRelatorio(eq(inicio), eq(fim))).thenReturn(pedidosMock);
+        when(pedidoRepository.somarFaturamentoPorMeioPagamento(any(), any(), any())).thenReturn(pagamentosMock);
+        when(pedidoRepository.buscarTopProdutosJPQL(any(), any(), any(), any())).thenReturn(topProdutosMock);
+
         relatorioService.gerarDashboard(inicio, fim, "");
     }
 

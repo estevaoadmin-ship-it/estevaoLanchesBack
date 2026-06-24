@@ -1,6 +1,7 @@
 package com.paullomaggio.estevaoLanches.entities;
 
 import com.fasterxml.jackson.annotation.JsonIgnore;
+import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import jakarta.persistence.*;
 import jakarta.validation.constraints.*;
 import lombok.*;
@@ -16,6 +17,8 @@ import java.util.UUID;
 @NoArgsConstructor
 @AllArgsConstructor
 @EqualsAndHashCode(onlyExplicitlyIncluded = true)
+// 🛡️ BLINDAGEM MÁGICA: Evita quebras de proxy quando a categoria for carregada de forma Lazy por um Produto
+@JsonIgnoreProperties({"hibernateLazyInitializer", "handler"})
 public class Categoria {
 
     @Id
@@ -44,10 +47,7 @@ public class Categoria {
     @Column(name = "url_imagem")
     private String urlImagem;
 
-    // =========================================================
-    // CASCADE: Exclui os produtos automaticamente ao excluir a categoria
-    // =========================================================
-    @JsonIgnore // Essencial para evitar loop infinito na hora de gerar o JSON
+    @JsonIgnore
     @OneToMany(mappedBy = "categoria", cascade = CascadeType.REMOVE, orphanRemoval = true)
     private List<Produto> produtos = new ArrayList<>();
 }

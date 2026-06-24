@@ -29,10 +29,16 @@ public record ProdutoRequestDTO(
         Boolean isCombo,
 
         @NotNull(message = "Informe se o produto necessita de preparo operacional na cozinha.")
-        Boolean precisaPreparo, // 🚀 INCLUSÃO: Captura o dado enviado pelo Angular
+        Boolean precisaPreparo,
 
         @NotNull(message = "O ID da categoria é obrigatório para vincular o produto.")
         UUID categoriaId,
 
         List<UUID> adicionaisIds
-) {}
+) {
+        public ProdutoRequestDTO {
+                if (nome != null) nome = nome.trim().toUpperCase();
+                if (isCombo == null) isCombo = false;
+                if (precisaPreparo == null) precisaPreparo = true;
+        }
+}

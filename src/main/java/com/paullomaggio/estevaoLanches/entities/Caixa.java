@@ -1,5 +1,6 @@
 package com.paullomaggio.estevaoLanches.entities;
 
+import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.paullomaggio.estevaoLanches.enums.StatusCaixa;
 import jakarta.persistence.*;
 import lombok.*;
@@ -12,8 +13,9 @@ import java.util.UUID;
 @Getter
 @Setter
 @NoArgsConstructor
-@AllArgsConstructor
+@AllArgsConstructor // 🎯 Trava o construtor de 10 parâmetros para os Mocks de teste
 @EqualsAndHashCode(onlyExplicitlyIncluded = true)
+@JsonIgnoreProperties({"hibernateLazyInitializer", "handler"})
 public class Caixa {
 
     @Id
@@ -36,12 +38,13 @@ public class Caixa {
     @Column(precision = 10, scale = 2)
     private BigDecimal valorFechamento;
 
-    // QUEM ABRIU: Relacionamento obrigatório na abertura
+    private String justificativaDiferenca; // Campo novo de fechamento cego
+    private String motivoReabertura;       // Campo novo de auditoria
+
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "usuario_abertura_id", nullable = false)
     private Usuario usuarioAbertura;
 
-    // QUEM FECHOU: Fica null até o momento do fechamento do turno
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "usuario_fechamento_id")
     private Usuario usuarioFechamento;

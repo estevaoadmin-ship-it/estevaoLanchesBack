@@ -16,8 +16,9 @@ public record ProdutoResponseDTO(
         StatusProduto status,
         Boolean isCombo,
         Boolean precisaPreparo,
+        UUID categoriaId,
         String categoriaNome,
-        List<AdicionalResponseDTO> adicionais // 🚀 AQUI ESTÁ A CHAVE: O Angular precisa disso!
+        List<AdicionalResponseDTO> adicionais
 ) {
     public ProdutoResponseDTO(Produto produto) {
         this(
@@ -29,8 +30,8 @@ public record ProdutoResponseDTO(
                 produto.getStatus(),
                 produto.getIsCombo(),
                 produto.getPrecisaPreparo(),
+                produto.getCategoria() != null ? produto.getCategoria().getId() : null,
                 produto.getCategoria() != null ? produto.getCategoria().getNome() : null,
-                // 🚀 Mapeia a lista do banco para o DTO. Retorna lista vazia se for null.
                 produto.getAdicionais() != null ?
                         produto.getAdicionais().stream()
                                 .map(AdicionalResponseDTO::new)

@@ -101,6 +101,7 @@ public class ClienteService {
         cliente.setEmail(dto.email());
         cliente.setNumero(dto.numero());
         cliente.setDataNascimento(dto.dataNascimento());
+        cliente.setStatus(dto.status());
 
         cliente.getEnderecos().clear();
         if (dto.enderecos() != null) {
@@ -111,7 +112,7 @@ public class ClienteService {
                 endereco.setNumero(endDto.numero());
                 endereco.setComplemento(endDto.complemento());
                 endereco.setBairro(endDto.bairro());
-                endereco.setCidade(endDto.city());
+                endereco.setCidade(endDto.cidade()); // Ajustado de endDto.city() para mapeamento correto do record
                 endereco.setUf(endDto.uf());
                 endereco.setCep(endDto.cep());
                 endereco.setCliente(cliente);

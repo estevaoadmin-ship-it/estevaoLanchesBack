@@ -22,8 +22,6 @@ public class CategoriaController {
     @Autowired
     private CategoriaService categoriaService;
 
-    // PADRÃO REST: Unifica a listagem e a busca usando parâmetros opcionais.
-    // Se passar ?nome=X ele filtra, se não, traz a listagem padrão.
     @GetMapping
     public ResponseEntity<List<CategoriaResponseDTO>> listar(@RequestParam(required = false) String nome) {
         if (nome != null && !nome.isBlank()) {

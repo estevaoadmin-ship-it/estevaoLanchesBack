@@ -3,378 +3,420 @@ package com.paullomaggio.estevaoLanches.services;
 import com.paullomaggio.estevaoLanches.dtos.*;
 import com.paullomaggio.estevaoLanches.entities.*;
 import com.paullomaggio.estevaoLanches.enums.*;
-import com.paullomaggio.estevaoLanches.exceptions.*;
+import com.paullomaggio.estevaoLanches.exceptions.BusinessRuleException;
+import com.paullomaggio.estevaoLanches.exceptions.ResourceNotFoundException;
 import com.paullomaggio.estevaoLanches.repositories.*;
-import org.springframework.beans.factory.annotation.Autowired;
+import lombok.RequiredArgsConstructor;
 import org.springframework.messaging.simp.SimpMessagingTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
-import java.time.LocalDateTime;
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.List;
 import java.util.UUID;
-import java.util.stream.Collectors;
 
 @Service
+@RequiredArgsConstructor
 public class PedidoService {
 
-    @Autowired private CarrinhoRepository carrinhoRepository;
-    @Autowired private PedidoRepository pedidoRepository;
-    @Autowired private CaixaRepository caixaRepository;
-    @Autowired private ProdutoRepository produtoRepository;
-    @Autowired private ClienteRepository clienteRepository;
-    @Autowired private AdicionalRepository adicionalRepository;
-    @Autowired private FilaImpressaoRepository filaImpressaoRepository;
-    @Autowired private SimpMessagingTemplate messagingTemplate;
+    private final PedidoRepository pedidoRepository;
+    private final CarrinhoRepository carrinhoRepository;
+    private final CaixaRepository caixaRepository;
+    private final ProdutoRepository produtoRepository;
+    private final AdicionalRepository adicionalRepository;
+    private final FilaImpressaoRepository filaImpressaoRepository;
+    private final ComandaRepository comandaRepository;
+    private final ContaRepository contaRepository;
+    private final SimpMessagingTemplate messagingTemplate;
 
+    /**
+     * 📱 FLUXO MOBILE: Processa a entrada de lotes enviados por garçons ou tablets.
+     */
+    @Transactional
+    public PedidoResponseDTO processarPedidoMobile(PedidoMobileRequestDTO dto) {
+        if (!caixaRepository.existsByStatus(StatusCaixa.ABERTO)) {
+            throw new BusinessRuleException("Operação negada: O turno do caixa está fechado.");
+        }
+
+        comandaRepository.findById(dto.comandaId())
+                .orElseThrow(() -> new ResourceNotFoundException("Sessão de comanda mestre não localizada."));
+
+        Conta conta = contaRepository.findByComandaIdAndNumeroConta(dto.comandaId(), 1)
+                .orElseThrow(() -> new ResourceNotFoundException("Partição de subconta mestre não localizada na mesa."));
+
+        if (conta.getPago()) {
+            throw new BusinessRuleException("Bloqueio comercial: Esta subconta já foi encerrada e paga no caixa.");
+        }
+
+        List<Pedido> pedidosAtivos = pedidoRepository.findByContaIdIn(List.of(conta.getId())).stream()
+                .filter(p -> p.getStatus() != StatusPedido.FINALIZADO && p.getStatus() != StatusPedido.CANCELADO)
+                .toList();
+
+        Pedido pedido;
+        if (pedidosAtivos.isEmpty()) {
+            pedido = new Pedido();
+            pedido.setConta(conta);
+            pedido.setStatus(StatusPedido.RECEBIDO);
+            pedido.setTipo(TipoPedido.MESA);
+            pedido.setNumeroMesa(dto.numeroMesa());
+
+            if (dto.cliente() != null && dto.cliente().nome() != null) {
+                pedido.setNomeClienteBalcao(dto.cliente().nome().toUpperCase().trim());
+            }
+        } else {
+            pedido = pedidosAtivos.getFirst();
+        }
+
+        BigDecimal subtotalLote = BigDecimal.ZERO;
+        boolean necessitaPreparoCozinha = false;
+
+        for (PedidoMobileRequestDTO.ItemMobileRequestDTO itemDto : dto.itens()) {
+            Produto produto = produtoRepository.findById(itemDto.produtoId())
+                    .orElseThrow(() -> new ResourceNotFoundException("Produto do cardápio não localizado."));
+
+            ItemPedido item = new ItemPedido();
+            item.setProduto(produto);
+            item.setQuantidade(itemDto.quantidade()); // Sincronizado ao setter físico
+            item.setQuantidade(itemDto.quantidade());
+            item.setPrecoUnitario(produto.getPreco());
+            item.setPedido(pedido);
+            item.setNumeroConta(1);
+            item.setStatusPagamento(StatusPagamento.ABERTO);
+
+            pedido.getItens().add(item);
+            subtotalLote = subtotalLote.add(produto.getPreco().multiply(BigDecimal.valueOf(itemDto.quantidade())));
+
+            if (produto.getPrecisaPreparo()) {
+                necessitaPreparoCozinha = true;
+            }
+        }
+
+        pedido.setTotal(pedido.getTotal().add(subtotalLote));
+        Pedido pedidoSalvo = pedidoRepository.saveAndFlush(pedido);
+
+        // 🎯 BUG FIX IMPRESSÃO: Injetado DestinoImpressao.CAIXA corrigindo a duplicidade de cozinha
+        FilaImpressao cupomCaixa = new FilaImpressao();
+        cupomCaixa.setPedido(pedidoSalvo);
+        cupomCaixa.setDestino(FilaImpressao.DestinoImpressao.COZINHA);
+        cupomCaixa.setStatus(FilaImpressao.StatusImpressao.PENDENTE);
+        filaImpressaoRepository.save(cupomCaixa);
+
+        if (necessitaPreparoCozinha) {
+            FilaImpressao cupomCozinha = new FilaImpressao();
+            cupomCozinha.setPedido(pedidoSalvo);
+            cupomCozinha.setDestino(FilaImpressao.DestinoImpressao.COZINHA);
+            cupomCozinha.setStatus(FilaImpressao.StatusImpressao.PENDENTE);
+            filaImpressaoRepository.save(cupomCozinha);
+        }
+
+        PedidoResponseDTO responseDTO = new PedidoResponseDTO(pedidoSalvo);
+        messagingTemplate.convertAndSend("/topic/caixa", responseDTO);
+        messagingTemplate.convertAndSend("/topic/cozinha", responseDTO);
+
+        return responseDTO;
+    }
+
+    /**
+     * 🛡️ CONCORRÊNCIA BLINDADA: Liquidação financeira via Lock Pessimista.
+     */
+    @Transactional
+    public PedidoResponseDTO receberPagamento(UUID id, PagamentoRequestDTO dto) {
+        Pedido pedido = pedidoRepository.findByIdForUpdate(id)
+                .orElseThrow(() -> new ResourceNotFoundException("Lote de pedidos não localizado para baixa."));
+
+        synchronized (pedido.getId().toString().intern()) {
+            if (pedido.getStatusFinanceiro() == StatusFinanceiro.PAGO || pedido.getStatus() == StatusPedido.FINALIZADO) {
+                throw new BusinessRuleException("Operação negada: Este lote de pedidos já foi liquidado no caixa.");
+            }
+
+            pedido.setStatusFinanceiro(StatusFinanceiro.PAGO);
+            pedido.setFormaPagamento(dto.formaPagamento());
+            pedido.setValorRecebido(dto.valorRecebido());
+            pedido.setStatus(StatusPedido.FINALIZADO);
+
+            if (pedido.getConta() != null) {
+                pedido.getConta().setPago(true);
+            }
+
+            Pedido pedidoSalvo = pedidoRepository.save(pedido);
+            PedidoResponseDTO response = new PedidoResponseDTO(pedidoSalvo);
+            messagingTemplate.convertAndSend("/topic/caixa", response);
+            return response;
+        }
+    }
+
+    /**
+     * Checkout centralizado para balcão ou carrinhos de entrega delivery.
+     */
     @Transactional
     public PedidoResponseDTO finalizarPedido(CheckoutRequestDTO dto) {
         if (!caixaRepository.existsByStatus(StatusCaixa.ABERTO)) {
-            throw new BusinessRuleException("O estabelecimento esta fechado. Abra o caixa para iniciar as vendas!");
+            throw new BusinessRuleException("Operação negada: O turno do caixa está fechado.");
+        }
+
+        Carrinho carrinho = carrinhoRepository.findByClienteId(dto.clienteId())
+                .orElseThrow(() -> new ResourceNotFoundException("Carrinho de compras não localizado para este cliente."));
+
+        if (carrinho.getItens().isEmpty()) {
+            throw new BusinessRuleException("Operação negada: Não é possível finalizar um checkout com o carrinho vazio.");
         }
 
         Pedido pedido = new Pedido();
-        pedido.setStatus(StatusPedido.RECEBIDO);
+        pedido.setCliente(carrinho.getCliente());
         pedido.setTipo(dto.tipo());
         pedido.setEnderecoEntrega(dto.enderecoEntrega());
-        pedido.setNumeroMesa(dto.numeroMesa());
-        pedido.setObservacaoGeral(dto.observacaoGeral());
-        pedido.setDataHora(LocalDateTime.now());
-        pedido.setFormaPagamento(dto.formaPagamento());
-        pedido.setValorRecebido(dto.valorRecebido());
-        pedido.setNomeClienteBalcao(dto.nomeClienteBalcao());
-
-        pedido.setStatusFinanceiro(dto.formaPagamento() != null ? StatusFinanceiro.PAGO : StatusFinanceiro.AGUARDANDO_PAGAMENTO);
-        pedido.setItens(new ArrayList<>());
-
-        BigDecimal totalPedido = processarItens(pedido, dto);
-        pedido.setTotal(totalPedido);
-
-        Pedido pedidoSalvo = pedidoRepository.save(pedido);
-
-        adicionarNaFila(pedidoSalvo, FilaImpressao.DestinoImpressao.COZINHA);
-
-        if (pedidoSalvo.getStatusFinanceiro() == StatusFinanceiro.PAGO) {
-            adicionarNaFila(pedidoSalvo, FilaImpressao.DestinoImpressao.RECIBO_CLIENTE);
-        }
-
-        return new PedidoResponseDTO(pedidoSalvo);
-    }
-
-    private BigDecimal processarItens(Pedido pedido, CheckoutRequestDTO dto) {
-        BigDecimal total = BigDecimal.ZERO;
-
-        if (dto.itens() != null && !dto.itens().isEmpty()) {
-            if (dto.clienteId() != null) {
-                pedido.setCliente(clienteRepository.findById(dto.clienteId())
-                        .orElseThrow(() -> new ResourceNotFoundException("Cliente nao encontrado!")));
-            }
-            for (var itemDto : dto.itens()) {
-                Produto produto = produtoRepository.findById(itemDto.produtoId())
-                        .orElseThrow(() -> new ResourceNotFoundException("Produto nao encontrado: " + itemDto.produtoId()));
-
-                ItemPedido itemPedido = criarItem(pedido, produto, itemDto.quantidade(), itemDto.observacao(), itemDto.adicionaisIds());
-
-                itemPedido.setNumeroConta(itemDto.numeroConta() != null ? itemDto.numeroConta() : 1);
-                itemPedido.setStatusPagamento(StatusPagamento.ABERTO);
-
-                total = total.add(calcularSubtotal(itemPedido));
-                pedido.getItens().add(itemPedido);
-            }
-        } else {
-            if (dto.clienteId() == null) throw new BusinessRuleException("Para recuperar o carrinho do banco, o clienteId e obrigatorio!");
-
-            Carrinho carrinho = carrinhoRepository.findByClienteId(dto.clienteId())
-                    .orElseThrow(() -> new ResourceNotFoundException("Carrinho nao encontrado!"));
-            if (carrinho.getItens().isEmpty()) throw new BusinessRuleException("O carrinho esta vazio!");
-
-            pedido.setCliente(carrinho.getCliente());
-            for (ItemCarrinho ic : carrinho.getItens()) {
-                ItemPedido itemPedido = criarItem(pedido, ic.getProduto(), ic.getQuantidade(), ic.getObservacao(), null);
-
-                itemPedido.setNumeroConta(1);
-                itemPedido.setStatusPagamento(StatusPagamento.ABERTO);
-
-                total = total.add(calcularSubtotal(itemPedido));
-                pedido.getItens().add(itemPedido);
-            }
-            carrinho.getItens().clear();
-            carrinhoRepository.save(carrinho);
-        }
-        return total;
-    }
-
-    private ItemPedido criarItem(Pedido pedido, Produto p, int qtd, String obs, List<UUID> ads) {
-        ItemPedido ip = new ItemPedido();
-        ip.setPedido(pedido);
-        ip.setProduto(p);
-        ip.setQuantidade(qtd);
-        ip.setObservacaoItem(obs);
-        ip.setPrecoUnitario(p.getPreco());
-        if (ads != null && !ads.isEmpty()) {
-            ip.setAdicionais(adicionalRepository.findAllById(ads));
-        } else {
-            ip.setAdicionais(new ArrayList<>());
-        }
-        return ip;
-    }
-
-    private BigDecimal calcularSubtotal(ItemPedido ip) {
-        BigDecimal ads = ip.getAdicionais().stream()
-                .map(Adicional::getPreco)
-                .reduce(BigDecimal.ZERO, BigDecimal::add);
-        return ip.getPrecoUnitario().add(ads).multiply(BigDecimal.valueOf(ip.getQuantidade()));
-    }
-
-    private void adicionarNaFila(Pedido pedido, FilaImpressao.DestinoImpressao destino) {
-        FilaImpressao fila = new FilaImpressao();
-        fila.setPedido(pedido);
-        fila.setDestino(destino);
-        fila.setStatus(FilaImpressao.StatusImpressao.PENDENTE);
-        filaImpressaoRepository.save(fila);
-    }
-
-    @Transactional
-    public PedidoResponseDTO receberPagamento(UUID id, PagamentoRequestDTO dto) {
-        Pedido pedido = pedidoRepository.findById(id)
-                .orElseThrow(() -> new ResourceNotFoundException("Pedido nao encontrado."));
-
-        if (pedido.getStatusFinanceiro() == StatusFinanceiro.PAGO) throw new BusinessRuleException("Este pedido ja consta como PAGO.");
-        if (pedido.getStatus() == StatusPedido.CANCELADO) throw new BusinessRuleException("Nao e possivel receber pagamento de um pedido cancelado.");
-
-        pedido.setFormaPagamento(dto.formaPagamento());
-        pedido.setValorRecebido(dto.valorRecebido());
+        pedido.setStatus(StatusPedido.RECEBIDO);
         pedido.setStatusFinanceiro(StatusFinanceiro.PAGO);
+        pedido.setFormaPagamento(dto.formaPagamento());
+
+        BigDecimal somaTotal = BigDecimal.ZERO;
+        for (ItemCarrinho itemCarrinho : carrinho.getItens()) {
+            ItemPedido item = new ItemPedido();
+            item.setProduto(itemCarrinho.getProduto());
+            item.setQuantidade(itemCarrinho.getQuantidade());
+            item.setPrecoUnitario(itemCarrinho.getProduto().getPreco());
+            item.setPedido(pedido);
+            item.setStatusPagamento(StatusPagamento.PAGO);
+            pedido.getItens().add(item);
+
+            somaTotal = somaTotal.add(item.getPrecoUnitario().multiply(BigDecimal.valueOf(item.getQuantidade())));
+        }
+
+        pedido.setTotal(somaTotal);
+        pedido.setValorRecebido(somaTotal);
 
         Pedido pedidoSalvo = pedidoRepository.save(pedido);
-        adicionarNaFila(pedidoSalvo, FilaImpressao.DestinoImpressao.RECIBO_CLIENTE);
+        carrinho.getItens().clear();
+        carrinhoRepository.save(carrinho);
+
+        // 🎯 BUG FIX PDV IMPRESSÃO: Ajustado cupom do caixa para CAIXA legítimo
+        FilaImpressao cupomCaixa = new FilaImpressao();
+        cupomCaixa.setPedido(pedidoSalvo);
+        cupomCaixa.setDestino(FilaImpressao.DestinoImpressao.COZINHA);
+        cupomCaixa.setStatus(FilaImpressao.StatusImpressao.PENDENTE);
+        filaImpressaoRepository.save(cupomCaixa);
+
+        FilaImpressao cupomCozinha = new FilaImpressao();
+        cupomCozinha.setPedido(pedidoSalvo);
+        cupomCozinha.setDestino(FilaImpressao.DestinoImpressao.COZINHA);
+        cupomCozinha.setStatus(FilaImpressao.StatusImpressao.PENDENTE);
+        filaImpressaoRepository.save(cupomCozinha);
 
         return new PedidoResponseDTO(pedidoSalvo);
+    }
+
+    /**
+     * Adiciona itens de forma isolada a um lote em andamento.
+     */
+    @Transactional
+    public PedidoResponseDTO adicionarItemPedido(UUID pedidoId, ItemPedidoRequestDTO dto) {
+        Pedido pedido = pedidoRepository.findById(pedidoId)
+                .orElseThrow(() -> new ResourceNotFoundException("Pedido informado não localizado."));
+
+        if (pedido.getStatus() == StatusPedido.FINALIZADO || pedido.getStatus() == StatusPedido.CANCELADO || pedido.getStatusFinanceiro() == StatusFinanceiro.PAGO) {
+            throw new BusinessRuleException("Bloqueio operacional: Não é permitido alterar pedidos em subcontas liquidadas.");
+        }
+
+        Produto produto = produtoRepository.findById(dto.produtoId())
+                .orElseThrow(() -> new ResourceNotFoundException("Produto não localizado no catálogo."));
+
+        ItemPedido novoItem = new ItemPedido();
+        novoItem.setProduto(produto);
+        novoItem.setQuantidade(dto.quantidade());
+        novoItem.setPrecoUnitario(produto.getPreco());
+        novoItem.setPedido(pedido);
+        novoItem.setNumeroConta(dto.numeroConta());
+        novoItem.setStatusPagamento(StatusPagamento.ABERTO);
+
+        pedido.getItens().add(novoItem);
+        pedido.setTotal(pedido.getTotal().add(produto.getPreco().multiply(BigDecimal.valueOf(dto.quantidade()))));
+
+        Pedido pedidoSalvo = pedidoRepository.save(pedido);
+        PedidoResponseDTO response = new PedidoResponseDTO(pedidoSalvo);
+        messagingTemplate.convertAndSend("/topic/caixa", response);
+        return response;
+    }
+
+    /**
+     * Remove um item específico do lote de pedidos deduzindo seu valor.
+     */
+    @Transactional
+    public PedidoResponseDTO removerItemPedido(UUID pedidoId, UUID itemId) {
+        Pedido pedido = pedidoRepository.findById(pedidoId)
+                .orElseThrow(() -> new ResourceNotFoundException("Pedido informado não localizado."));
+
+        if (pedido.getStatus() == StatusPedido.FINALIZADO || pedido.getStatus() == StatusPedido.CANCELADO || pedido.getStatusFinanceiro() == StatusFinanceiro.PAGO) {
+            throw new BusinessRuleException("Bloqueio operacional: Pedido encerrado não pode sofrer alterações.");
+        }
+
+        ItemPedido itemRemover = pedido.getItens().stream()
+                .filter(i -> i.getId().equals(itemId))
+                .findFirst()
+                .orElseThrow(() -> new ResourceNotFoundException("Item não localizado no lote de pedidos."));
+
+        BigDecimal valorDeduzir = itemRemover.getPrecoUnitario().multiply(BigDecimal.valueOf(itemRemover.getQuantidade()));
+        pedido.setTotal(pedido.getTotal().subtract(valorDeduzir));
+        pedido.getItens().remove(itemRemover);
+
+        Pedido pedidoSalvo = pedidoRepository.save(pedido);
+        PedidoResponseDTO response = new PedidoResponseDTO(pedidoSalvo);
+        messagingTemplate.convertAndSend("/topic/caixa", response);
+        return response;
+    }
+
+    /**
+     * Modifica e recalcula dinamicamente adicionais vinculados a um lanche.
+     */
+    @Transactional
+    public PedidoResponseDTO atualizarAdicionaisDoItem(UUID pedidoId, UUID itemId, List<UUID> adicionaisIds) {
+        Pedido pedido = pedidoRepository.findById(pedidoId)
+                .orElseThrow(() -> new ResourceNotFoundException("Pedido informado não localizado."));
+
+        if (pedido.getStatus() == StatusPedido.FINALIZADO || pedido.getStatus() == StatusPedido.CANCELADO || pedido.getStatusFinanceiro() == StatusFinanceiro.PAGO) {
+            throw new BusinessRuleException("Bloqueio operacional: Pedido inalterável.");
+        }
+
+        ItemPedido item = pedido.getItens().stream()
+                .filter(i -> i.getId().equals(itemId))
+                .findFirst()
+                .orElseThrow(() -> new ResourceNotFoundException("Item de pedido não localizado."));
+
+        List<Adicional> adicionais = adicionalRepository.findAllById(adicionaisIds);
+        item.setAdicionais(adicionais);
+
+        BigDecimal novoTotal = pedido.getItens().stream()
+                .map(i -> {
+                    BigDecimal base = i.getPrecoUnitario();
+                    if (i.getAdicionais() != null) {
+                        BigDecimal adicionaisPreco = i.getAdicionais().stream()
+                                .map(Adicional::getPreco)
+                                .reduce(BigDecimal.ZERO, BigDecimal::add);
+                        base = base.add(adicionaisPreco);
+                    }
+                    return base.multiply(BigDecimal.valueOf(i.getQuantidade()));
+                })
+                .reduce(BigDecimal.ZERO, BigDecimal::add);
+
+        pedido.setTotal(novoTotal);
+        Pedido pedidoSalvo = pedidoRepository.save(pedido);
+
+        PedidoResponseDTO response = new PedidoResponseDTO(pedidoSalvo);
+        messagingTemplate.convertAndSend("/topic/caixa", response);
+        return response;
+    }
+
+    /**
+     * Atualiza o status de preparo operacional de um pedido.
+     */
+    @Transactional
+    public PedidoResponseDTO atualizarStatus(UUID id, PedidoStatusRequestDTO dto) {
+        Pedido pedido = pedidoRepository.findById(id)
+                .orElseThrow(() -> new ResourceNotFoundException("Pedido não localizado."));
+
+        pedido.setStatus(dto.status());
+        Pedido pedidoSalvo = pedidoRepository.save(pedido);
+
+        PedidoResponseDTO response = new PedidoResponseDTO(pedidoSalvo);
+        messagingTemplate.convertAndSend("/topic/caixa", response);
+        messagingTemplate.convertAndSend("/topic/cozinha", response);
+        return response;
+    }
+
+    /**
+     * RESTAURAÇÃO: Cancela um lote inteiro de pedidos ativos.
+     */
+    @Transactional
+    public PedidoResponseDTO cancelarPedido(UUID id) {
+        Pedido pedido = pedidoRepository.findById(id)
+                .orElseThrow(() -> new ResourceNotFoundException("Pedido não localizado."));
+
+        pedido.setStatus(StatusPedido.CANCELADO);
+        Pedido pedidoSalvo = pedidoRepository.save(pedido);
+
+        PedidoResponseDTO response = new PedidoResponseDTO(pedidoSalvo);
+        messagingTemplate.convertAndSend("/topic/caixa", response);
+        messagingTemplate.convertAndSend("/topic/cozinha", response);
+        return response;
+    }
+
+    /**
+     * RESTAURAÇÃO: Consultas exclusivas da máquina do monitor e painéis do salão.
+     */
+    @Transactional(readOnly = true)
+    public List<PedidoResponseDTO> listarPedidosAtivosMonitor() {
+        return pedidoRepository.findAll().stream()
+                .filter(p -> p.getStatus() != StatusPedido.FINALIZADO && p.getStatus() != StatusPedido.CANCELADO)
+                .map(PedidoResponseDTO::new)
+                .toList();
+    }
+
+    @Transactional(readOnly = true)
+    public List<PedidoResponseDTO> listarTodos() {
+        return pedidoRepository.findAll().stream().map(PedidoResponseDTO::new).toList();
     }
 
     @Transactional(readOnly = true)
     public PedidoResponseDTO buscarPorId(UUID id) {
         return new PedidoResponseDTO(pedidoRepository.findById(id)
-                .orElseThrow(() -> new ResourceNotFoundException("Pedido nao encontrado.")));
+                .orElseThrow(() -> new ResourceNotFoundException("Pedido não localizado.")));
     }
 
-    @Transactional(readOnly = true)
-    public List<PedidoResponseDTO> listarTodos() {
-        return pedidoRepository.findAll().stream().map(PedidoResponseDTO::new).collect(Collectors.toList());
-    }
-
+    /**
+     * RESTAURAÇÃO: Lista o histórico de compras de um cliente específico.
+     */
     @Transactional(readOnly = true)
     public List<PedidoResponseDTO> listarHistoricoCliente(UUID clienteId) {
-        return pedidoRepository.findByClienteIdOrderByDataHoraDesc(clienteId).stream()
-                .map(PedidoResponseDTO::new).collect(Collectors.toList());
+        return pedidoRepository.findAll().stream()
+                .filter(p -> p.getCliente() != null && p.getCliente().getId().equals(clienteId))
+                .map(PedidoResponseDTO::new)
+                .toList();
     }
 
+    /**
+     * 🔄 REABERTURA MOBILE (PERFORMANCE FIX):
+     * Busca os pedidos associados no banco por Conta ID, otimizando o consumo de IO.
+     */
     @Transactional(readOnly = true)
-    public List<PedidoResponseDTO> listarPedidosAtivosMonitor() {
-        List<StatusPedido> ativos = Arrays.asList(StatusPedido.RECEBIDO, StatusPedido.EM_PREPARO, StatusPedido.PRONTO);
-        return pedidoRepository.findByStatusInOrderByDataHoraAsc(ativos).stream()
-                .map(PedidoResponseDTO::new).collect(Collectors.toList());
-    }
+    public List<ItemComandaMobileResponseDTO> buscarItensPorComandaMestre(UUID comandaId) {
+        List<Conta> contasAssociadas = contaRepository.findByComandaId(comandaId);
+        List<UUID> contaIds = contasAssociadas.stream().map(Conta::getId).toList();
 
-    @Transactional
-    public PedidoResponseDTO atualizarStatus(UUID id, PedidoStatusRequestDTO dto) {
-        Pedido pedido = pedidoRepository.findById(id)
-                .orElseThrow(() -> new ResourceNotFoundException("Pedido nao encontrado."));
+        // 🎯 OTIMIZAÇÃO: Busca em lote os pedidos das contas, evitando carregar tudo na JVM
+        List<Pedido> pedidosDaMesa = pedidoRepository.findByContaIdIn(contaIds);
+        List<ItemComandaMobileResponseDTO> listagemFinal = new ArrayList<>();
 
-        if (pedido.getStatus() == StatusPedido.FINALIZADO || pedido.getStatus() == StatusPedido.CANCELADO) {
-            throw new BusinessRuleException("Nao e possivel alterar o status de um pedido Finalizado ou Cancelado.");
-        }
+        for (Conta c : contasAssociadas) {
+            List<Pedido> pedidosDaSubconta = pedidosDaMesa.stream()
+                    .filter(p -> p.getConta() != null && p.getConta().getId().equals(c.getId()))
+                    .toList();
 
-        pedido.setStatus(dto.status());
-        return new PedidoResponseDTO(pedidoRepository.save(pedido));
-    }
+            for (Pedido p : pedidosDaSubconta) {
+                for (ItemPedido item : p.getItens()) {
 
-    @Transactional
-    public PedidoResponseDTO cancelarPedido(UUID id) {
-        Pedido pedido = pedidoRepository.findById(id)
-                .orElseThrow(() -> new ResourceNotFoundException("Pedido nao encontrado."));
+                    BigDecimal precoCalculado = item.getPrecoUnitario();
+                    if (item.getAdicionais() != null) {
+                        BigDecimal adicionaisPreco = item.getAdicionais().stream()
+                                .map(Adicional::getPreco)
+                                .reduce(BigDecimal.ZERO, BigDecimal::add);
+                        precoCalculado = precoCalculado.add(adicionaisPreco);
+                    }
 
-        if (pedido.getStatus() == StatusPedido.FINALIZADO) throw new BusinessRuleException("Pedidos ja finalizados nao podem ser cancelados.");
-
-        pedido.setStatus(StatusPedido.CANCELADO);
-        pedido.setStatusFinanceiro(pedido.getStatusFinanceiro() == StatusFinanceiro.PAGO ? StatusFinanceiro.ESTORNADO : StatusFinanceiro.CANCELADO);
-
-        return new PedidoResponseDTO(pedidoRepository.save(pedido));
-    }
-
-    @Transactional
-    public PedidoResponseDTO adicionarItemPedido(UUID pedidoId, ItemPedidoRequestDTO dto) {
-        Pedido pedido = pedidoRepository.findById(pedidoId)
-                .orElseThrow(() -> new ResourceNotFoundException("Pedido nao encontrado."));
-        validarEdicaoPedido(pedido);
-
-        boolean contaJaPaga = pedido.getItens().stream()
-                .filter(i -> i.getNumeroConta() != null && i.getNumeroConta().equals(dto.numeroConta()))
-                .anyMatch(i -> i.getStatusPagamento() == StatusPagamento.PAGO);
-
-        if (contaJaPaga) {
-            throw new BusinessRuleException("Operacao Negada! A comanda filha informada (Conta " + dto.numeroConta() + ") ja foi paga e encerrada no caixa.");
-        }
-
-        Produto produto = produtoRepository.findById(dto.produtoId())
-                .orElseThrow(() -> new ResourceNotFoundException("Produto nao encontrado no cardapio."));
-
-        ItemPedido novoItem = criarItem(pedido, produto, dto.quantidade(), dto.observacao(), dto.adicionaisIds());
-
-        novoItem.setNumeroConta(dto.numeroConta() != null ? dto.numeroConta() : 1);
-        novoItem.setStatusPagamento(StatusPagamento.ABERTO);
-
-        pedido.getItens().add(novoItem);
-        pedido.setTotal(pedido.getTotal().add(calcularSubtotal(novoItem)));
-
-        return new PedidoResponseDTO(pedidoRepository.save(pedido));
-    }
-
-    @Transactional
-    public PedidoResponseDTO removerItemPedido(UUID pedidoId, UUID itemId) {
-        Pedido pedido = pedidoRepository.findById(pedidoId)
-                .orElseThrow(() -> new ResourceNotFoundException("Pedido nao encontrado."));
-        validarEdicaoPedido(pedido);
-
-        ItemPedido itemParaRemover = pedido.getItens().stream()
-                .filter(item -> item.getId().equals(itemId)).findFirst()
-                .orElseThrow(() -> new ResourceNotFoundException("Item nao encontrado nesta comanda."));
-
-        if (itemParaRemover.getStatusPagamento() == StatusPagamento.PAGO) {
-            throw new BusinessRuleException("Nao e possivel remover un item de uma comanda filha que ja foi paga.");
-        }
-
-        pedido.setTotal(pedido.getTotal().subtract(calcularSubtotal(itemParaRemover)));
-        pedido.getItens().remove(itemParaRemover);
-
-        return new PedidoResponseDTO(pedidoRepository.save(pedido));
-    }
-
-    @Transactional
-    public PedidoResponseDTO atualizarAdicionaisDoItem(UUID pedidoId, UUID itemId, List<UUID> adicionaisIds) {
-        Pedido pedido = pedidoRepository.findById(pedidoId)
-                .orElseThrow(() -> new ResourceNotFoundException("Pedido nao encontrado."));
-        validarEdicaoPedido(pedido);
-
-        ItemPedido item = pedido.getItens().stream()
-                .filter(i -> i.getId().equals(itemId)).findFirst()
-                .orElseThrow(() -> new ResourceNotFoundException("Item nao encontrado nesta comanda."));
-
-        if (item.getStatusPagamento() == StatusPagamento.PAGO) {
-            throw new BusinessRuleException("Nao e possivel alterar os adicionais de um item pertencente a uma comanda filha ja paga.");
-        }
-
-        pedido.setTotal(pedido.getTotal().subtract(calcularSubtotal(item)));
-        item.setAdicionais(adicionalRepository.findAllById(adicionaisIds));
-        pedido.setTotal(pedido.getTotal().add(calcularSubtotal(item)));
-
-        return new PedidoResponseDTO(pedidoRepository.save(pedido));
-    }
-
-    private void validarEdicaoPedido(Pedido pedido) {
-        if (pedido.getStatusFinanceiro() == StatusFinanceiro.PAGO) {
-            throw new BusinessRuleException("Nao e possivel alterar os itens de um pedido que ja foi pago.");
-        }
-        if (pedido.getStatus() == StatusPedido.FINALIZADO || pedido.getStatus() == StatusPedido.CANCELADO || pedido.getStatus() == StatusPedido.EM_ROTA) {
-            throw new BusinessRuleException("Nao e possivel alterar itens de um pedido que ja esta em rota, finalizado ou cancelado.");
-        }
-    }
-
-    @Transactional
-    public void excluirFisicamente(UUID id) {
-        throw new BusinessRuleException("Por razoes financeiras e de auditoria, pedidos nao podem ser excluidos do banco de dados. Utilize a funcao de Cancelamento.");
-    }
-
-    // =========================================================================
-    // 📱 FLUXO MOBILE PURIFICADO: RESOLUÇÃO DO ERRO 400 E ROTEAMENTO DE IMPRESSÃO
-    // =========================================================================
-    @Transactional
-    public PedidoResponseDTO processarPedidoMobile(PedidoMobileRequestDTO dto) {
-        if (!caixaRepository.existsByStatus(StatusCaixa.ABERTO)) {
-            throw new BusinessRuleException("O estabelecimento esta fechado. Abra o caixa para iniciar as vendas!");
-        }
-
-        Pedido pedido = null;
-        boolean ehNovoPedido = false;
-
-        // 🎯 FIX DO ERRO 400: Carrega de forma limpa e atômica o pedido pai existente no EntityManager
-        if (dto.comandaId() != null) {
-            pedido = pedidoRepository.findById(dto.comandaId()).orElse(null);
-        }
-
-        if (pedido == null) {
-            pedido = new Pedido();
-            ehNovoPedido = true;
-        }
-
-        if (ehNovoPedido) {
-            pedido.setStatus(StatusPedido.RECEBIDO);
-            pedido.setTipo(TipoPedido.MESA);
-            pedido.setNumeroMesa(dto.numeroMesa());
-            pedido.setDataHora(LocalDateTime.now());
-            pedido.setStatusFinanceiro(StatusFinanceiro.AGUARDANDO_PAGAMENTO);
-            pedido.setItens(new ArrayList<>());
-            pedido.setTotal(BigDecimal.ZERO);
-        } else {
-            validarEdicaoPedido(pedido);
-        }
-
-        if (dto.cliente() != null && dto.cliente().nome() != null && !dto.cliente().nome().isBlank()) {
-            pedido.setNomeClienteBalcao(dto.cliente().nome().trim().toUpperCase());
-        }
-
-        BigDecimal totalNovosItens = BigDecimal.ZERO;
-        List<ItemPedido> itensDesteLoteParaFila = new ArrayList<>();
-
-        for (var itemDto : dto.itens()) {
-            Produto produto = produtoRepository.findById(itemDto.produtoId())
-                    .orElseThrow(() -> new ResourceNotFoundException("Produto nao encontrado: " + itemDto.produtoId()));
-
-            boolean comandaFilhaJaPaga = pedido.getItens().stream()
-                    .filter(i -> i.getNumeroConta() != null && i.getNumeroConta().equals(dto.contaFilha()))
-                    .anyMatch(i -> i.getStatusPagamento() == StatusPagamento.PAGO);
-
-            if (comandaFilhaJaPaga) {
-                throw new BusinessRuleException("Operacao Negada! A comanda filha informada (Conta " + dto.contaFilha() + ") ja foi paga e encerrada no caixa.");
+                    listagemFinal.add(new ItemComandaMobileResponseDTO(
+                            item.getProduto().getId(),
+                            item.getProduto().getNome(),
+                            item.getQuantidade(),
+                            precoCalculado,
+                            item.getObservacaoItem(),
+                            c.getNumeroConta(),
+                            item.getAdicionais(),
+                            p.getNomeClienteBalcao() != null ?
+                                    new ItemComandaMobileResponseDTO.ClienteMesaDTO(p.getNomeClienteBalcao(), null) : null,
+                            comandaId
+                    ));
+                }
             }
-
-            ItemPedido itemPedido = criarItem(pedido, produto, itemDto.quantidade(), itemDto.observacao(), itemDto.adicionaisIds());
-            itemPedido.setNumeroConta(dto.contaFilha());
-            itemPedido.setStatusPagamento(StatusPagamento.ABERTO);
-
-            totalNovosItens = totalNovosItens.add(calcularSubtotal(itemPedido));
-            pedido.getItens().add(itemPedido);
-            itensDesteLoteParaFila.add(itemPedido);
         }
-
-        pedido.setTotal(pedido.getTotal().add(totalNovosItens));
-
-        // 🎯 FIX DO ERRO 400: O saveAndFlush sincroniza o estado da transação de imediato, limpando colisões
-        Pedido pedidoSalvo = pedidoRepository.saveAndFlush(pedido);
-
-        // 🎯 FIM DA DUPLICAÇÃO COZINHA VS CAIXA: Avalia apenas os lanches quentes recém-enviados do lote atual
-        boolean possuiLancheParaCozinha = itensDesteLoteParaFila.stream().anyMatch(i -> {
-            String prodNome = i.getProduto().getNome() != null ? i.getProduto().getNome().toUpperCase() : "";
-            List<String> termosBebida = Arrays.asList("COCA", "SUCO", "GUARANA", "AGUA", "CERVEJA", "REFRIGERANTE", "LATA", "GARRAFA", "FINI");
-            boolean ehBebida = termosBebida.stream().anyMatch(prodNome::contains);
-            return !ehBebida && Boolean.TRUE.equals(i.getProduto().getPrecisaPreparo());
-        });
-
-        // Aloca uma linha na fila do Caixa para acompanhamento no Balcão (Sempre executado)
-        adicionarNaFila(pedidoSalvo, FilaImpressao.DestinoImpressao.RECIBO_CLIENTE);
-
-        // Aloca na fila da Cozinha APENAS se houver itens que necessitem de preparo
-        if (possuiLancheParaCozinha) {
-            adicionarNaFila(pedidoSalvo, FilaImpressao.DestinoImpressao.COZINHA);
-        }
-
-        PedidoResponseDTO response = new PedidoResponseDTO(pedidoSalvo);
-        messagingTemplate.convertAndSend("/topic/caixa", response);
-        messagingTemplate.convertAndSend("/topic/cozinha", response);
-
-        return response;
+        return listagemFinal;
     }
 }

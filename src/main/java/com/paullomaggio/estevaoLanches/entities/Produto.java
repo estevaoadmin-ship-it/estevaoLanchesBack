@@ -1,7 +1,7 @@
 package com.paullomaggio.estevaoLanches.entities;
 
-import com.fasterxml.jackson.annotation.JsonIgnore; // 🚨 Importação necessária
-import com.fasterxml.jackson.annotation.JsonIgnoreProperties; // 🚨 Importação necessária
+import com.fasterxml.jackson.annotation.JsonIgnore;
+import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.paullomaggio.estevaoLanches.enums.StatusProduto;
 import jakarta.persistence.*;
 import jakarta.validation.constraints.*;
@@ -18,6 +18,8 @@ import java.util.UUID;
 @NoArgsConstructor
 @AllArgsConstructor
 @EqualsAndHashCode(onlyExplicitlyIncluded = true)
+// 🛡️ BLINDAGEM MÁGICA: Garante estabilidade total nos mapeamentos Lazy de ItemPedido, Carrinho e ComboProduto
+@JsonIgnoreProperties({"hibernateLazyInitializer", "handler"})
 public class Produto {
 
     @Id
@@ -50,19 +52,16 @@ public class Produto {
     @Column(nullable = false)
     private Boolean isCombo = false;
 
-    // 🚀 NOVO CAMPO: Define se o produto exige fabricação ou se é entregue direto no balcão
     @NotNull
     @Column(name = "precisa_preparo", nullable = false)
     private Boolean precisaPreparo = true;
 
     @NotNull(message = "A categoria é obrigatória.")
-    // 🚨 A MÁGICA 1: Diz pro Jackson não surtar com o Proxy Lazy do Hibernate
-    @JsonIgnoreProperties({"hibernateLazyInitializer", "handler"})
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "categoria_id", nullable = false)
+    @JsonIgnoreProperties("produtos")
     private Categoria categoria;
 
-    // 🚨 A MÁGICA 2: Ignora essas listas na hora de gerar o JSON para não dar erro de LazyLoading
     @JsonIgnore
     @ManyToMany
     @JoinTable(
@@ -72,7 +71,6 @@ public class Produto {
     )
     private List<Adicional> adicionais = new ArrayList<>();
 
-    // 🚨 A MÁGICA 3: Também ignora os combos para blindar o JSON
     @JsonIgnore
     @OneToMany(mappedBy = "combo", cascade = CascadeType.ALL, orphanRemoval = true)
     private List<ComboProduto> itensDoCombo = new ArrayList<>();

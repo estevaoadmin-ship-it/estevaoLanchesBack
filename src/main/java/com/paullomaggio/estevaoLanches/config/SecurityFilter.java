@@ -30,12 +30,10 @@ public class SecurityFilter extends OncePerRequestFilter {
         this.contaDeliveryRepository = contaDeliveryRepository;
     }
 
-    // 🎯 O FILTRO DE BARREIRA: Diz ao Spring quais rotas estão terminantemente dispensadas de validação JWT
     @Override
     protected boolean shouldNotFilter(HttpServletRequest request) throws ServletException {
         String path = request.getServletPath();
 
-        // Bloqueia a execução do filtro para as portas públicas de autenticação, ponte de impressão e WebSocket
         return path.startsWith("/api/auth/")
                 || path.startsWith("/api/fila-impressao")
                 || path.startsWith("/api/pedidos/fila-impressao")

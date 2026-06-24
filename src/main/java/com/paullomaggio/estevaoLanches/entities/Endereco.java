@@ -1,6 +1,6 @@
 package com.paullomaggio.estevaoLanches.entities;
 
-import com.fasterxml.jackson.annotation.JsonIgnore;
+import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import jakarta.persistence.*;
 import lombok.*;
 import java.util.UUID;
@@ -12,6 +12,7 @@ import java.util.UUID;
 @NoArgsConstructor
 @AllArgsConstructor
 @EqualsAndHashCode(onlyExplicitlyIncluded = true)
+@JsonIgnoreProperties({"hibernateLazyInitializer", "handler"})
 public class Endereco {
 
     @Id
@@ -19,11 +20,11 @@ public class Endereco {
     @EqualsAndHashCode.Include
     private UUID id;
 
-    @Column(nullable = false, length = 50)
-    private String rotulo; // Ex: "Casa", "Trabalho", "Mãe"
+    @Column(length = 50)
+    private String rotulo; // Ex: Casa, Trabalho, Namorada
 
     @Column(nullable = false, length = 150)
-    private String logradouro; // Rua, Avenida, etc.
+    private String logradouro;
 
     @Column(nullable = false, length = 20)
     private String numero;
@@ -40,11 +41,11 @@ public class Endereco {
     @Column(nullable = false, length = 2)
     private String uf;
 
-    @Column(length = 9)
+    @Column(nullable = false, length = 9)
     private String cep;
 
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "cliente_id", nullable = false)
-    @JsonIgnore // Evita loops infinitos na serialização
+    @JsonIgnoreProperties("enderecos")
     private Cliente cliente;
 }

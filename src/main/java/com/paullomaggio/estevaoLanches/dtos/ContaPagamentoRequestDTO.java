@@ -1,31 +1,18 @@
 package com.paullomaggio.estevaoLanches.dtos;
 
+import com.paullomaggio.estevaoLanches.enums.FormaPagamento;
 import jakarta.validation.constraints.NotNull;
+import jakarta.validation.constraints.Positive;
 import java.math.BigDecimal;
 
-public class ContaPagamentoRequestDTO {
+public record ContaPagamentoRequestDTO(
+        @NotNull(message = "O número da subcomanda/conta é obrigatório.")
+        Integer numeroConta,
 
-    @NotNull
-    private Integer numeroConta;
+        @NotNull(message = "O valor recebido é obrigatório.")
+        @Positive(message = "O valor recebido deve ser maior que zero.")
+        BigDecimal valorRecebido,
 
-    @NotNull
-    private BigDecimal valorPago;
-
-    @NotNull
-    private String formaPagamento;
-
-    private String usuarioResponsavel;
-
-    // Getters e Setters manuais para evitar falhas do compilador
-    public Integer getNumeroConta() { return numeroConta; }
-    public void setNumeroConta(Integer numeroConta) { this.numeroConta = numeroConta; }
-
-    public BigDecimal getValorPago() { return valorPago; }
-    public void setValorPago(BigDecimal valorPago) { this.valorPago = valorPago; }
-
-    public String getFormaPagamento() { return formaPagamento; }
-    public void setFormaPagamento(String formaPagamento) { this.formaPagamento = formaPagamento; }
-
-    public String getUsuarioResponsavel() { return usuarioResponsavel; }
-    public void setUsuarioResponsavel(String usuarioResponsavel) { this.usuarioResponsavel = usuarioResponsavel; }
-}
+        @NotNull(message = "A forma de pagamento é obrigatória.")
+        FormaPagamento formaPagamento
+) {}

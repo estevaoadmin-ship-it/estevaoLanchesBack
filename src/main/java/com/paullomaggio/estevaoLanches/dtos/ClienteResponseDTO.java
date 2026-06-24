@@ -1,6 +1,7 @@
 package com.paullomaggio.estevaoLanches.dtos;
 
 import com.paullomaggio.estevaoLanches.entities.Cliente;
+import com.paullomaggio.estevaoLanches.enums.StatusCliente;
 import java.time.LocalDate;
 import java.util.List;
 import java.util.UUID;
@@ -13,6 +14,7 @@ public record ClienteResponseDTO(
         String email,
         String numero,
         LocalDate dataNascimento,
+        StatusCliente status,
         List<EnderecoResponseDTO> enderecos
 ) {
     public ClienteResponseDTO(Cliente cliente) {
@@ -23,6 +25,7 @@ public record ClienteResponseDTO(
                 cliente.getEmail(),
                 cliente.getNumero(),
                 cliente.getDataNascimento(),
+                cliente.getStatus(),
                 cliente.getEnderecos().stream().map(EnderecoResponseDTO::new).collect(Collectors.toList())
         );
     }

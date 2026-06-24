@@ -58,18 +58,13 @@ public class AdicionalService {
         if (!adicionalRepository.existsById(id)) {
             throw new ResourceNotFoundException("Não é possível excluir. Adicional não encontrado!");
         }
-
-        // Se tentar deletar um adicional que já está vinculado a um lanche,
-        // o nosso GlobalExceptionHandler vai interceptar o erro do banco de dados
-        // e devolver um 409 Conflict bonitão pro front-end!
         adicionalRepository.deleteById(id);
     }
 
-    // =========================================================================
-    // Método auxiliar para evitar repetição de código no Salvar e Atualizar
-    // =========================================================================
     private void copiarDtoParaEntidade(AdicionalRequestDTO dto, Adicional adicional) {
-        adicional.setNome(dto.nome());
+        if (dto.nome() != null) {
+            adicional.setNome(dto.nome().trim().toUpperCase());
+        }
         adicional.setPreco(dto.preco());
     }
 }
