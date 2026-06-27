@@ -46,12 +46,9 @@ public class Cliente {
     @Column(nullable = false, length = 20)
     private StatusCliente status = StatusCliente.ATIVO;
 
-    /**
-     * 🎯 NOVA LÓGICA: Um cliente tem uma conta associada no atendimento corrente.
-     */
-    @OneToOne(mappedBy = "cliente", fetch = FetchType.LAZY)
+    @OneToMany(mappedBy = "cliente", fetch = FetchType.LAZY)
     @JsonIgnoreProperties("cliente")
-    private Conta conta;
+    private List<Conta> contas = new ArrayList<>();
 
     @OneToMany(mappedBy = "cliente", cascade = CascadeType.ALL, orphanRemoval = true)
     @JsonIgnoreProperties("cliente")

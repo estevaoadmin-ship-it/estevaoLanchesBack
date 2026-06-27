@@ -44,12 +44,10 @@ public class Conta {
     @JsonIgnoreProperties("contas")
     private Comanda comanda;
 
-    /**
-     * 🎯 NOVA LÓGICA: Uma conta tem exatamente um cliente associado (Relação 1:1).
-     */
-    @OneToOne(fetch = FetchType.LAZY, cascade = CascadeType.ALL)
+
+    @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "cliente_id", nullable = false)
-    @JsonIgnoreProperties("conta")
+    @JsonIgnoreProperties("contas")
     private Cliente cliente;
 
     @OneToMany(mappedBy = "conta", cascade = CascadeType.ALL, orphanRemoval = true)

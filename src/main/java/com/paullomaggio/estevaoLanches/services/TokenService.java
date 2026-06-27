@@ -21,14 +21,14 @@ public class TokenService {
         return JWT.create()
                 .withIssuer("estevao-lanches-api")
                 .withSubject(usuario.getEmail())
-                .withClaim("role", usuario.getRole().name())
+                // CORRECAO: Como 'role' ja e uma String na entidade Usuario, removemos o .name()
+                .withClaim("role", usuario.getRole())
                 .withClaim("nome", usuario.getNome())
                 .withClaim("tipo_conta", "COLABORADOR")
                 .withExpiresAt(gerarDataExpiracao())
                 .sign(Algorithm.HMAC256(secret));
     }
 
-    // 🎯 ALTERADO: Assinatura adaptada para receber a ContaDelivery isolada
     public String gerarTokenCliente(ContaDelivery conta) {
         return JWT.create()
                 .withIssuer("estevao-lanches-api")
@@ -47,7 +47,9 @@ public class TokenService {
                     .build()
                     .verify(token)
                     .getSubject();
-        } catch (Exception e) { return ""; }
+        } catch (Exception e) {
+            return "";
+        }
     }
 
     public String extrairTipoConta(String token) {
@@ -59,7 +61,9 @@ public class TokenService {
 
             var claim = jwt.getClaim("tipo_conta");
             return (claim.isMissing() || claim.isNull()) ? "COLABORADOR" : claim.asString();
-        } catch (Exception e) { return null; }
+        } catch (Exception e) {
+            return null;
+        }
     }
 
     private Instant gerarDataExpiracao() {

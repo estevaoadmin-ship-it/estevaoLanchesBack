@@ -5,6 +5,7 @@ import com.paullomaggio.estevaoLanches.dtos.ProdutoRankingDTO;
 import com.paullomaggio.estevaoLanches.entities.Pedido;
 import com.paullomaggio.estevaoLanches.enums.FormaPagamento;
 import com.paullomaggio.estevaoLanches.enums.StatusPedido;
+import com.paullomaggio.estevaoLanches.enums.TipoPedido;
 import jakarta.persistence.LockModeType;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
@@ -42,6 +43,12 @@ public interface PedidoRepository extends JpaRepository<Pedido, UUID> {
      * Busca o histórico completo de pedidos de um cliente ordenado por data decrescente.
      */
     List<Pedido> findByClienteIdOrderByDataHoraDesc(UUID clienteId);
+
+    /**
+     * 🚚 DELIVERY APP E SEPARAÇÃO DE CONTEXTOS:
+     * Busca o histórico de pedidos de um cliente filtrado exclusivamente pelo canal de venda (ex: DELIVERY).
+     */
+    List<Pedido> findByClienteIdAndTipo(UUID clienteId, TipoPedido tipo);
 
     /**
      * 🎯 RESTAURAÇÃO DE TESTE (Erros 3 e 4):

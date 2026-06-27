@@ -1,24 +1,30 @@
 package com.paullomaggio.estevaoLanches.dtos;
 
-import jakarta.validation.constraints.NotNull;
 import java.util.List;
 import java.util.UUID;
 
+/**
+ * 📝 ESTRUTURA MESTRA DE RECEBIMENTO DO SALÃO:
+ * Desserializa rigidamente o fluxo da sacola emitido pelo Angular sem perda de pacotes.
+ */
 public record PedidoMobileRequestDTO(
-        @NotNull(message = "O ID da comanda mestre é obrigatório.")
         UUID comandaId,
-
         Integer numeroMesa,
-        Integer contaFilha,
-        ClienteMobileDTO cliente,
-        List<ItemMobileRequestDTO> itens
+        Integer numeroConta,
+        ClientePayloadDTO cliente, // O Angular agora despacha corretamente a chave "cliente" aninhada
+        List<ItemPedidoPayloadDTO> itens
 ) {
-        public record ClienteMobileDTO(String nome, String telefone) {}
+        public record ClientePayloadDTO(
+                String nome, // O Angular enviará a chave 'nome', batendo com o Jackson do Spring
+                String telefone
+        ) {}
 
-        public record ItemMobileRequestDTO(
+        public record ItemPedidoPayloadDTO(
                 UUID produtoId,
-                int quantidade,
+                String nome,
+                Integer quantidade,
+                Double precoCalculado,
                 String observacao,
-                List<UUID> adicionaisIds
+                List<UUID> adicionaisIds // Recebe apenas a lista de UUIDs dos adicionais atrelados
         ) {}
 }

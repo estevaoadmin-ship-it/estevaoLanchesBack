@@ -39,68 +39,83 @@ public class PedidoService {
             throw new BusinessRuleException("Operação negada: O turno do caixa está fechado.");
         }
 
-        comandaRepository.findById(dto.comandaId())
-                .orElseThrow(() -> new ResourceNotFoundException("Sessão de comanda mestre não localizada."));
+        // 🎯 FIX 404 & 409 CONTA FILHA: Se a subconta (Ex: Conta 2) não existir, ela é instanciada herdando
+        // obrigatoriamente o mesmo Cliente relacional da Conta Mãe (Conta 1) daquela mesa.
+        Conta conta = contaRepository.findByComandaIdAndNumeroConta(dto.comandaId(), dto.numeroConta())
+                .orElseGet(() -> {
+                    Comanda comandaMestre = comandaRepository.findById(dto.comandaId())
+                            .orElseThrow(() -> new ResourceNotFoundException("Sessão de comanda mestre não localizada."));
 
-        Conta conta = contaRepository.findByComandaIdAndNumeroConta(dto.comandaId(), 1)
-                .orElseThrow(() -> new ResourceNotFoundException("Partição de subconta mestre não localizada na mesa."));
+                    Conta novaConta = new Conta();
+                    novaConta.setComanda(comandaMestre);
+                    novaConta.setNumeroConta(dto.numeroConta());
+                    novaConta.setValorTotal(BigDecimal.ZERO);
+                    novaConta.setPago(false);
+
+                    // Envelopamento Automático: Herda o cliente da partição principal (Conta 1)
+                    contaRepository.findByComandaIdAndNumeroConta(dto.comandaId(), 1)
+                            .ifPresent(contaMae -> novaConta.setCliente(contaMae.getCliente()));
+
+                    return contaRepository.save(novaConta);
+                });
 
         if (conta.getPago()) {
             throw new BusinessRuleException("Bloqueio comercial: Esta subconta já foi encerrada e paga no caixa.");
         }
 
-        List<Pedido> pedidosAtivos = pedidoRepository.findByContaIdIn(List.of(conta.getId())).stream()
-                .filter(p -> p.getStatus() != StatusPedido.FINALIZADO && p.getStatus() != StatusPedido.CANCELADO)
-                .toList();
+        Pedido pedido = new Pedido();
+        pedido.setConta(conta);
+        pedido.setStatus(StatusPedido.RECEBIDO);
+        pedido.setTipo(TipoPedido.MESA);
+        pedido.setNumeroMesa(dto.numeroMesa());
+        pedido.setTotal(BigDecimal.ZERO);
+        pedido.setItens(new ArrayList<>());
 
-        Pedido pedido;
-        if (pedidosAtivos.isEmpty()) {
-            pedido = new Pedido();
-            pedido.setConta(conta);
-            pedido.setStatus(StatusPedido.RECEBIDO);
-            pedido.setTipo(TipoPedido.MESA);
-            pedido.setNumeroMesa(dto.numeroMesa());
+        // 🎯 FIX CRÍTICO 409: Satisfeita a restrição de integridade relacional 'cliente_id' NOT NULL da tabela Pedido
+        if (conta.getCliente() != null) {
+            pedido.setCliente(conta.getCliente());
+        }
 
-            if (dto.cliente() != null && dto.cliente().nome() != null) {
-                pedido.setNomeClienteBalcao(dto.cliente().nome().toUpperCase().trim());
-            }
-        } else {
-            pedido = pedidosAtivos.getFirst();
+        if (dto.cliente() != null && dto.cliente().nome() != null) {
+            pedido.setNomeClienteBalcao(dto.cliente().nome().toUpperCase().trim());
         }
 
         BigDecimal subtotalLote = BigDecimal.ZERO;
         boolean necessitaPreparoCozinha = false;
 
-        for (PedidoMobileRequestDTO.ItemMobileRequestDTO itemDto : dto.itens()) {
+        for (PedidoMobileRequestDTO.ItemPedidoPayloadDTO itemDto : dto.itens()) {
             Produto produto = produtoRepository.findById(itemDto.produtoId())
                     .orElseThrow(() -> new ResourceNotFoundException("Produto do cardápio não localizado."));
 
+            List<Adicional> adicionaisVinculados = itemDto.adicionaisIds() != null ?
+                    adicionalRepository.findAllById(itemDto.adicionaisIds()) : new ArrayList<>();
+
+            BigDecimal precoAdicionais = adicionaisVinculados.stream()
+                    .map(Adicional::getPreco)
+                    .reduce(BigDecimal.ZERO, BigDecimal::add);
+
+            BigDecimal precoFinalItemUnitario = produto.getPreco().add(precoAdicionais);
+
             ItemPedido item = new ItemPedido();
             item.setProduto(produto);
-            item.setQuantidade(itemDto.quantidade()); // Sincronizado ao setter físico
             item.setQuantidade(itemDto.quantidade());
-            item.setPrecoUnitario(produto.getPreco());
+            item.setPrecoUnitario(precoFinalItemUnitario);
+            item.setAdicionais(adicionaisVinculados);
             item.setPedido(pedido);
-            item.setNumeroConta(1);
+            item.setObservacaoItem(itemDto.observacao());
+            item.setNumeroConta(dto.numeroConta());
             item.setStatusPagamento(StatusPagamento.ABERTO);
 
             pedido.getItens().add(item);
-            subtotalLote = subtotalLote.add(produto.getPreco().multiply(BigDecimal.valueOf(itemDto.quantidade())));
+            subtotalLote = subtotalLote.add(precoFinalItemUnitario.multiply(BigDecimal.valueOf(itemDto.quantidade())));
 
             if (produto.getPrecisaPreparo()) {
                 necessitaPreparoCozinha = true;
             }
         }
 
-        pedido.setTotal(pedido.getTotal().add(subtotalLote));
+        pedido.setTotal(subtotalLote);
         Pedido pedidoSalvo = pedidoRepository.saveAndFlush(pedido);
-
-        // 🎯 BUG FIX IMPRESSÃO: Injetado DestinoImpressao.CAIXA corrigindo a duplicidade de cozinha
-        FilaImpressao cupomCaixa = new FilaImpressao();
-        cupomCaixa.setPedido(pedidoSalvo);
-        cupomCaixa.setDestino(FilaImpressao.DestinoImpressao.COZINHA);
-        cupomCaixa.setStatus(FilaImpressao.StatusImpressao.PENDENTE);
-        filaImpressaoRepository.save(cupomCaixa);
 
         if (necessitaPreparoCozinha) {
             FilaImpressao cupomCozinha = new FilaImpressao();
@@ -117,9 +132,6 @@ public class PedidoService {
         return responseDTO;
     }
 
-    /**
-     * 🛡️ CONCORRÊNCIA BLINDADA: Liquidação financeira via Lock Pessimista.
-     */
     @Transactional
     public PedidoResponseDTO receberPagamento(UUID id, PagamentoRequestDTO dto) {
         Pedido pedido = pedidoRepository.findByIdForUpdate(id)
@@ -146,9 +158,6 @@ public class PedidoService {
         }
     }
 
-    /**
-     * Checkout centralizado para balcão ou carrinhos de entrega delivery.
-     */
     @Transactional
     public PedidoResponseDTO finalizarPedido(CheckoutRequestDTO dto) {
         if (!caixaRepository.existsByStatus(StatusCaixa.ABERTO)) {
@@ -169,6 +178,7 @@ public class PedidoService {
         pedido.setStatus(StatusPedido.RECEBIDO);
         pedido.setStatusFinanceiro(StatusFinanceiro.PAGO);
         pedido.setFormaPagamento(dto.formaPagamento());
+        pedido.setItens(new ArrayList<>());
 
         BigDecimal somaTotal = BigDecimal.ZERO;
         for (ItemCarrinho itemCarrinho : carrinho.getItens()) {
@@ -190,13 +200,6 @@ public class PedidoService {
         carrinho.getItens().clear();
         carrinhoRepository.save(carrinho);
 
-        // 🎯 BUG FIX PDV IMPRESSÃO: Ajustado cupom do caixa para CAIXA legítimo
-        FilaImpressao cupomCaixa = new FilaImpressao();
-        cupomCaixa.setPedido(pedidoSalvo);
-        cupomCaixa.setDestino(FilaImpressao.DestinoImpressao.COZINHA);
-        cupomCaixa.setStatus(FilaImpressao.StatusImpressao.PENDENTE);
-        filaImpressaoRepository.save(cupomCaixa);
-
         FilaImpressao cupomCozinha = new FilaImpressao();
         cupomCozinha.setPedido(pedidoSalvo);
         cupomCozinha.setDestino(FilaImpressao.DestinoImpressao.COZINHA);
@@ -206,9 +209,6 @@ public class PedidoService {
         return new PedidoResponseDTO(pedidoSalvo);
     }
 
-    /**
-     * Adiciona itens de forma isolada a um lote em andamento.
-     */
     @Transactional
     public PedidoResponseDTO adicionarItemPedido(UUID pedidoId, ItemPedidoRequestDTO dto) {
         Pedido pedido = pedidoRepository.findById(pedidoId)
@@ -238,9 +238,6 @@ public class PedidoService {
         return response;
     }
 
-    /**
-     * Remove um item específico do lote de pedidos deduzindo seu valor.
-     */
     @Transactional
     public PedidoResponseDTO removerItemPedido(UUID pedidoId, UUID itemId) {
         Pedido pedido = pedidoRepository.findById(pedidoId)
@@ -265,9 +262,6 @@ public class PedidoService {
         return response;
     }
 
-    /**
-     * Modifica e recalcula dinamicamente adicionais vinculados a um lanche.
-     */
     @Transactional
     public PedidoResponseDTO atualizarAdicionaisDoItem(UUID pedidoId, UUID itemId, List<UUID> adicionaisIds) {
         Pedido pedido = pedidoRepository.findById(pedidoId)
@@ -306,9 +300,6 @@ public class PedidoService {
         return response;
     }
 
-    /**
-     * Atualiza o status de preparo operacional de um pedido.
-     */
     @Transactional
     public PedidoResponseDTO atualizarStatus(UUID id, PedidoStatusRequestDTO dto) {
         Pedido pedido = pedidoRepository.findById(id)
@@ -323,9 +314,6 @@ public class PedidoService {
         return response;
     }
 
-    /**
-     * RESTAURAÇÃO: Cancela um lote inteiro de pedidos ativos.
-     */
     @Transactional
     public PedidoResponseDTO cancelarPedido(UUID id) {
         Pedido pedido = pedidoRepository.findById(id)
@@ -340,9 +328,6 @@ public class PedidoService {
         return response;
     }
 
-    /**
-     * RESTAURAÇÃO: Consultas exclusivas da máquina do monitor e painéis do salão.
-     */
     @Transactional(readOnly = true)
     public List<PedidoResponseDTO> listarPedidosAtivosMonitor() {
         return pedidoRepository.findAll().stream()
@@ -362,9 +347,6 @@ public class PedidoService {
                 .orElseThrow(() -> new ResourceNotFoundException("Pedido não localizado.")));
     }
 
-    /**
-     * RESTAURAÇÃO: Lista o histórico de compras de um cliente específico.
-     */
     @Transactional(readOnly = true)
     public List<PedidoResponseDTO> listarHistoricoCliente(UUID clienteId) {
         return pedidoRepository.findAll().stream()
@@ -373,16 +355,11 @@ public class PedidoService {
                 .toList();
     }
 
-    /**
-     * 🔄 REABERTURA MOBILE (PERFORMANCE FIX):
-     * Busca os pedidos associados no banco por Conta ID, otimizando o consumo de IO.
-     */
     @Transactional(readOnly = true)
     public List<ItemComandaMobileResponseDTO> buscarItensPorComandaMestre(UUID comandaId) {
         List<Conta> contasAssociadas = contaRepository.findByComandaId(comandaId);
         List<UUID> contaIds = contasAssociadas.stream().map(Conta::getId).toList();
 
-        // 🎯 OTIMIZAÇÃO: Busca em lote os pedidos das contas, evitando carregar tudo na JVM
         List<Pedido> pedidosDaMesa = pedidoRepository.findByContaIdIn(contaIds);
         List<ItemComandaMobileResponseDTO> listagemFinal = new ArrayList<>();
 
@@ -392,26 +369,28 @@ public class PedidoService {
                     .toList();
 
             for (Pedido p : pedidosDaSubconta) {
-                for (ItemPedido item : p.getItens()) {
 
+                String nomeCli = p.getNomeClienteBalcao();
+                if ((nomeCli == null || nomeCli.isBlank()) && c.getCliente() != null) {
+                    nomeCli = c.getCliente().getNome();
+                }
+                ItemComandaMobileResponseDTO.ClienteMesaDTO cliMesa = (nomeCli != null && !nomeCli.isBlank())
+                        ? new ItemComandaMobileResponseDTO.ClienteMesaDTO(nomeCli, null)
+                        : null;
+
+                for (ItemPedido item : p.getItens()) {
                     BigDecimal precoCalculado = item.getPrecoUnitario();
-                    if (item.getAdicionais() != null) {
-                        BigDecimal adicionaisPreco = item.getAdicionais().stream()
-                                .map(Adicional::getPreco)
-                                .reduce(BigDecimal.ZERO, BigDecimal::add);
-                        precoCalculado = precoCalculado.add(adicionaisPreco);
-                    }
+                    BigDecimal precoTotalCalculadoItem = precoCalculado.multiply(BigDecimal.valueOf(item.getQuantidade()));
 
                     listagemFinal.add(new ItemComandaMobileResponseDTO(
                             item.getProduto().getId(),
                             item.getProduto().getNome(),
                             item.getQuantidade(),
-                            precoCalculado,
+                            precoTotalCalculadoItem,
                             item.getObservacaoItem(),
                             c.getNumeroConta(),
                             item.getAdicionais(),
-                            p.getNomeClienteBalcao() != null ?
-                                    new ItemComandaMobileResponseDTO.ClienteMesaDTO(p.getNomeClienteBalcao(), null) : null,
+                            cliMesa,
                             comandaId
                     ));
                 }

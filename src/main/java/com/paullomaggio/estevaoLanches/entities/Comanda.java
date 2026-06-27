@@ -60,4 +60,15 @@ public class Comanda {
     public void setDataHoraAbertura(LocalDateTime now) {
         this.abertaEm = now;
     }
+
+    @PrePersist
+    public void prePersist() {
+        if (this.empresaId == null) {
+            this.empresaId = UUID.fromString("00000000-0000-0000-0000-000000000001");
+        }
+
+        if (this.filialId == null) {
+            this.filialId = UUID.fromString("00000000-0000-0000-0000-000000000002");
+        }
+    }
 }

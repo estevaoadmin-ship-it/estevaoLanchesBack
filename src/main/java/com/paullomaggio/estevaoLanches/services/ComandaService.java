@@ -35,6 +35,12 @@ public class ComandaService {
      */
     @Transactional
     public ComandaResponseDTO abrirPorNumeroMesa(Integer numeroMesa) {
+        // ✅ Validação de piso e teto: Resolve CT-INT-004, 005 e 006
+        if (numeroMesa == null || numeroMesa <= 0 || numeroMesa > 500) {
+            throw new BusinessRuleException("Número de mesa inválido.");
+        }
+
+        // ✅ Lógica de criação sob demanda mantida para não quebrar testes E2E
         Mesa mesa = mesaRepository.findByNumero(numeroMesa)
                 .orElseGet(() -> {
                     Mesa novaMesa = new Mesa();
@@ -61,7 +67,6 @@ public class ComandaService {
         comanda.setFilialId(FILIAL_PADRAO);
         Comanda comandaSalva = comandaRepository.save(comanda);
 
-        // 🎯 AJUSTADO À NOVA DIRETRIZ: A Conta pertence à comanda e recebe o Cliente
         Conta contaPai = new Conta();
         contaPai.setComanda(comandaSalva);
         contaPai.setNumeroConta(1);
@@ -117,8 +122,8 @@ public class ComandaService {
 
     @Transactional(readOnly = true)
     public List<ComandaResponseDTO> listarTodasAtivas() {
-        return comandaRepository.findAll().stream()
-                .filter(c -> c.getStatus() == StatusComanda.ABERTA)
+        // ✅ Busca otimizada com delegação de filtro para o banco
+        return comandaRepository.findByStatus(StatusComanda.ABERTA).stream()
                 .map(c -> new ComandaResponseDTO(c, false))
                 .collect(Collectors.toList());
     }

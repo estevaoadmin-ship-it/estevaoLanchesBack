@@ -71,12 +71,12 @@ public class UsuarioService implements UserDetailsService {
             usuario.setSenha(dto.senha());
         }
 
-        usuario.setRole(dto.role());
+        // CORREÇÃO: Converte o Enum vindo do RequestDTO para String antes de persistir
+        usuario.setRole(dto.role().name());
         usuario.setAtivo(true);
 
         Usuario usuarioSalvo = usuarioRepository.save(usuario);
 
-        // 🎯 FIX: Se a persistência falhar ou for mockada de forma vazia, aborta explicitamente antes de construir o DTO
         if (usuarioSalvo == null) {
             throw new BusinessRuleException("Erro crítico ao gravar os registros do colaborador.");
         }
@@ -95,7 +95,9 @@ public class UsuarioService implements UserDetailsService {
 
         usuario.setNome(dto.nome());
         usuario.setEmail(dto.email());
-        usuario.setRole(dto.role());
+
+        // CORREÇÃO: Converte o Enum vindo do RequestDTO para String na esteira de atualização
+        usuario.setRole(dto.role().name());
 
         if (dto.senha() != null && !dto.senha().isBlank()) {
             if (passwordEncoder != null) {
@@ -107,7 +109,6 @@ public class UsuarioService implements UserDetailsService {
 
         Usuario usuarioAtualizado = usuarioRepository.save(usuario);
 
-        // 🎯 FIX: Proteção idêntica na esteira de atualização
         if (usuarioAtualizado == null) {
             throw new BusinessRuleException("Erro crítico ao atualizar os registros do colaborador.");
         }

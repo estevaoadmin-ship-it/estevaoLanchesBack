@@ -10,9 +10,13 @@ import java.util.UUID;
 @Repository
 public interface CaixaRepository extends JpaRepository<Caixa, UUID> {
 
-    // Checagem rápida de existência
+    /**
+     * Verifica a existência de registros correspondentes ao status informado.
+     */
     boolean existsByStatus(StatusCaixa status);
 
-    // 🚀 OTIMIZAÇÃO: Busca o único caixa aberto diretamente via índice do banco de dados
+    /**
+     * Busca um registro de caixa com base em seu status de funcionamento atual.
+     */
     Optional<Caixa> findByStatus(StatusCaixa status);
 }

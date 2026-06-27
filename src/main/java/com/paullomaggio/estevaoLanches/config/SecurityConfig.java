@@ -1,6 +1,7 @@
 package com.paullomaggio.estevaoLanches.config;
 
 import com.paullomaggio.estevaoLanches.config.SecurityFilter;
+import jakarta.servlet.http.HttpServletResponse;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.http.HttpMethod;
@@ -35,32 +36,42 @@ public class SecurityConfig {
                 .cors(cors -> cors.configurationSource(corsConfigurationSource()))
                 .csrf(csrf -> csrf.disable())
                 .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
+                // ✅ Resolve CT-INT-019: Retorna 401 Unauthorized para acessos sem token
+                .exceptionHandling(exceptions -> exceptions
+                        .authenticationEntryPoint((request, response, authException) -> {
+                            response.sendError(HttpServletResponse.SC_UNAUTHORIZED, "Não autorizado");
+                        })
+                )
                 .authorizeHttpRequests(authorize -> authorize
-                        // 🔓 PORTAS PÚBLICAS: Autenticação do Ecossistema
+                        // PORTAS PÚBLICAS: Autenticação do Ecossistema
                         .requestMatchers(HttpMethod.POST, "/api/auth/login").permitAll()
                         .requestMatchers(HttpMethod.POST, "/api/auth/login/cliente").permitAll()
                         .requestMatchers(HttpMethod.POST, "/api/auth/registrar").permitAll()
                         .requestMatchers(HttpMethod.POST, "/api/auth/cliente/google").permitAll()
                         .requestMatchers("/error").permitAll()
 
-                        // 🔓 PORTAS PÚBLICAS: Hubs da Ponte Física de Impressão Térmica
+                        // PORTAS PÚBLICAS: Hubs da Ponte Física de Impressão Térmica
                         .requestMatchers("/api/fila-impressao/**").permitAll()
                         .requestMatchers("/api/pedidos/fila-impressao/**").permitAll()
 
-                        // 🎯 Rota do WebSocket liberada
+                        // Rota do WebSocket liberada
                         .requestMatchers("/ws-tevao/**").permitAll()
 
-                        // 👥 PAPEL MISTO (ADMIN ou GARÇOM): Operação em Tempo Real do Salão
+                        // === NOVO: APP DE DELIVERY ===
+                        // Restringe as rotas do aplicativo aos clientes autenticados (e admins)
+                        .requestMatchers("/api/delivery/pedidos/**").hasAnyRole("CLIENTE", "ADMIN")
+
+                        // PAPEL MISTO (ADMIN ou GARÇOM): Operação em Tempo Real do Salão
                         .requestMatchers("/api/comandas/**").hasAnyRole("ADMIN", "GARCOM")
                         .requestMatchers(HttpMethod.GET, "/api/caixas/status").hasAnyRole("ADMIN", "GARCOM")
                         .requestMatchers(HttpMethod.GET, "/api/caixas/resumo").hasAnyRole("ADMIN", "GARCOM")
-                        .requestMatchers("/api/pedidos/checkout").hasAnyRole("ADMIN", "GARCOM")
+                        .requestMatchers("/api/pedidos/balcao/checkout").hasAnyRole("ADMIN", "GARCOM") // Rota ajustada
                         .requestMatchers("/api/clientes/**").hasAnyRole("ADMIN", "GARCOM")
 
-                        // 👥 PAPEL OPERACIONAL DA ESTEIRA: Produção de Cozinha e Expedição
+                        // PAPEL OPERACIONAL DA ESTEIRA: Produção de Cozinha e Expedição
                         .requestMatchers("/api/pedidos/**").hasAnyRole("ADMIN", "GARCOM", "COZINHA")
 
-                        // 🔒 PAPEL EXCLUSIVO DO GERENTE (ADMIN)
+                        // PAPEL EXCLUSIVO DO GERENTE (ADMIN)
                         .requestMatchers("/api/caixas/**").hasRole("ADMIN")
                         .requestMatchers("/api/relatorios/**").hasRole("ADMIN")
                         .requestMatchers("/api/cardapio/**").hasRole("ADMIN")
@@ -76,11 +87,8 @@ public class SecurityConfig {
     public CorsConfigurationSource corsConfigurationSource() {
         CorsConfiguration configuration = new CorsConfiguration();
 
-        // 🎯 FIX MESTRE DE CORS: Abre de forma segura para os padrões wildcard permitindo subredes locais
         configuration.setAllowedOriginPatterns(List.of("*"));
         configuration.setAllowedMethods(List.of("GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"));
-
-        // 🎯 AJUSTE CRÍTICO: Permitido "*" nos headers para não quebrar requisições contendo "X-Requested-With" do Android WebView
         configuration.setAllowedHeaders(List.of("*"));
         configuration.setExposedHeaders(List.of("Authorization"));
         configuration.setAllowCredentials(true);
