@@ -102,11 +102,28 @@ class SistemaCompletoE2ETest {
         @Test
         @DisplayName("SYS-013 ao SYS-017: Registrar cliente, autenticar no app e consultar cardápio digital síncrono")
         void sys013To017() throws Exception {
-            mockMvc.perform(post("/api/auth/registrar").contentType(MediaType.APPLICATION_JSON)
-                            .content("{\"nome\":\"Paulo\",\"email\":\"paulo@mail.com\",\"telefone\":\"16999991122\",\"senha\":\"123\"}"))
-                    .andExpect(status().isOk());
+            String emailCliente = "paulo@mail.com";
+            String senhaCliente = "123456"; // Senha válida
 
-            mockMvc.perform(get("/api/produtos").header("Authorization", tokenBearerCliente))
+            // 1. Registrar cliente (espera 201 Created)
+            mockMvc.perform(post("/api/auth/registrar")
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content(String.format("{\"nome\":\"Paulo\",\"email\":\"%s\",\"telefone\":\"16999991122\",\"senha\":\"%s\"}", emailCliente, senhaCliente)))
+                    .andExpect(status().isCreated()); // CORREÇÃO: Espera 201 Created
+
+            // 2. Fazer login para obter um JWT real
+            MvcResult loginResult = mockMvc.perform(post("/api/auth/login/cliente")
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content(String.format("{\"email\":\"%s\",\"senha\":\"%s\"}", emailCliente, senhaCliente)))
+                    .andExpect(status().isOk())
+                    .andReturn();
+
+            String responseBody = loginResult.getResponse().getContentAsString();
+            String jwtToken = JsonPath.read(responseBody, "$.token"); // Extrai o token JWT
+
+            // 3. Usar o JWT real para acessar /api/produtos
+            mockMvc.perform(get("/api/produtos")
+                            .header("Authorization", "Bearer " + jwtToken)) // Usa o JWT real
                     .andExpect(status().isOk());
         }
     }
@@ -253,7 +270,12 @@ class SistemaCompletoE2ETest {
         @Test @WithMockUser(roles = {"CLIENTE"})
         @DisplayName("SYS-090 - Reter perfil CLIENTE tentando invocar endpoints administrativos (Espera 403)")
         void sys090() throws Exception {
-            mockMvc.perform(get("/api/admin/relatorios")).andExpect(status().isForbidden());
+            // O endpoint correto é /api/relatorios/dashboard e exige role ADMIN.
+            // Um CLIENTE deve receber 403 Forbidden.
+            mockMvc.perform(get("/api/relatorios/dashboard")
+                            .param("inicio", "2023-01-01T00:00:00") // Parâmetros necessários para o endpoint
+                            .param("fim", "2023-01-01T23:59:59"))
+                    .andExpect(status().isForbidden());
         }
 
         @Test @DisplayName("SYS-091 ao SYS-099 - Mitigação de JWTs expirados, SQL Injection, XSS e Rate Limits")
@@ -280,7 +302,7 @@ class SistemaCompletoE2ETest {
     }
 
     // =========================================================================
-    // INFRAESTRUTURA COMPLEMENTAR DE AUXILIARES
+    // INFRASTRUTURA COMPLEMENTAR DE AUXILIARES
     // =========================================================================
     private Usuario instanciarUsuario(String nome, String email, String role) {
         Usuario u = new Usuario();

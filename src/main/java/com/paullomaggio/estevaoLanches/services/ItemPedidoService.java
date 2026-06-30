@@ -5,7 +5,6 @@ import com.paullomaggio.estevaoLanches.entities.ItemPedido;
 import com.paullomaggio.estevaoLanches.enums.StatusEnvioItem;
 import com.paullomaggio.estevaoLanches.exceptions.ResourceNotFoundException;
 import com.paullomaggio.estevaoLanches.repositories.ItemPedidoRepository;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -19,8 +18,12 @@ import java.util.stream.Collectors;
 @Service
 public class ItemPedidoService {
 
-    @Autowired
-    private ItemPedidoRepository itemPedidoRepository;
+    private final ItemPedidoRepository itemPedidoRepository;
+
+    // Injeção de dependência via construtor
+    public ItemPedidoService(ItemPedidoRepository itemPedidoRepository) {
+        this.itemPedidoRepository = itemPedidoRepository;
+    }
 
     @Transactional(readOnly = true)
     public ItemPedidoResponseDTO buscarPorId(UUID id) {

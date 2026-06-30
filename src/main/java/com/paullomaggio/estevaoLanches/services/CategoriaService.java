@@ -6,7 +6,6 @@ import com.paullomaggio.estevaoLanches.entities.Categoria;
 import com.paullomaggio.estevaoLanches.exceptions.ResourceNotFoundException;
 import com.paullomaggio.estevaoLanches.repositories.CategoriaRepository;
 import com.paullomaggio.estevaoLanches.repositories.ProdutoRepository;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -17,11 +16,14 @@ import java.util.stream.Collectors;
 @Service
 public class CategoriaService {
 
-    @Autowired
-    private CategoriaRepository categoriaRepository;
+    private final CategoriaRepository categoriaRepository;
+    private final ProdutoRepository produtoRepository;
 
-    @Autowired
-    private ProdutoRepository produtoRepository;
+    // Injeção de dependência via construtor
+    public CategoriaService(CategoriaRepository categoriaRepository, ProdutoRepository produtoRepository) {
+        this.categoriaRepository = categoriaRepository;
+        this.produtoRepository = produtoRepository;
+    }
 
     @Transactional(readOnly = true)
     public List<CategoriaResponseDTO> listarTodas() {

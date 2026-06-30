@@ -26,6 +26,7 @@ import java.util.UUID;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.Mockito.*;
 
 @ExtendWith(MockitoExtension.class)
@@ -36,7 +37,8 @@ class CarrinhoServiceTest {
     @Mock private ClienteRepository clienteRepository;
     @Mock private ProdutoRepository produtoRepository;
 
-    @InjectMocks private CarrinhoService carrinhoService;
+    // Removido @InjectMocks
+    private CarrinhoService carrinhoService;
 
     private UUID clienteId;
     private UUID produtoId;
@@ -46,6 +48,9 @@ class CarrinhoServiceTest {
 
     @BeforeEach
     void setUp() {
+        // Instanciação manual do serviço com os mocks
+        carrinhoService = new CarrinhoService(carrinhoRepository, clienteRepository, produtoRepository);
+
         clienteId = UUID.randomUUID();
         produtoId = UUID.randomUUID();
 
@@ -257,20 +262,31 @@ class CarrinhoServiceTest {
         @Test
         @DisplayName("Cenário 34 e 37 — Preservação: Adicionar um novo item nunca deve expurgar ou limpar a malha de itens históricos")
         void naoDevePerderItensAntigosAoAdicionarNovo() {
+            // Criar um produto com ID para o item histórico para evitar NPE
+            Produto produtoHistorico = new Produto();
+            produtoHistorico.setId(UUID.randomUUID()); // Adicionado ID para o produto histórico
+            produtoHistorico.setNome("PRODUTO HISTORICO");
+            produtoHistorico.setPreco(new BigDecimal("10.00"));
+
             ItemCarrinho itemHistorico = new ItemCarrinho();
-            itemHistorico.setProduto(new Produto());
+            itemHistorico.setProduto(produtoHistorico);
             itemHistorico.setQuantidade(1);
             carrinhoExistentePadrao.getItens().add(itemHistorico);
 
             ItemCarrinhoRequestDTO dto = new ItemCarrinhoRequestDTO(produtoId, 2, "");
             when(carrinhoRepository.findByClienteId(clienteId)).thenReturn(Optional.of(carrinhoExistentePadrao));
             when(produtoRepository.findById(produtoId)).thenReturn(Optional.of(produtoPadrao));
+            // REMOVIDO: when(produtoRepository.findById(produtoHistorico.getId())).thenReturn(Optional.of(produtoHistorico)); // Este stub é desnecessário
             when(carrinhoRepository.save(any(Carrinho.class))).thenAnswer(i -> i.getArgument(0));
 
             carrinhoService.adicionarItem(clienteId, dto);
 
-            assertThat(carrinhoExistentePadrao.getItens()).hasSize(2);
-            assertThat(carrinhoExistentePadrao.getItens().get(0)).isEqualTo(itemHistorico);
+            // Agora, com a lógica de consolidação, se o produtoId do dto for diferente do produtoHistorico.getId(),
+            // teremos 2 itens. Se for o mesmo, teremos 1 item consolidado.
+            // O produtoPadrao já tem um ID diferente do produtoHistorico.getId() que acabamos de criar.
+            assertThat(carrinhoExistentePadrao.getItens()).hasSize(2); // Espera 2 itens, pois os produtos são diferentes
+            assertThat(carrinhoExistentePadrao.getItens().get(0)).isEqualTo(itemHistorico); // O item histórico ainda está lá
+            assertThat(carrinhoExistentePadrao.getItens().get(1).getProduto()).isEqualTo(produtoPadrao); // O novo item foi adicionado
         }
     }
 
@@ -294,8 +310,8 @@ class CarrinhoServiceTest {
             carrinhoService.adicionarItem(clienteId, new ItemCarrinhoRequestDTO(produtoId, 1, ""));
             carrinhoService.adicionarItem(clienteId, new ItemCarrinhoRequestDTO(produtoId, 100, ""));
 
-            assertThat(carrinhoExistentePadrao.getItens().get(0).getQuantidade()).isEqualTo(1);
-            assertThat(carrinhoExistentePadrao.getItens().get(1).getQuantidade()).isEqualTo(100);
+            assertThat(carrinhoExistentePadrao.getItens()).hasSize(1); // Alterado de 2 para 1
+            assertThat(carrinhoExistentePadrao.getItens().get(0).getQuantidade()).isEqualTo(101); // Alterado de 1 para 101 (1 + 100)
         }
 
         @Test
@@ -305,8 +321,8 @@ class CarrinhoServiceTest {
             carrinhoService.adicionarItem(clienteId, new ItemCarrinhoRequestDTO(produtoId, -5, ""));
 
             // 🎯 Provando o comportamento falho aceito atualmente pelo backend
-            assertThat(carrinhoExistentePadrao.getItens().get(0).getQuantidade()).isZero();
-            assertThat(carrinhoExistentePadrao.getItens().get(1).getQuantidade()).isNegative();
+            assertThat(carrinhoExistentePadrao.getItens()).hasSize(1); // Deve ter apenas 1 item consolidado
+            assertThat(carrinhoExistentePadrao.getItens().get(0).getQuantidade()).isEqualTo(-5); // Alterado para esperar a soma (0 + -5 = -5)
         }
 
         @Test
@@ -314,15 +330,13 @@ class CarrinhoServiceTest {
         void deveTolerarVariacoesEstruturaisDeObservacao() {
             String stringGigante = "A".repeat(1000);
 
-            carrinhoService.adicionarItem(clienteId, new ItemCarrinhoRequestDTO(produtoId, 1, null));
-            carrinhoService.adicionarItem(clienteId, new ItemCarrinhoRequestDTO(produtoId, 1, ""));
-            carrinhoService.adicionarItem(clienteId, new ItemCarrinhoRequestDTO(produtoId, 1, "   "));
-            carrinhoService.adicionarItem(clienteId, new ItemCarrinhoRequestDTO(produtoId, 1, stringGigante));
+            carrinhoService.adicionarItem(clienteId, new ItemCarrinhoRequestDTO(produtoId, 1, null)); // Observação inicial null
+            carrinhoService.adicionarItem(clienteId, new ItemCarrinhoRequestDTO(produtoId, 1, "")); // Sobrescreve com ""
+            carrinhoService.adicionarItem(clienteId, new ItemCarrinhoRequestDTO(produtoId, 1, "   ")); // Sobrescreve com "   "
+            carrinhoService.adicionarItem(clienteId, new ItemCarrinhoRequestDTO(produtoId, 1, stringGigante)); // Sobrescreve com stringGigante
 
-            assertThat(carrinhoExistentePadrao.getItens().get(0).getObservacao()).isNull();
-            assertThat(carrinhoExistentePadrao.getItens().get(1).getObservacao()).isEmpty();
-            assertThat(carrinhoExistentePadrao.getItens().get(2).getObservacao()).isBlank();
-            assertThat(carrinhoExistentePadrao.getItens().get(3).getObservacao().length()).isEqualTo(1000);
+            assertThat(carrinhoExistentePadrao.getItens()).hasSize(1); // Deve ter apenas 1 item consolidado
+            assertThat(carrinhoExistentePadrao.getItens().get(0).getObservacao()).isEqualTo(stringGigante); // Alterado para esperar a última observação
         }
     }
 
@@ -363,9 +377,9 @@ class CarrinhoServiceTest {
             carrinhoService.adicionarItem(clienteId, new ItemCarrinhoRequestDTO(produtoId, 3, "B"));
 
             // 🎯 Provando que o comportamento atual duplica linhas no banco de dados do PDV
-            assertThat(carrinhoExistentePadrao.getItens()).hasSize(2);
-            assertThat(carrinhoExistentePadrao.getItens().get(0).getQuantidade()).isEqualTo(2);
-            assertThat(carrinhoExistentePadrao.getItens().get(1).getQuantidade()).isEqualTo(3);
+            assertThat(carrinhoExistentePadrao.getItens()).hasSize(1); // Alterado de 2 para 1
+            assertThat(carrinhoExistentePadrao.getItens().get(0).getQuantidade()).isEqualTo(5); // 2 + 3 = 5
+            assertThat(carrinhoExistentePadrao.getItens().get(0).getObservacao()).isEqualTo("B"); // Última observação sobrescreve
         }
     }
 
@@ -392,7 +406,8 @@ class CarrinhoServiceTest {
 
             // Provas de Isolamento de Estado
             assertThat(carrinhoExistentePadrao.getCliente()).isEqualTo(clientePadrao); // Cliente imutável
-            assertThat(carrinhoExistentePadrao.getItens().get(0).getQuantidade()).isEqualTo(10); // Histórico preservado
+            assertThat(carrinhoExistentePadrao.getItens()).hasSize(1); // Deve ter apenas 1 item consolidado
+            assertThat(carrinhoExistentePadrao.getItens().get(0).getQuantidade()).isEqualTo(11); // Alterado de 10 para 11 (10 + 1)
             assertThat(carrinhoExistentePadrao.getItens().get(0).getProduto()).isEqualTo(produtoPadrao); // Produto original intacto
 
             verify(carrinhoRepository, never()).delete(any());
@@ -452,9 +467,9 @@ class CarrinhoServiceTest {
             carrinhoService.adicionarItem(clienteId, dtoGarcom2);
 
             // Bate a prova se o acúmulo em lista foi retido e gravado corretamente sem perdas de ponteiro de memória
-            assertThat(carrinhoExistentePadrao.getItens()).hasSize(2);
-            assertThat(carrinhoExistentePadrao.getItens().get(0).getObservacao()).isEqualTo("Garçom 1");
-            assertThat(carrinhoExistentePadrao.getItens().get(1).getObservacao()).isEqualTo("Garçom 2");
+            assertThat(carrinhoExistentePadrao.getItens()).hasSize(1); // Alterado de 2 para 1
+            assertThat(carrinhoExistentePadrao.getItens().get(0).getQuantidade()).isEqualTo(4); // 1 + 3 = 4
+            assertThat(carrinhoExistentePadrao.getItens().get(0).getObservacao()).isEqualTo("Garçom 2"); // Última observação sobrescreve
 
             verify(carrinhoRepository, times(2)).save(any(Carrinho.class));
         }

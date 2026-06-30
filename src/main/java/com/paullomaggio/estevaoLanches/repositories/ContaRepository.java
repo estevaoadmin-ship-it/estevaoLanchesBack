@@ -11,12 +11,18 @@ import java.util.UUID;
 public interface ContaRepository extends JpaRepository<Conta, UUID> {
 
     /**
-     * 🎯 REAJUSTADO: Busca todas as subcontas atreladas a uma sessão de mesa.
+     * Busca todas as subcontas atreladas a uma sessão de mesa.
+     * Não garante ordem específica.
      */
     List<Conta> findByComandaId(UUID comandaId);
 
     /**
-     * 🎯 REAJUSTADO: Localiza uma partição específica de subconta dentro de uma comanda mestre.
+     * Busca todas as subcontas atreladas a uma sessão de mesa, ordenadas pelo número da conta.
+     */
+    List<Conta> findByComandaIdOrderByNumeroContaAsc(UUID comandaId);
+
+    /**
+     * Localiza uma partição específica de subconta dentro de uma comanda mestre.
      */
     Optional<Conta> findByComandaIdAndNumeroConta(UUID comandaId, Integer numeroConta);
 }

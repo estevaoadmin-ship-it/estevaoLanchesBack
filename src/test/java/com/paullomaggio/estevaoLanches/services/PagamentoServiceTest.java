@@ -15,7 +15,6 @@ import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InOrder;
-import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
@@ -38,7 +37,7 @@ class PagamentoServiceTest {
     @Mock private PagamentoRepository pagamentoRepository;
     @Mock private ContaRepository contaRepository;
 
-    @InjectMocks private PagamentoService pagamentoService;
+    private PagamentoService pagamentoService;
 
     private UUID contaId;
     private UUID pagamentoId;
@@ -47,6 +46,9 @@ class PagamentoServiceTest {
 
     @BeforeEach
     void setUp() {
+        // Instanciação manual do serviço com os mocks
+        pagamentoService = new PagamentoService(pagamentoRepository, contaRepository);
+
         contaId = UUID.randomUUID();
         pagamentoId = UUID.randomUUID();
 
@@ -65,6 +67,9 @@ class PagamentoServiceTest {
         pagamentoMock.setFormaPagamento(FormaPagamento.PIX);
         pagamentoMock.setDataHora(LocalDateTime.now());
         pagamentoMock.setUsuarioResponsavel("SISTEMA_MOBILE");
+
+        // As configurações de mock foram movidas para os métodos de teste ou para @BeforeEach em classes @Nested,
+        // conforme a necessidade de cada teste, para evitar UnnecessaryStubbingException.
     }
 
     // =========================================================================
@@ -82,6 +87,10 @@ class PagamentoServiceTest {
             when(contaRepository.findById(contaId)).thenReturn(Optional.of(contaMock));
             when(pagamentoRepository.sumPagamentosPorConta(contaId)).thenReturn(BigDecimal.ZERO);
             when(pagamentoRepository.save(any(Pagamento.class))).thenReturn(pagamentoMock);
+            when(contaRepository.save(any(Conta.class))).thenAnswer(invocation -> {
+                Conta savedConta = invocation.getArgument(0);
+                return savedConta;
+            });
 
             PagamentoResponseDTO resultado = pagamentoService.registrarPagamento(contaId, dto);
 
@@ -94,6 +103,7 @@ class PagamentoServiceTest {
         @DisplayName("CT-011 ao CT-013: Conta Ausente — Chamar ID nulo ou inexistente deve abortar transação financeira com ResourceNotFoundException")
         void ct011_deveLancarExceptionSeContaInexistente() {
             PagamentoRequestDTO dto = new PagamentoRequestDTO(FormaPagamento.PIX, new BigDecimal("50.00"));
+
             when(contaRepository.findById(any())).thenReturn(Optional.empty());
 
             assertThrows(ResourceNotFoundException.class, () -> pagamentoService.registrarPagamento(UUID.randomUUID(), dto));
@@ -127,6 +137,10 @@ class PagamentoServiceTest {
             when(contaRepository.findById(contaId)).thenReturn(Optional.of(contaMock));
             when(pagamentoRepository.sumPagamentosPorConta(contaId)).thenReturn(BigDecimal.ZERO);
             when(pagamentoRepository.save(any(Pagamento.class))).thenReturn(pagamentoMock);
+            when(contaRepository.save(any(Conta.class))).thenAnswer(invocation -> {
+                Conta savedConta = invocation.getArgument(0);
+                return savedConta;
+            });
 
             assertDoesNotThrow(() -> pagamentoService.registrarPagamento(contaId, dtoDinheiroExcedente));
         }
@@ -165,8 +179,10 @@ class PagamentoServiceTest {
             when(contaRepository.findById(contaId)).thenReturn(Optional.of(contaMock));
             when(pagamentoRepository.sumPagamentosPorConta(contaId)).thenReturn(new BigDecimal("50.00")); // Já pagou metade
             when(pagamentoRepository.save(any(Pagamento.class))).thenReturn(pagamentoMock);
+            // REMOVIDO: when(contaRepository.save(any(Conta.class))) pois o teste verifica que não é chamado.
 
             assertDoesNotThrow(() -> pagamentoService.registrarPagamento(contaId, dtoParcial));
+
             verify(contaRepository, never()).save(any()); // R$50 + R$33.33 = R$83.33 (Ainda não quitou, permanece aberta)
         }
     }
@@ -181,12 +197,15 @@ class PagamentoServiceTest {
         @Test
         @DisplayName("CT-037 ao CT-041: Trigger de Fechamento — Quando a soma dos lançamentos atinge o valor total da subconta, o status muda para pago=true")
         void ct037_deveQuitarContaQuandoValorAlcancado() {
-            // 🎯 FIX: Ajustado para usar o fluxo real de registrarPagamento do PagamentoService
             PagamentoRequestDTO dto = new PagamentoRequestDTO(FormaPagamento.PIX, new BigDecimal("100.00"));
 
             when(contaRepository.findById(contaId)).thenReturn(Optional.of(contaMock));
             when(pagamentoRepository.sumPagamentosPorConta(contaId)).thenReturn(BigDecimal.ZERO);
             when(pagamentoRepository.save(any(Pagamento.class))).thenReturn(pagamentoMock);
+            when(contaRepository.save(any(Conta.class))).thenAnswer(invocation -> {
+                Conta savedConta = invocation.getArgument(0);
+                return savedConta;
+            });
 
             pagamentoService.registrarPagamento(contaId, dto);
 
@@ -198,7 +217,6 @@ class PagamentoServiceTest {
         @DisplayName("CT-043 ao CT-047: Leitura Cronológica — Deve listar histórico de amortizações de forma limpa ou explodir 404 se a conta for órfã")
         void ct043_deveListarPagamentosPorContaValida() {
             when(contaRepository.existsById(contaId)).thenReturn(true);
-            // 🎯 FIX: Corrigido de findByComandaId para findByContaId conforme o repositório real
             when(pagamentoRepository.findByContaId(contaId)).thenReturn(List.of(pagamentoMock));
 
             List<PagamentoResponseDTO> resultado = pagamentoService.listarPorConta(contaId);
@@ -218,7 +236,6 @@ class PagamentoServiceTest {
         @Test
         @DisplayName("CT-067: Isolamento Financeiro de Subcontas — Liquidações na Conta 1 da mesa não podem dar baixa ou afetar os saldos da Conta 2")
         void ct067_deveManterContasIsoladas() {
-            // 🎯 FIX: Removido dependências externas de comandaMock e inicializado via setters para isolar o escopo do teste
             Conta conta1 = new Conta();
             conta1.setId(UUID.randomUUID());
             conta1.setValorTotal(BigDecimal.TEN);
@@ -233,8 +250,12 @@ class PagamentoServiceTest {
 
             when(contaRepository.findById(conta1.getId())).thenReturn(Optional.of(conta1));
             when(pagamentoRepository.sumPagamentosPorConta(conta1.getId())).thenReturn(BigDecimal.ZERO);
+            when(pagamentoRepository.save(any(Pagamento.class))).thenReturn(new Pagamento()); // Retorna uma nova instância para evitar conflitos com pagamentoMock
+            when(contaRepository.save(any(Conta.class))).thenAnswer(invocation -> {
+                Conta savedConta = invocation.getArgument(0);
+                return savedConta;
+            });
 
-            // 🎯 FIX: Alterado de contaService.liquidarConta para pagamentoService.registrarPagamento
             pagamentoService.registrarPagamento(conta1.getId(), dto);
 
             assertTrue(conta1.getPago());
@@ -257,6 +278,10 @@ class PagamentoServiceTest {
             when(contaRepository.findById(contaId)).thenReturn(Optional.of(contaMock));
             when(pagamentoRepository.sumPagamentosPorConta(contaId)).thenReturn(BigDecimal.ZERO);
             when(pagamentoRepository.save(any(Pagamento.class))).thenReturn(pagamentoMock);
+            when(contaRepository.save(any(Conta.class))).thenAnswer(invocation -> {
+                Conta savedConta = invocation.getArgument(0);
+                return savedConta;
+            });
 
             // Operador 1 processa a baixa com sucesso e muta o estado da instância em memória
             pagamentoService.registrarPagamento(contaId, dto);
@@ -273,6 +298,10 @@ class PagamentoServiceTest {
             when(contaRepository.findById(contaId)).thenReturn(Optional.of(contaMock));
             when(pagamentoRepository.sumPagamentosPorConta(contaId)).thenReturn(BigDecimal.ZERO);
             when(pagamentoRepository.save(any(Pagamento.class))).thenReturn(pagamentoMock);
+            when(contaRepository.save(any(Conta.class))).thenAnswer(invocation -> {
+                Conta savedConta = invocation.getArgument(0);
+                return savedConta;
+            });
 
             pagamentoService.registrarPagamento(contaId, dto);
 

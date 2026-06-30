@@ -12,11 +12,11 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
-import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
 import java.math.BigDecimal;
+import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 import java.util.Optional;
@@ -33,7 +33,8 @@ class ItemComboServiceTest {
     @Mock private ItemComboRepository itemComboRepository;
     @Mock private ItemPedidoRepository itemPedidoRepository;
 
-    @InjectMocks private ItemComboService itemComboService;
+    // Removido @InjectMocks
+    private ItemComboService itemComboService;
 
     private UUID itemPedidoId;
     private UUID produtoFilhoId;
@@ -42,6 +43,9 @@ class ItemComboServiceTest {
 
     @BeforeEach
     void setUp() {
+        // Instanciação manual do serviço com os mocks
+        itemComboService = new ItemComboService(itemComboRepository, itemPedidoRepository);
+
         itemPedidoId = UUID.randomUUID();
         produtoFilhoId = UUID.randomUUID();
 

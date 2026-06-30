@@ -17,7 +17,6 @@ import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InOrder;
-import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
@@ -29,9 +28,15 @@ import java.util.Set;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.Mockito.*;
+import static org.mockito.Mockito.doNothing;
+import static org.mockito.Mockito.inOrder;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
 
 @ExtendWith(MockitoExtension.class)
 @DisplayName("🧪 Suíte de Testes Suprema — Matriz de Blindagem do Catálogo (Categorias)")
@@ -40,13 +45,17 @@ class CategoriaServiceTest {
     @Mock private CategoriaRepository categoriaRepository;
     @Mock private ProdutoRepository produtoRepository;
 
-    @InjectMocks private CategoriaService categoriaService;
+    // Removido @InjectMocks
+    private CategoriaService categoriaService;
 
     private Categoria categoriaPadrao;
     private UUID categoriaId;
 
     @BeforeEach
     void setUp() {
+        // Instanciação manual do serviço com os mocks
+        categoriaService = new CategoriaService(categoriaRepository, produtoRepository);
+
         categoriaId = UUID.randomUUID();
         categoriaPadrao = new Categoria(
                 categoriaId,
@@ -223,15 +232,15 @@ class CategoriaServiceTest {
     @DisplayName("5. Camada de Blindagem — atualizar()")
     class CategoriaAtualizarTests {
 
-        @BeforeEach
-        void setupFind() {
-            lenient().when(categoriaRepository.findById(categoriaId)).thenReturn(Optional.of(categoriaPadrao));
-            lenient().when(categoriaRepository.save(any(Categoria.class))).thenAnswer(i -> i.getArgument(0));
-        }
+        // Removido @BeforeEach setupFind()
 
         @Test
         @DisplayName("Cenário 28, 35, 36 e 37 — Atualização Completa: Deve alterar todos os campos sem violar UUID ou duplicar linhas")
         void deveAtualizarTodosOsCampos() {
+            // Mocks específicos para este teste
+            when(categoriaRepository.findById(categoriaId)).thenReturn(Optional.of(categoriaPadrao));
+            when(categoriaRepository.save(any(Categoria.class))).thenAnswer(i -> i.getArgument(0));
+
             CategoriaRequestDTO request = new CategoriaRequestDTO(
                     "BURGER MODIF",
                     "Nova Desc",
@@ -254,14 +263,21 @@ class CategoriaServiceTest {
         @Test
         @DisplayName("Cenários 29 ao 33 — Alterações Isoladas: Deve modificar campos específicos mantendo o resto do estado íntegro")
         void deveAtualizarCamposDeFormaIsolada() {
-            CategoriaResponseDTO resNome = categoriaService.atualizar(categoriaId, new CategoriaRequestDTO("SÓ NOME", "Hambúrgueres artesanais e combos", 1, true, "https://res.cloudinary.com/estevaolanches/image/upload/lanches.png"));
-            assertThat(resNome.nome()).isEqualTo("SÓ NOME");
-            assertThat(resNome.descricao()).isEqualTo("Hambúrgueres artesanais e combos");
+            // Mocks específicos para este teste
+            when(categoriaRepository.findById(categoriaId)).thenReturn(Optional.of(categoriaPadrao));
+            when(categoriaRepository.save(any(Categoria.class))).thenAnswer(i -> i.getArgument(0));
 
-            CategoriaResponseDTO resDesc = categoriaService.atualizar(categoriaId, new CategoriaRequestDTO("LANCHES", "SÓ DESC", 1, true, "https://res.cloudinary.com/estevaolanches/image/upload/lanches.png"));
+            // Teste 1: Atualiza apenas o nome
+            CategoriaResponseDTO resNome = categoriaService.atualizar(categoriaId, new CategoriaRequestDTO("SÓ NOME", categoriaPadrao.getDescricao(), categoriaPadrao.getOrdemExibicao(), categoriaPadrao.getAtivo(), categoriaPadrao.getUrlImagem()));
+            assertThat(resNome.nome()).isEqualTo("SÓ NOME");
+            assertThat(resNome.descricao()).isEqualTo(categoriaPadrao.getDescricao());
+
+            // Teste 2: Atualiza apenas a descrição
+            CategoriaResponseDTO resDesc = categoriaService.atualizar(categoriaId, new CategoriaRequestDTO(categoriaPadrao.getNome(), "SÓ DESC", categoriaPadrao.getOrdemExibicao(), categoriaPadrao.getAtivo(), categoriaPadrao.getUrlImagem()));
             assertThat(resDesc.descricao()).isEqualTo("SÓ DESC");
 
-            CategoriaResponseDTO resAtivo = categoriaService.atualizar(categoriaId, new CategoriaRequestDTO("LANCHES", "Hambúrgueres artesanais e combos", 1, false, "https://res.cloudinary.com/estevaolanches/image/upload/lanches.png"));
+            // Teste 3: Atualiza apenas o status ativo
+            CategoriaResponseDTO resAtivo = categoriaService.atualizar(categoriaId, new CategoriaRequestDTO(categoriaPadrao.getNome(), categoriaPadrao.getDescricao(), categoriaPadrao.getOrdemExibicao(), false, categoriaPadrao.getUrlImagem()));
             assertThat(resAtivo.ativo()).isFalse();
         }
 
@@ -277,6 +293,7 @@ class CategoriaServiceTest {
         }
     }
 
+
     // =========================================================================
     // BLOCO 6 — deletar() (ORDENAÇÃO CIRÚRGICA DE EXECUÇÃO)
     // =========================================================================
@@ -288,6 +305,8 @@ class CategoriaServiceTest {
         @DisplayName("Cenários 38, 40, 41, 42 e 45 — Cascade Manual Control: Deve expurgar produtos da categoria ANTES de eliminar a categoria mãe")
         void deveRespeitarOrdemDeDelecaoFisica() {
             when(categoriaRepository.existsById(categoriaId)).thenReturn(true);
+            doNothing().when(produtoRepository).deletarPorCategoriaId(categoriaId); // Mock para o método void
+            doNothing().when(categoriaRepository).deleteById(categoriaId); // Mock para o método void
 
             categoriaService.deletar(categoriaId);
 
@@ -424,6 +443,8 @@ class CategoriaServiceTest {
         void regressaoSalvarDeletarBuscar() {
             when(categoriaRepository.existsById(categoriaId)).thenReturn(true);
             when(categoriaRepository.findById(categoriaId)).thenReturn(Optional.empty());
+            doNothing().when(produtoRepository).deletarPorCategoriaId(categoriaId); // Mock para o método void
+            doNothing().when(categoriaRepository).deleteById(categoriaId); // Mock para o método void
 
             categoriaService.deletar(categoriaId);
 

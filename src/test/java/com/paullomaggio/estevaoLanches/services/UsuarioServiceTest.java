@@ -12,6 +12,7 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.ArgumentCaptor;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
@@ -33,7 +34,7 @@ import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.*;
 
 @ExtendWith(MockitoExtension.class)
-@DisplayName("🧪 Suíte de Testes Suprema — Matriz de Blindagem da Identidade de Colaboradores")
+@DisplayName("UsuarioService - colaboradores, credenciais e RBAC")
 class UsuarioServiceTest {
 
     @Mock private UsuarioRepository usuarioRepository;
@@ -50,19 +51,16 @@ class UsuarioServiceTest {
         idAtivo = UUID.randomUUID();
         idInativo = UUID.randomUUID();
 
-        usuarioAtivo = new Usuario(idAtivo, "João Caixa", "joao@tevao.com", "senhaCripto123", "GARCOM", true);
-        usuarioInativo = new Usuario(idInativo, "Maria Antiga", "maria@tevao.com", "senhaCripto456", "COZINHA", false);
+        usuarioAtivo = new Usuario(idAtivo, "Joao Caixa", "joao@tevao.com", "senhaCripto123", "GARCOM", true);
+        usuarioInativo = new Usuario(idInativo, "Maria Cozinha", "maria@tevao.com", "senhaCripto456", "COZINHA", false);
     }
 
-    // =========================================================================
-    // BLOCO 1 — SPRING SECURITY (CONTRATO USERDETAILS)
-    // =========================================================================
     @Nested
-    @DisplayName("1. Camada de Blindagem — Mecanismo de Contrato Spring Security")
+    @DisplayName("1. Contrato Spring Security")
     class SpringSecurityTests {
 
         @Test
-        @DisplayName("CT-USR-001 e CT-USR-003: Carregar Usuário Legítimo — Deve carregar UserDetails com sucesso ao buscar e-mail existente")
+        @DisplayName("CT-USR-001 e CT-USR-003 - Carrega colaborador existente pelo e-mail")
         void loadUserByUsernameCenario1() {
             when(usuarioRepository.findByEmail("joao@tevao.com")).thenReturn(Optional.of(usuarioAtivo));
 
@@ -70,156 +68,165 @@ class UsuarioServiceTest {
 
             assertNotNull(resultado);
             assertEquals("joao@tevao.com", resultado.getUsername());
-            verify(usuarioRepository, times(1)).findByEmail("joao@tevao.com");
+            assertEquals("senhaCripto123", resultado.getPassword());
+            verify(usuarioRepository).findByEmail("joao@tevao.com");
         }
 
         @Test
-        @DisplayName("CT-USR-002: Usuário Fantasma — Deve estourar UsernameNotFoundException quando o e-mail não existir no banco")
+        @DisplayName("CT-USR-002 - E-mail inexistente dispara UsernameNotFoundException")
         void loadUserByUsernameCenario2() {
             when(usuarioRepository.findByEmail("fantasma@tevao.com")).thenReturn(Optional.empty());
+
             assertThrows(UsernameNotFoundException.class, () -> usuarioService.loadUserByUsername("fantasma@tevao.com"));
         }
 
         @Test
-        @DisplayName("CT-USR-004 ao CT-USR-010: Prefixo ROLE_ — Garante mapeamento correto das authorities e flags nativas do Spring Security")
+        @DisplayName("CT-USR-004 ao CT-USR-010 - Role persistida sem prefixo e authority exposta com ROLE_")
         void ctUsr004_validarAtributosDeContratoSecurity() {
             Collection<? extends GrantedAuthority> authorities = usuarioAtivo.getAuthorities();
-            assertNotNull(authorities);
+
+            assertEquals("GARCOM", usuarioAtivo.getRole());
             assertEquals("ROLE_GARCOM", authorities.iterator().next().getAuthority());
             assertTrue(usuarioAtivo.isAccountNonExpired());
             assertTrue(usuarioAtivo.isAccountNonLocked());
             assertTrue(usuarioAtivo.isCredentialsNonExpired());
+            assertTrue(usuarioAtivo.isEnabled());
+            assertFalse(usuarioInativo.isEnabled());
         }
     }
 
-    // =========================================================================
-    // BLOCO 2 — LISTAGEM GERAL
-    // =========================================================================
     @Nested
-    @DisplayName("2. Camada de Blindagem — Listagem Geral de Turno")
+    @DisplayName("2. Listagem geral")
     class ListagemGeralTests {
 
         @Test
-        @DisplayName("CT-USR-011, CT-USR-013 e CT-USR-014: Mapeamento de Lote — Deve retornar todos os usuários cadastrados convertidos em DTO")
+        @DisplayName("CT-USR-011, CT-USR-013 e CT-USR-014 - Lista todos os colaboradores convertidos em DTO")
         void listarTodosCenario1() {
             when(usuarioRepository.findAll()).thenReturn(List.of(usuarioAtivo, usuarioInativo));
 
             List<UsuarioResponseDTO> resultado = usuarioService.listarTodos();
 
             assertEquals(2, resultado.size());
-            assertEquals("João Caixa", resultado.get(0).nome());
-            assertEquals("Maria Antiga", resultado.get(1).nome());
+            assertEquals("Joao Caixa", resultado.get(0).nome());
+            assertEquals("GARCOM", resultado.get(0).role());
+            assertEquals("Maria Cozinha", resultado.get(1).nome());
+            assertFalse(resultado.get(1).ativo());
         }
 
         @Test
-        @DisplayName("CT-USR-012: Painel Vazio — Deve retornar uma coleção imutável vazia se não existirem funcionários no banco")
+        @DisplayName("CT-USR-012 - Lista vazia quando nao ha colaboradores cadastrados")
         void listarTodosCenario2() {
             when(usuarioRepository.findAll()).thenReturn(Collections.emptyList());
+
             List<UsuarioResponseDTO> resultado = usuarioService.listarTodos();
+
             assertTrue(resultado.isEmpty());
         }
     }
 
-    // =========================================================================
-    // BLOCO 3 — USUÁRIOS ATIVOS (ESCUDO DE ESCALAS)
-    // =========================================================================
     @Nested
-    @DisplayName("3. Camada de Blindagem — Filtro de Funcionários Ativos")
+    @DisplayName("3. Colaboradores ativos")
     class UsuariosAtivosTests {
 
         @Test
-        @DisplayName("CT-USR-015 ao CT-USR-018: Filtro Operacional — Deve retornar exclusivamente colaboradores com a flag ativo=true")
+        @DisplayName("CT-USR-015 ao CT-USR-018 - Lista somente colaboradores ativos")
         void listarApenasAtivosCenario1() {
             when(usuarioRepository.findByAtivoTrue()).thenReturn(List.of(usuarioAtivo));
 
             List<UsuarioResponseDTO> resultado = usuarioService.listarApenasAtivos();
 
             assertEquals(1, resultado.size());
-            assertEquals("João Caixa", resultado.get(0).nome());
+            assertEquals(idAtivo, resultado.get(0).id());
             assertTrue(resultado.get(0).ativo());
+            assertEquals("GARCOM", resultado.get(0).role());
         }
 
         @Test
-        @DisplayName("CT-USR-017: Turno Deserto — Caso todos estejam inativos, o painel deve retornar uma coleção vazia")
+        @DisplayName("CT-USR-017 - Retorna lista vazia se nenhum colaborador estiver ativo")
         void listarApenasAtivosCenario2() {
             when(usuarioRepository.findByAtivoTrue()).thenReturn(Collections.emptyList());
+
             List<UsuarioResponseDTO> resultado = usuarioService.listarApenasAtivos();
+
             assertTrue(resultado.isEmpty());
         }
     }
 
-    // =========================================================================
-    // BLOCO 4 — BUSCA POR ID IDENTIFICADOR
-    // =========================================================================
     @Nested
-    @DisplayName("4. Camada de Blindagem — Consultas Unitárias por ID")
+    @DisplayName("4. Busca por ID")
     class BuscaPorIdTests {
 
         @Test
-        @DisplayName("CT-USR-019 e CT-USR-021: ID Existente — Localiza usuário ativo e monta o DTO de resposta")
+        @DisplayName("CT-USR-019 e CT-USR-021 - Busca colaborador existente por ID")
         void buscarPorIdCenario1() {
             when(usuarioRepository.findById(idAtivo)).thenReturn(Optional.of(usuarioAtivo));
 
             UsuarioResponseDTO resultado = usuarioService.buscarPorId(idAtivo);
 
-            assertNotNull(resultado);
             assertEquals(idAtivo, resultado.id());
+            assertEquals("joao@tevao.com", resultado.email());
+            assertEquals("GARCOM", resultado.role());
         }
 
         @Test
-        @DisplayName("CT-USR-020: ID Inexistente — Tentar carregar ID órfão dispara ResourceNotFoundException imediatamente")
+        @DisplayName("CT-USR-020 - ID inexistente dispara ResourceNotFoundException")
         void buscarPorIdCenario2() {
             when(usuarioRepository.findById(any(UUID.class))).thenReturn(Optional.empty());
+
             assertThrows(ResourceNotFoundException.class, () -> usuarioService.buscarPorId(UUID.randomUUID()));
         }
     }
 
-    // =========================================================================
-    // BLOCO 5 & 10 & 12 — CADASTRO E CRIPTOGRAFIA (BCRYPT SEGURANÇA)
-    // =========================================================================
     @Nested
-    @DisplayName("5, 10 & 12. Camada de Blindagem — Cadastro e Processamento Criptográfico")
+    @DisplayName("5, 10 e 12. Cadastro e criptografia")
     class CadastroECriptografiaTests {
 
         @Test
-        @DisplayName("CT-USR-022 ao CT-USR-024, CT-USR-028 ao CT-USR-030: Inserção de Nova Credencial — Deve cadastrar colaboradores com status ativo=true e converter Enums")
+        @DisplayName("CT-USR-022 ao CT-USR-024, CT-USR-028 ao CT-USR-030 - Cadastra colaborador ativo com role sem prefixo")
         void salvarCenario1() {
             UsuarioRequestDTO request = new UsuarioRequestDTO("Paulo", "paulo@tevao.com", "senha123", RoleUsuario.ADMIN);
-            when(usuarioRepository.existsByEmail(request.email())).thenReturn(false);
+            when(usuarioRepository.existsByEmail("paulo@tevao.com")).thenReturn(false);
+            when(passwordEncoder.encode("senha123")).thenReturn("hashSenha123");
             when(usuarioRepository.save(any(Usuario.class))).thenAnswer(invocation -> invocation.getArgument(0));
 
             UsuarioResponseDTO resultado = usuarioService.salvar(request);
 
-            assertNotNull(resultado);
             assertEquals("Paulo", resultado.nome());
+            assertEquals("paulo@tevao.com", resultado.email());
             assertEquals("ADMIN", resultado.role());
             assertTrue(resultado.ativo());
+
+            ArgumentCaptor<Usuario> captor = ArgumentCaptor.forClass(Usuario.class);
+            verify(usuarioRepository).save(captor.capture());
+            assertEquals("ADMIN", captor.getValue().getRole());
+            assertFalse(captor.getValue().getRole().startsWith("ROLE_"));
+            assertEquals("hashSenha123", captor.getValue().getSenha());
         }
 
         @Test
-        @DisplayName("CT-USR-025 e CT-USR-026, CT-USR-058, CT-USR-060: Mascaramento BCrypt — Deve acionar o PasswordEncoder para mascarar a senha em texto puro")
+        @DisplayName("CT-USR-025 e CT-USR-026, CT-USR-058, CT-USR-060 - Usa PasswordEncoder para mascarar senha")
         void salvarCenario3() {
             UsuarioRequestDTO request = new UsuarioRequestDTO("Paulo", "paulo@tevao.com", "textoPuro123", RoleUsuario.ADMIN);
-            when(usuarioRepository.existsByEmail(request.email())).thenReturn(false);
+            when(usuarioRepository.existsByEmail("paulo@tevao.com")).thenReturn(false);
             when(passwordEncoder.encode("textoPuro123")).thenReturn("hashBCrypt8821");
             when(usuarioRepository.save(any(Usuario.class))).thenAnswer(invocation -> invocation.getArgument(0));
 
             usuarioService.salvar(request);
 
-            verify(passwordEncoder, times(1)).encode("textoPuro123");
+            verify(passwordEncoder).encode("textoPuro123");
         }
 
         @Test
-        @DisplayName("CT-USR-027 e CT-USR-059: Encoder Ausente — Deve reter a senha em texto puro caso o PasswordEncoder esteja nulo em ambiente isolado")
+        @DisplayName("CT-USR-027 e CT-USR-059 - Mantem compatibilidade quando PasswordEncoder nao estiver disponivel")
         void salvarCenario4() {
             ReflectionTestUtils.setField(usuarioService, "passwordEncoder", null);
 
             UsuarioRequestDTO request = new UsuarioRequestDTO("Paulo", "paulo@tevao.com", "textoPuro123", RoleUsuario.ADMIN);
-            when(usuarioRepository.existsByEmail(request.email())).thenReturn(false);
+            when(usuarioRepository.existsByEmail("paulo@tevao.com")).thenReturn(false);
             when(usuarioRepository.save(any(Usuario.class))).thenAnswer(invocation -> {
-                Usuario u = invocation.getArgument(0);
-                assertEquals("textoPuro123", u.getSenha());
-                return u;
+                Usuario usuario = invocation.getArgument(0);
+                assertEquals("textoPuro123", usuario.getSenha());
+                return usuario;
             });
 
             usuarioService.salvar(request);
@@ -228,81 +235,78 @@ class UsuarioServiceTest {
         }
     }
 
-    // =========================================================================
-    // BLOCO 6 — DUPLICIDADE DE E-MAILS (UNICIADADE DO LIVRO-RAZÃO)
-    // =========================================================================
     @Nested
-    @DisplayName("6. Camada de Blindagem — Bloqueio de Idempotência e Duplicidade")
+    @DisplayName("6. Duplicidade de e-mail")
     class DuplicidadeEmailTests {
 
         @Test
-        @DisplayName("CT-USR-031 e CT-USR-032: Conflito de Cadastro — Tentar salvar e-mail já cadastrado deve estourar BusinessRuleException")
+        @DisplayName("CT-USR-031 e CT-USR-032 - Bloqueia cadastro com e-mail ja existente")
         void salvarCenario2() {
             UsuarioRequestDTO request = new UsuarioRequestDTO("Paulo", "joao@tevao.com", "senha123", RoleUsuario.ADMIN);
-            when(usuarioRepository.existsByEmail(request.email())).thenReturn(true);
+            when(usuarioRepository.existsByEmail("joao@tevao.com")).thenReturn(true);
 
             assertThrows(BusinessRuleException.class, () -> usuarioService.salvar(request));
             verify(usuarioRepository, never()).save(any(Usuario.class));
         }
 
         @Test
-        @DisplayName("CT-USR-033 ao CT-USR-035: Case Insensitive — A verificação de e-mail deve ignorar variações de letras maiúsculas/minúsculas")
+        @DisplayName("CT-USR-033 ao CT-USR-035 - Mesmo e-mail com case diferente nao consulta duplicidade externa")
         void deveIgnorarCaseAoValidarEmailDuplicadoNaAtualizacao() {
-            UsuarioRequestDTO request = new UsuarioRequestDTO("João", "JOAO@TEVAO.COM", "", RoleUsuario.GARCOM);
-
+            UsuarioRequestDTO request = new UsuarioRequestDTO("Joao", "JOAO@TEVAO.COM", "", RoleUsuario.GARCOM);
             when(usuarioRepository.findById(idAtivo)).thenReturn(Optional.of(usuarioAtivo));
-            when(usuarioRepository.save(any(Usuario.class))).thenAnswer(i -> i.getArgument(0));
+            when(usuarioRepository.save(any(Usuario.class))).thenAnswer(invocation -> invocation.getArgument(0));
 
-            usuarioService.atualizar(idAtivo, request);
+            UsuarioResponseDTO resultado = usuarioService.atualizar(idAtivo, request);
 
+            assertEquals("JOAO@TEVAO.COM", resultado.email());
             verify(usuarioRepository, never()).existsByEmailAndIdNot(anyString(), any(UUID.class));
         }
     }
 
-    // =========================================================================
-    // BLOCO 7 & 13 & 14 — ATUALIZAÇÃO E HIGIENIZAÇÃO DE CAMPOS SENCILES
-    // =========================================================================
     @Nested
-    @DisplayName("7, 13 & 14. Camada de Blindagem — Atualizações e Higienização de Formulário")
+    @DisplayName("7, 13 e 14. Atualizacao de campos")
     class AtualizacaoCamposTests {
 
         @Test
-        @DisplayName("CT-USR-036 ao CT-USR-038, CT-USR-046 e CT-USR-047: Atualização Limpa — Modifica cadastro com sucesso preservando o ID mestre")
+        @DisplayName("CT-USR-036 ao CT-USR-038, CT-USR-046 e CT-USR-047 - Atualiza dados preservando ID")
         void atualizarCenario1() {
-            UsuarioRequestDTO request = new UsuarioRequestDTO("João Alterado", "joao@tevao.com", "", RoleUsuario.GARCOM);
+            UsuarioRequestDTO request = new UsuarioRequestDTO("Joao Alterado", "joao@tevao.com", "", RoleUsuario.GARCOM);
             when(usuarioRepository.findById(idAtivo)).thenReturn(Optional.of(usuarioAtivo));
-            when(usuarioRepository.save(any(Usuario.class))).thenAnswer(i -> i.getArgument(0));
+            when(usuarioRepository.save(any(Usuario.class))).thenAnswer(invocation -> invocation.getArgument(0));
 
             UsuarioResponseDTO resultado = usuarioService.atualizar(idAtivo, request);
 
-            assertEquals("João Alterado", resultado.nome());
             assertEquals(idAtivo, resultado.id());
+            assertEquals("Joao Alterado", resultado.nome());
+            assertEquals("GARCOM", resultado.role());
+            assertEquals("senhaCripto123", usuarioAtivo.getSenha());
         }
 
         @Test
-        @DisplayName("CT-USR-039 e CT-USR-044: Alterar Senha — Deve codificar e atualizar a senha se ela for alterada de forma explícita")
+        @DisplayName("CT-USR-039 e CT-USR-044 - Codifica senha quando alterada explicitamente")
         void atualizarCenario5() {
-            UsuarioRequestDTO request = new UsuarioRequestDTO("João", "joao@tevao.com", "novaSenhaMaster", RoleUsuario.GARCOM);
+            UsuarioRequestDTO request = new UsuarioRequestDTO("Joao", "joao@tevao.com", "novaSenhaMaster", RoleUsuario.GARCOM);
             when(usuarioRepository.findById(idAtivo)).thenReturn(Optional.of(usuarioAtivo));
             when(passwordEncoder.encode("novaSenhaMaster")).thenReturn("novaSenhaCripto999");
-            when(usuarioRepository.save(any(Usuario.class))).thenAnswer(i -> i.getArgument(0));
+            when(usuarioRepository.save(any(Usuario.class))).thenAnswer(invocation -> invocation.getArgument(0));
 
             usuarioService.atualizar(idAtivo, request);
 
-            verify(passwordEncoder, times(1)).encode("novaSenhaMaster");
+            verify(passwordEncoder).encode("novaSenhaMaster");
+            assertEquals("novaSenhaCripto999", usuarioAtivo.getSenha());
         }
 
         @Test
-        @DisplayName("CT-USR-040 ao CT-USR-043, CT-USR-045, CT-USR-061 ao CT-USR-063, CT-USR-077: Antissalto de Hash — Deve preservar o hash antigo intacto se a nova senha vier nula, vazia ou em branco")
+        @DisplayName("CT-USR-040 ao CT-USR-043, CT-USR-045, CT-USR-061 ao CT-USR-063, CT-USR-077 - Preserva hash se senha vier nula ou em branco")
         void atualizarCenariosSenhaNulaEVazia() {
             when(usuarioRepository.findById(idAtivo)).thenReturn(Optional.of(usuarioAtivo));
-            when(usuarioRepository.save(any(Usuario.class))).thenAnswer(i -> i.getArgument(0));
+            when(usuarioRepository.save(any(Usuario.class))).thenAnswer(invocation -> invocation.getArgument(0));
 
-            UsuarioRequestDTO reqNull = new UsuarioRequestDTO("João", "joao@tevao.com", null, RoleUsuario.GARCOM);
+            UsuarioRequestDTO reqNull = new UsuarioRequestDTO("Joao", "joao@tevao.com", null, RoleUsuario.GARCOM);
             usuarioService.atualizar(idAtivo, reqNull);
             assertEquals("senhaCripto123", usuarioAtivo.getSenha());
 
-            UsuarioRequestDTO reqVazia = new UsuarioRequestDTO("João", "joao@tevao.com", "   ", RoleUsuario.GARCOM);
+            UsuarioRequestDTO reqVazia = new UsuarioRequestDTO("Joao", "joao@tevao.com", "   ", RoleUsuario.GARCOM);
             usuarioService.atualizar(idAtivo, reqVazia);
             assertEquals("senhaCripto123", usuarioAtivo.getSenha());
 
@@ -310,29 +314,27 @@ class UsuarioServiceTest {
         }
     }
 
-    // =========================================================================
-    // BLOCO 8 — ALTERAÇÃO DE E-MAIL E ROUBO DE IDENTIDADE
-    // =========================================================================
     @Nested
-    @DisplayName("8. Camada de Blindagem — Atualização de E-mail e Cruzamento de Dados")
+    @DisplayName("8. Atualizacao de e-mail")
     class AtualizacaoEmailTests {
 
         @Test
-        @DisplayName("CT-USR-050: Roubo de Identidade — Deve bloquear a alteração se o funcionário tentar usar o e-mail de outro colega ativo")
+        @DisplayName("CT-USR-050 - Bloqueia e-mail pertencente a outro colaborador")
         void atualizarCenario3() {
-            UsuarioRequestDTO request = new UsuarioRequestDTO("João", "maria@tevao.com", "", RoleUsuario.GARCOM);
+            UsuarioRequestDTO request = new UsuarioRequestDTO("Joao", "maria@tevao.com", "", RoleUsuario.GARCOM);
             when(usuarioRepository.findById(idAtivo)).thenReturn(Optional.of(usuarioAtivo));
             when(usuarioRepository.existsByEmailAndIdNot("maria@tevao.com", idAtivo)).thenReturn(true);
 
             assertThrows(BusinessRuleException.class, () -> usuarioService.atualizar(idAtivo, request));
+            verify(usuarioRepository, never()).save(any(Usuario.class));
         }
 
         @Test
-        @DisplayName("CT-USR-048: Manter o Mesmo E-mail — Não deve rodar validações de duplicidade se o e-mail enviado for idêntico ao atual")
+        @DisplayName("CT-USR-048 - Mantem mesmo e-mail sem consultar duplicidade")
         void atualizarCenario4() {
-            UsuarioRequestDTO request = new UsuarioRequestDTO("João Caixa Modificado", "joao@tevao.com", "", RoleUsuario.GARCOM);
+            UsuarioRequestDTO request = new UsuarioRequestDTO("Joao Caixa Modificado", "joao@tevao.com", "", RoleUsuario.GARCOM);
             when(usuarioRepository.findById(idAtivo)).thenReturn(Optional.of(usuarioAtivo));
-            when(usuarioRepository.save(any(Usuario.class))).thenAnswer(i -> i.getArgument(0));
+            when(usuarioRepository.save(any(Usuario.class))).thenAnswer(invocation -> invocation.getArgument(0));
 
             usuarioService.atualizar(idAtivo, request);
 
@@ -340,54 +342,50 @@ class UsuarioServiceTest {
         }
     }
 
-    // =========================================================================
-    // BLOCO 9 — SOFT DELETE (EXCLUSÃO LÓGICA E INTEGRIDADE FISCAL)
-    // =========================================================================
     @Nested
-    @DisplayName("9. Camada de Blindagem — Mecanismo de Soft Delete")
+    @DisplayName("9. Soft delete")
     class SoftDeleteTests {
 
         @Test
-        @DisplayName("CT-USR-052 ao CT-USR-056, CT-USR-079, CT-USR-103: Preservação Física — Deve inativar logicamente o usuário fixando ativo=false sem apagar o registro físico")
+        @DisplayName("CT-USR-052 ao CT-USR-056, CT-USR-079, CT-USR-103 - Inativa colaborador sem apagar registro")
         void deletarOuInativarCenario1e3() {
             when(usuarioRepository.findById(idAtivo)).thenReturn(Optional.of(usuarioAtivo));
-            when(usuarioRepository.save(any(Usuario.class))).thenAnswer(i -> i.getArgument(0));
+            when(usuarioRepository.save(any(Usuario.class))).thenAnswer(invocation -> invocation.getArgument(0));
 
             usuarioService.deletarOuInativar(idAtivo);
 
-            // 🎯 FIX DEFINITIVO: O Lombok gera o padrão isAtivo() para propriedades booleanas primitivas
             assertFalse(usuarioAtivo.isAtivo());
-            verify(usuarioRepository, times(1)).save(usuarioAtivo);
+            assertFalse(usuarioAtivo.isEnabled());
+            verify(usuarioRepository).save(usuarioAtivo);
             verify(usuarioRepository, never()).delete(any(Usuario.class));
         }
 
         @Test
-        @DisplayName("CT-USR-057: Inativar Inexistente — Tentar desativar um colaborador com ID órfão dispara ResourceNotFoundException")
+        @DisplayName("CT-USR-057 - Inativar ID inexistente dispara ResourceNotFoundException")
         void deveLancarExcecaoAoInativarUsuarioInexistente() {
-            when(usuarioRepository.findById(any())).thenReturn(Optional.empty());
+            when(usuarioRepository.findById(any(UUID.class))).thenReturn(Optional.empty());
+
             assertThrows(ResourceNotFoundException.class, () -> usuarioService.deletarOuInativar(UUID.randomUUID()));
         }
     }
 
-    // =========================================================================
-    // BLOCO 11 — CONTRATO DE PERSISTÊNCIA (VALIDAÇÃO ANTI-NULO)
-    // =========================================================================
     @Nested
-    @DisplayName("11. Camada de Blindagem — Proteção Anti-Nulos na Esteira JPA")
+    @DisplayName("11. Persistencia anti-nulo")
     class PersistenciaAntiNuloTests {
 
         @Test
-        @DisplayName("CT-USR-065: Quebra Crítica no Insert — Lança BusinessRuleException se o repositório retornar nulo ao salvar")
+        @DisplayName("CT-USR-065 - Retorno nulo no insert dispara BusinessRuleException")
         void salvarDeveLancarExcecaoQuandoPersistenciaRetornarNulo() {
             UsuarioRequestDTO request = new UsuarioRequestDTO("Falha", "falha@tevao.com", "123", RoleUsuario.GARCOM);
-            when(usuarioRepository.existsByEmail(request.email())).thenReturn(false);
+            when(usuarioRepository.existsByEmail("falha@tevao.com")).thenReturn(false);
+            when(passwordEncoder.encode("123")).thenReturn("hash123");
             when(usuarioRepository.save(any(Usuario.class))).thenReturn(null);
 
             assertThrows(BusinessRuleException.class, () -> usuarioService.salvar(request));
         }
 
         @Test
-        @DisplayName("CT-USR-066: Quebra Crítica no Update — Lança BusinessRuleException se o repositório retornar nulo ao atualizar")
+        @DisplayName("CT-USR-066 - Retorno nulo no update dispara BusinessRuleException")
         void atualizarDeveLancarExcecaoQuandoPersistenciaRetornarNulo() {
             UsuarioRequestDTO request = new UsuarioRequestDTO("Falha", "joao@tevao.com", "", RoleUsuario.GARCOM);
             when(usuarioRepository.findById(idAtivo)).thenReturn(Optional.of(usuarioAtivo));
@@ -397,23 +395,23 @@ class UsuarioServiceTest {
         }
     }
 
-    // =========================================================================
-    // BLOCO 15, 16, 17 & 18 — ESCUDOS OPERACIONAIS E FLUXOS COMPLETO DO SALÃO
-    // =========================================================================
     @Nested
-    @DisplayName("15 a 18. Camada de Blindagem — Fluxos Integrados e Isolamento")
+    @DisplayName("15 a 18. Fluxos integrados e isolamento")
     class FluxosIntegradosLanchesTests {
 
         @Test
-        @DisplayName("CT-USR-076 e CT-USR-100: Segregação Corporativa — Garante que o UsuarioService opere estritamente com funcionários e nunca exponha hashes de senhas em DTOs")
+        @DisplayName("CT-USR-076 e CT-USR-100 - UsuarioService cuida apenas de colaboradores e DTO nao expoe senha")
         void deveGarantirQueUsuarioServiceNaoInvoqueEscoposDeClientesExteriores() {
             when(usuarioRepository.findById(idAtivo)).thenReturn(Optional.of(usuarioAtivo));
-            when(usuarioRepository.save(any(Usuario.class))).thenAnswer(i -> i.getArgument(0));
+            when(usuarioRepository.save(any(Usuario.class))).thenAnswer(invocation -> invocation.getArgument(0));
 
-            UsuarioRequestDTO request = new UsuarioRequestDTO("João Monitorado", "joao@tevao.com", "", RoleUsuario.GARCOM);
+            UsuarioRequestDTO request = new UsuarioRequestDTO("Joao Monitorado", "joao@tevao.com", "", RoleUsuario.GARCOM);
             UsuarioResponseDTO response = usuarioService.atualizar(idAtivo, request);
 
             assertNotNull(response);
+            assertEquals("Joao Monitorado", response.nome());
+            assertEquals("GARCOM", response.role());
+            assertEquals(5, UsuarioResponseDTO.class.getRecordComponents().length);
             verifyNoInteractions(passwordEncoder);
         }
     }

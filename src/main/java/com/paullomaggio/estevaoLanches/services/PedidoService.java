@@ -8,12 +8,16 @@ import com.paullomaggio.estevaoLanches.exceptions.ResourceNotFoundException;
 import com.paullomaggio.estevaoLanches.repositories.*;
 import lombok.RequiredArgsConstructor;
 import org.springframework.messaging.simp.SimpMessagingTemplate;
+import org.springframework.security.access.AccessDeniedException; // Importar AccessDeniedException
+import org.springframework.security.core.Authentication; // Importar Authentication
+import org.springframework.security.core.context.SecurityContextHolder; // Importar SecurityContextHolder
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Random;
 import java.util.UUID;
 
 @Service
@@ -95,6 +99,10 @@ public class PedidoService {
                     .reduce(BigDecimal.ZERO, BigDecimal::add);
 
             BigDecimal precoFinalItemUnitario = produto.getPreco().add(precoAdicionais);
+            // Adicionada validação para preço final do item (Correção RB019)
+            if (precoFinalItemUnitario.compareTo(BigDecimal.ZERO) <= 0) {
+                throw new BusinessRuleException("Preço final do item não pode ser zero ou negativo.");
+            }
 
             ItemPedido item = new ItemPedido();
             item.setProduto(produto);
@@ -197,14 +205,17 @@ public class PedidoService {
         pedido.setValorRecebido(somaTotal);
 
         Pedido pedidoSalvo = pedidoRepository.save(pedido);
-        carrinho.getItens().clear();
-        carrinhoRepository.save(carrinho);
 
+        // Fila de impressão (movido para antes da limpeza do carrinho)
         FilaImpressao cupomCozinha = new FilaImpressao();
         cupomCozinha.setPedido(pedidoSalvo);
         cupomCozinha.setDestino(FilaImpressao.DestinoImpressao.COZINHA);
         cupomCozinha.setStatus(FilaImpressao.StatusImpressao.PENDENTE);
         filaImpressaoRepository.save(cupomCozinha);
+
+        // Limpeza do carrinho e salvamento (movido para depois da fila de impressão)
+        carrinho.getItens().clear();
+        carrinhoRepository.save(carrinho);
 
         return new PedidoResponseDTO(pedidoSalvo);
     }

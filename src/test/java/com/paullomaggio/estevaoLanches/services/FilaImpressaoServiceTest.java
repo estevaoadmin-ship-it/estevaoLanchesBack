@@ -12,7 +12,6 @@ import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InOrder;
-import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.scheduling.annotation.Scheduled;
@@ -36,7 +35,8 @@ import static org.mockito.Mockito.*;
 class FilaImpressaoServiceTest {
 
     @Mock private FilaImpressaoRepository repository;
-    @InjectMocks private FilaImpressaoService service;
+    // Removido @InjectMocks
+    private FilaImpressaoService service;
 
     private UUID idValido;
     private FilaImpressao itemFila;
@@ -44,6 +44,9 @@ class FilaImpressaoServiceTest {
 
     @BeforeEach
     void setUp() {
+        // Instanciação manual do serviço com o mock
+        service = new FilaImpressaoService(repository);
+
         idValido = UUID.randomUUID();
         pedidoMock = new Pedido();
         pedidoMock.setId(UUID.randomUUID());
@@ -108,6 +111,7 @@ class FilaImpressaoServiceTest {
         @DisplayName("CT-015 ao CT-017: Transição Válida — Mudar de PENDENTE para PROCESSANDO deve carregar o timestamp da tentativa e dar saveAndFlush")
         void ct015_deveMudarParaProcessandoComSucesso() {
             when(repository.findById(idValido)).thenReturn(Optional.of(itemFila));
+            when(repository.saveAndFlush(any(FilaImpressao.class))).thenAnswer(i -> i.getArgument(0));
 
             service.alterarParaProcessando(idValido);
 
@@ -149,6 +153,7 @@ class FilaImpressaoServiceTest {
         void ct022_deveConsolidarImpressaoComSucesso() {
             itemFila.setStatus(StatusImpressao.PROCESSANDO);
             when(repository.findById(idValido)).thenReturn(Optional.of(itemFila));
+            when(repository.saveAndFlush(any(FilaImpressao.class))).thenAnswer(i -> i.getArgument(0));
 
             service.marcarComoImpresso(idValido);
 
@@ -189,6 +194,7 @@ class FilaImpressaoServiceTest {
         void ct030_deveReverterParaPendenteComLog() {
             itemFila.setStatus(StatusImpressao.PROCESSANDO);
             when(repository.findById(idValido)).thenReturn(Optional.of(itemFila));
+            when(repository.saveAndFlush(any(FilaImpressao.class))).thenAnswer(i -> i.getArgument(0));
 
             service.reverterParaPendente(idValido);
 
@@ -221,6 +227,7 @@ class FilaImpressaoServiceTest {
             itemFila.setUltimaTentativa(LocalDateTime.now().minusMinutes(12)); // Estourou o tempo limite de 10min
 
             when(repository.findByStatus(StatusImpressao.PROCESSANDO)).thenReturn(List.of(itemFila));
+            when(repository.saveAndFlush(any(FilaImpressao.class))).thenAnswer(i -> i.getArgument(0));
 
             service.verificarProcessamentosTravados();
 
@@ -259,6 +266,7 @@ class FilaImpressaoServiceTest {
 
             // Força a explosão de concorrência ou lock físico de banco na primeira gravação
             doThrow(new RuntimeException("Database Lock Critical Failure")).when(repository).saveAndFlush(itemFalho);
+            when(repository.saveAndFlush(itemSaudavel)).thenAnswer(i -> i.getArgument(0)); // Mock para o item saudável
 
             assertDoesNotThrow(() -> service.verificarProcessamentosTravados());
             assertTrue(itemFalho.getLogErro().contains("Falha catastrofica no Watchdog"));
@@ -277,6 +285,7 @@ class FilaImpressaoServiceTest {
         @DisplayName("CT-048 e CT-085: Ordem Cronológica — Deve assegurar a sequência síncrona exata de leitura e alteração via InOrder")
         void ct048_deveGarantirOrdemCronologicaEstrita() {
             when(repository.findById(idValido)).thenReturn(Optional.of(itemFila));
+            when(repository.saveAndFlush(any(FilaImpressao.class))).thenAnswer(i -> i.getArgument(0));
 
             service.alterarParaProcessando(idValido);
 
@@ -311,6 +320,7 @@ class FilaImpressaoServiceTest {
             when(repository.findById(idValido))
                     .thenReturn(Optional.of(itemFila)) // Node 1 lê e passa
                     .thenReturn(Optional.of(itemFila)); // Node 2 lê na mesma fração de segundo
+            when(repository.saveAndFlush(any(FilaImpressao.class))).thenAnswer(i -> i.getArgument(0));
 
             // Node 1 executa e altera status
             service.alterarParaProcessando(idValido);
@@ -326,6 +336,7 @@ class FilaImpressaoServiceTest {
         void ct072_corridaDeAckSimultaneo() {
             itemFila.setStatus(StatusImpressao.PROCESSANDO);
             when(repository.findById(idValido)).thenReturn(Optional.of(itemFila));
+            when(repository.saveAndFlush(any(FilaImpressao.class))).thenAnswer(i -> i.getArgument(0));
 
             // ACK do terminal 1 consolida com sucesso
             service.marcarComoImpresso(idValido);

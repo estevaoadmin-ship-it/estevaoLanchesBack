@@ -7,7 +7,6 @@ import com.paullomaggio.estevaoLanches.enums.StatusMesa;
 import com.paullomaggio.estevaoLanches.exceptions.BusinessRuleException;
 import com.paullomaggio.estevaoLanches.exceptions.ResourceNotFoundException;
 import com.paullomaggio.estevaoLanches.repositories.MesaRepository;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -21,8 +20,12 @@ import java.util.stream.Collectors;
 @Service
 public class MesaService {
 
-    @Autowired
-    private MesaRepository mesaRepository;
+    private final MesaRepository mesaRepository;
+
+    // Injeção de dependência via construtor
+    public MesaService(MesaRepository mesaRepository) {
+        this.mesaRepository = mesaRepository;
+    }
 
     /**
      * Cria uma nova mesa garantindo a regra de unicidade de numeração no salão.

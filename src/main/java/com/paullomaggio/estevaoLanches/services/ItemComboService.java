@@ -7,7 +7,6 @@ import com.paullomaggio.estevaoLanches.entities.ItemPedido;
 import com.paullomaggio.estevaoLanches.exceptions.ResourceNotFoundException;
 import com.paullomaggio.estevaoLanches.repositories.ItemComboRepository;
 import com.paullomaggio.estevaoLanches.repositories.ItemPedidoRepository;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -18,8 +17,14 @@ import java.util.stream.Collectors;
 @Service
 public class ItemComboService {
 
-    @Autowired private ItemComboRepository itemComboRepository;
-    @Autowired private ItemPedidoRepository itemPedidoRepository;
+    private final ItemComboRepository itemComboRepository;
+    private final ItemPedidoRepository itemPedidoRepository;
+
+    // Injeção de dependência via construtor
+    public ItemComboService(ItemComboRepository itemComboRepository, ItemPedidoRepository itemPedidoRepository) {
+        this.itemComboRepository = itemComboRepository;
+        this.itemPedidoRepository = itemPedidoRepository;
+    }
 
     @Transactional
     public ItemComboResponseDTO lancarItemNoCombo(ItemComboRequestDTO dto) {

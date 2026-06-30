@@ -17,7 +17,6 @@ import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
-import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
@@ -41,7 +40,8 @@ class ProdutoServiceTest {
     @Mock private CategoriaRepository categoriaRepository;
     @Mock private AdicionalRepository adicionalRepository;
 
-    @InjectMocks private ProdutoService produtoService;
+    // Removido @InjectMocks
+    private ProdutoService produtoService;
 
     private UUID produtoId;
     private UUID categoriaId;
@@ -51,6 +51,9 @@ class ProdutoServiceTest {
 
     @BeforeEach
     void setUp() {
+        // Instanciação manual do serviço com os mocks
+        produtoService = new ProdutoService(produtoRepository, categoriaRepository, adicionalRepository);
+
         produtoId = UUID.randomUUID();
         categoriaId = UUID.randomUUID();
 

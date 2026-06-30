@@ -11,7 +11,6 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
-import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.messaging.simp.SimpMessagingTemplate;
@@ -41,7 +40,8 @@ public class EcosystemApocalypseTest {
     @Mock private ComandaRepository comandaRepository;
     @Mock private ContaRepository contaRepository;
 
-    @InjectMocks private PedidoService pedidoService;
+    // Removido @InjectMocks
+    private PedidoService pedidoService;
 
     private UUID prodIdLanche;
     private UUID comandaId;
@@ -55,6 +55,13 @@ public class EcosystemApocalypseTest {
 
     @BeforeEach
     void setUp() {
+        // Instanciação manual do serviço com os mocks
+        pedidoService = new PedidoService(
+                pedidoRepository, carrinhoRepository, caixaRepository,
+                produtoRepository, adicionalRepository, filaImpressaoRepository,
+                comandaRepository, contaRepository, messagingTemplate
+        );
+
         prodIdLanche = UUID.randomUUID();
         comandaId = UUID.randomUUID();
         contaId = UUID.randomUUID();
@@ -126,7 +133,7 @@ public class EcosystemApocalypseTest {
         void deveProcessarLoteMassivoSemPerdaDeEntidades() throws InterruptedException {
             int cargaDisparo = 100;
             when(caixaRepository.existsByStatus(StatusCaixa.ABERTO)).thenReturn(true);
-            when(comandaRepository.findById(comandaId)).thenReturn(Optional.of(comandaMestre));
+            // REMOVIDO: when(comandaRepository.findById(comandaId)).thenReturn(Optional.of(comandaMestre)); // UnnecessaryStubbing
             when(contaRepository.findByComandaIdAndNumeroConta(eq(comandaId), anyInt())).thenReturn(Optional.of(contaMestre));
             when(produtoRepository.findById(prodIdLanche)).thenReturn(Optional.of(lancheMonstro));
             when(pedidoRepository.saveAndFlush(any(Pedido.class))).thenAnswer(i -> {
@@ -339,9 +346,13 @@ public class EcosystemApocalypseTest {
         void ct079_guerraDelivery() {
             UUID cId = UUID.randomUUID();
             when(caixaRepository.existsByStatus(StatusCaixa.ABERTO)).thenReturn(true);
-            Carrinho carrinho = new Carrinho(); carrinho.setCliente(clienteSessao);
-            ItemCarrinho ic = new ItemCarrinho(); ic.setProduto(lancheMonstro); ic.setQuantidade(2);
-            carrinho.setItens(List.of(ic));
+            Carrinho carrinho = new Carrinho();
+            carrinho.setCliente(clienteSessao);
+            ItemCarrinho ic = new ItemCarrinho();
+            ic.setProduto(lancheMonstro);
+            ic.setQuantidade(2);
+            // Correção: Usar ArrayList para uma lista mutável
+            carrinho.setItens(new ArrayList<>(List.of(ic)));
             when(carrinhoRepository.findByClienteId(cId)).thenReturn(Optional.of(carrinho));
             when(pedidoRepository.save(any())).thenReturn(pedidoCompartilhado);
 

@@ -26,6 +26,14 @@ public class SecurityConfig {
 
     private final SecurityFilter securityFilter;
 
+    private static final String[] SWAGGER_WHITELIST = {
+            "/swagger-ui/**",
+            "/swagger-ui.html",
+            "/v3/api-docs/**",
+            "/api-docs/**",
+            "/swagger/**"
+    };
+
     public SecurityConfig(SecurityFilter securityFilter) {
         this.securityFilter = securityFilter;
     }
@@ -50,6 +58,9 @@ public class SecurityConfig {
                         .requestMatchers(HttpMethod.POST, "/api/auth/cliente/google").permitAll()
                         .requestMatchers("/error").permitAll()
 
+                        // PORTAS PÚBLICAS: Swagger
+                        .requestMatchers(SWAGGER_WHITELIST).permitAll()
+
                         // PORTAS PÚBLICAS: Hubs da Ponte Física de Impressão Térmica
                         .requestMatchers("/api/fila-impressao/**").permitAll()
                         .requestMatchers("/api/pedidos/fila-impressao/**").permitAll()
@@ -59,7 +70,7 @@ public class SecurityConfig {
 
                         // === NOVO: APP DE DELIVERY ===
                         // Restringe as rotas do aplicativo aos clientes autenticados (e admins)
-                        .requestMatchers("/api/delivery/pedidos/**").hasAnyRole("CLIENTE", "ADMIN")
+                        .requestMatchers("/api/delivery/pedidos/**").hasAnyAuthority("ROLE_CLIENTE", "ROLE_ADMIN")
 
                         // PAPEL MISTO (ADMIN ou GARÇOM): Operação em Tempo Real do Salão
                         .requestMatchers("/api/comandas/**").hasAnyRole("ADMIN", "GARCOM")
@@ -67,6 +78,7 @@ public class SecurityConfig {
                         .requestMatchers(HttpMethod.GET, "/api/caixas/resumo").hasAnyRole("ADMIN", "GARCOM")
                         .requestMatchers("/api/pedidos/balcao/checkout").hasAnyRole("ADMIN", "GARCOM") // Rota ajustada
                         .requestMatchers("/api/clientes/**").hasAnyRole("ADMIN", "GARCOM")
+                        .requestMatchers("/api/contas/**").hasAnyRole("ADMIN", "GARCOM") // ✅ Adicionado proteção para /api/contas
 
                         // PAPEL OPERACIONAL DA ESTEIRA: Produção de Cozinha e Expedição
                         .requestMatchers("/api/pedidos/**").hasAnyRole("ADMIN", "GARCOM", "COZINHA")
@@ -74,8 +86,14 @@ public class SecurityConfig {
                         // PAPEL EXCLUSIVO DO GERENTE (ADMIN)
                         .requestMatchers("/api/caixas/**").hasRole("ADMIN")
                         .requestMatchers("/api/relatorios/**").hasRole("ADMIN")
-                        .requestMatchers("/api/cardapio/**").hasRole("ADMIN")
+                        // Regras de autorização para /api/produtos
+                        .requestMatchers(HttpMethod.GET, "/api/produtos/**").hasAnyRole("ADMIN", "GARCOM", "CLIENTE")
+                        .requestMatchers(HttpMethod.POST, "/api/produtos/**").hasRole("ADMIN")
+                        .requestMatchers(HttpMethod.PUT, "/api/produtos/**").hasRole("ADMIN")
+                        .requestMatchers(HttpMethod.DELETE, "/api/produtos/**").hasRole("ADMIN")
                         .requestMatchers("/api/usuarios/**").hasRole("ADMIN")
+                        .requestMatchers("/api/pagamentos/**").hasRole("ADMIN") // ✅ Adicionado proteção para /api/pagamentos
+                        .requestMatchers("/api/carrinhos/**").hasAnyRole("CLIENTE", "ADMIN") // ✅ Adicionado proteção para /api/carrinhos
 
                         .anyRequest().authenticated()
                 )

@@ -6,6 +6,10 @@ import com.paullomaggio.estevaoLanches.entities.Usuario;
 import com.paullomaggio.estevaoLanches.repositories.ContaDeliveryRepository;
 import com.paullomaggio.estevaoLanches.services.ContaDeliveryService;
 import com.paullomaggio.estevaoLanches.services.TokenService;
+import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.responses.ApiResponse;
+import io.swagger.v3.oas.annotations.responses.ApiResponses;
+import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -18,6 +22,7 @@ import org.springframework.web.bind.annotation.*;
 @RestController
 @RequestMapping("/api/auth")
 @CrossOrigin(origins = "*")
+@Tag(name = "Autenticação", description = "Operações de autenticação para funcionários e clientes")
 public class AutenticacaoController {
 
     private final AuthenticationManager authenticationManager;
@@ -40,6 +45,12 @@ public class AutenticacaoController {
     }
 
     // 🖥️ ROTA PDV WEB CENTRAL: Autenticação de Funcionários (Blindada contra 403 indesejados)
+    @Operation(summary = "Autentica um funcionário (usuário do sistema)",
+               description = "Realiza o login de um funcionário e retorna um token JWT para acesso às rotas protegidas.")
+    @ApiResponses(value = {
+            @ApiResponse(responseCode = "200", description = "Autenticação bem-sucedida, token JWT retornado"),
+            @ApiResponse(responseCode = "401", description = "Credenciais inválidas")
+    })
     @PostMapping("/login")
     public ResponseEntity<?> login(@RequestBody LoginRequestDTO dto) {
         try {
@@ -59,6 +70,12 @@ public class AutenticacaoController {
     }
 
     // 🚀 ROTA DELIVERY APP: Cadastro nativo por e-mail e senha (Fase 1)
+    @Operation(summary = "Registra uma nova conta de cliente para o aplicativo de delivery",
+               description = "Cria uma nova conta de cliente com e-mail e senha fornecidos.")
+    @ApiResponses(value = {
+            @ApiResponse(responseCode = "201", description = "Conta de Delivery cadastrada com sucesso"),
+            @ApiResponse(responseCode = "400", description = "Dados de registro inválidos")
+    })
     @PostMapping("/registrar")
     public ResponseEntity<String> registrarCliente(@Valid @RequestBody RegistroDeliveryRequestDTO dto) {
         contaDeliveryService.registrarNovaConta(dto);
@@ -66,6 +83,14 @@ public class AutenticacaoController {
     }
 
     // 🚀 ROTA DELIVERY APP: Login nativo por credenciais digitais de cliente
+    @Operation(summary = "Autentica um cliente do aplicativo de delivery",
+               description = "Realiza o login de um cliente e retorna um token JWT para acesso às rotas protegidas do delivery.")
+    @ApiResponses(value = {
+            @ApiResponse(responseCode = "200", description = "Autenticação bem-sucedida, token JWT retornado"),
+            @ApiResponse(responseCode = "400", description = "E-mail e senha são obrigatórios"),
+            @ApiResponse(responseCode = "401", description = "E-mail ou senha incorretos"),
+            @ApiResponse(responseCode = "403", description = "Esta conta está inativa no sistema")
+    })
     @PostMapping("/login/cliente")
     public ResponseEntity<?> loginCliente(@RequestBody LoginRequestDTO dto) {
         if (dto.email() == null || dto.senha() == null) {

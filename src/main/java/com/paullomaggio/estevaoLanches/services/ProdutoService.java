@@ -10,7 +10,6 @@ import com.paullomaggio.estevaoLanches.exceptions.ResourceNotFoundException;
 import com.paullomaggio.estevaoLanches.repositories.AdicionalRepository;
 import com.paullomaggio.estevaoLanches.repositories.CategoriaRepository;
 import com.paullomaggio.estevaoLanches.repositories.ProdutoRepository;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -21,14 +20,18 @@ import java.util.stream.Collectors;
 @Service
 public class ProdutoService {
 
-    @Autowired
-    private ProdutoRepository produtoRepository;
+    private final ProdutoRepository produtoRepository;
+    private final CategoriaRepository categoriaRepository;
+    private final AdicionalRepository adicionalRepository;
 
-    @Autowired
-    private CategoriaRepository categoriaRepository;
-
-    @Autowired
-    private AdicionalRepository adicionalRepository;
+    // Injeção de dependência via construtor
+    public ProdutoService(ProdutoRepository produtoRepository,
+                          CategoriaRepository categoriaRepository,
+                          AdicionalRepository adicionalRepository) {
+        this.produtoRepository = produtoRepository;
+        this.categoriaRepository = categoriaRepository;
+        this.adicionalRepository = adicionalRepository;
+    }
 
     @Transactional(readOnly = true)
     public List<ProdutoResponseDTO> listarTodos() {

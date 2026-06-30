@@ -15,7 +15,6 @@ import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InOrder;
-import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.dao.DataIntegrityViolationException;
@@ -37,7 +36,9 @@ import static org.mockito.Mockito.*;
 class ClienteServiceTest {
 
     @Mock private ClienteRepository clienteRepository;
-    @InjectMocks private ClienteService clienteService;
+
+    // Removido @InjectMocks
+    private ClienteService clienteService;
 
     private Cliente clienteMock;
     private ClienteRequestDTO requestDTOMock;
@@ -45,6 +46,9 @@ class ClienteServiceTest {
 
     @BeforeEach
     void setUp() {
+        // Instanciação manual do serviço com o mock
+        clienteService = new ClienteService(clienteRepository);
+
         clienteId = UUID.randomUUID();
 
         clienteMock = new Cliente();
@@ -382,6 +386,12 @@ class ClienteServiceTest {
             when(clienteRepository.findByCpf("11122233344"))
                     .thenReturn(Optional.empty()) // Garçom 1 passa
                     .thenReturn(Optional.of(clienteMock)); // Garçom 2 bate na barreira
+            when(clienteRepository.findByEmail(any())).thenReturn(Optional.empty()); // Adicionado mock para findByEmail
+            when(clienteRepository.save(any(Cliente.class))).thenAnswer(invocation -> { // Adicionado mock para save
+                Cliente c = invocation.getArgument(0);
+                c.setId(clienteId);
+                return c;
+            });
 
             clienteService.salvar(requestDTOMock);
 

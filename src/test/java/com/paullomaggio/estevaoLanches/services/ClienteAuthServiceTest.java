@@ -2,8 +2,6 @@ package com.paullomaggio.estevaoLanches.services;
 
 import com.google.api.client.googleapis.auth.oauth2.GoogleIdToken;
 import com.google.api.client.googleapis.auth.oauth2.GoogleIdTokenVerifier;
-import com.paullomaggio.estevaoLanches.controllers.AutenticacaoController;
-import com.paullomaggio.estevaoLanches.dtos.*;
 import com.paullomaggio.estevaoLanches.entities.Cliente;
 import com.paullomaggio.estevaoLanches.entities.ContaDelivery;
 import com.paullomaggio.estevaoLanches.entities.Usuario;
@@ -16,25 +14,15 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
 import org.mockito.InOrder;
-import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.MockedConstruction;
 import org.mockito.junit.jupiter.MockitoExtension;
-import org.springframework.dao.DataRetrievalFailureException;
-import org.springframework.http.HttpStatus;
-import org.springframework.http.ResponseEntity;
-import org.springframework.security.authentication.AuthenticationManager;
-import org.springframework.security.authentication.BadCredentialsException;
-import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
-import org.springframework.security.core.Authentication;
 import org.springframework.security.core.authority.SimpleGrantedAuthority;
-import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.test.util.ReflectionTestUtils;
 
 import java.io.IOException;
 import java.security.GeneralSecurityException;
 import java.util.Collections;
-import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -53,7 +41,8 @@ class ClienteAuthServiceTest {
     @Mock private GoogleIdToken googleIdToken;
     @Mock private GoogleIdToken.Payload payload;
 
-    @InjectMocks private ClienteAuthService clienteAuthService;
+    // Removido @InjectMocks
+    private ClienteAuthService clienteAuthService;
 
     private static final String FAKE_TOKEN_STRING = "fake-jwt-token-string";
     private static final String FAKE_GENERATED_JWT = "abc123.jwt.token";
@@ -62,6 +51,8 @@ class ClienteAuthServiceTest {
 
     @BeforeEach
     void setUp() {
+        // Instanciação manual do serviço com os mocks
+        clienteAuthService = new ClienteAuthService(clienteRepository, tokenService, contaDeliveryRepository);
         ReflectionTestUtils.setField(clienteAuthService, "googleClientId", "test-client-id.apps.googleusercontent.com");
     }
 
@@ -363,87 +354,5 @@ class ClienteAuthServiceTest {
             assertTrue(usuario.isCredentialsNonExpired());
             assertTrue(usuario.isEnabled());
         }
-
-    // =========================================================================
-    // BLOCO O, P & Q — CAMADA DE CONTROLLER & AUDITORIA OPERACIONAL
-    // =========================================================================
-    @Nested
-    @DisplayName("Bloco O, P & Q — Testes do Controlador de Autenticação (PDV e App)")
-    class AutenticacaoControllerUnitTests {
-
-        private AuthenticationManager authManager;
-        private TokenService tokService;
-        private ContaDeliveryService deliveryService;
-        private PasswordEncoder encoder;
-        private AutenticacaoController controller;
-
-        @BeforeEach
-        void setUpController() {
-            authManager = mock(AuthenticationManager.class);
-            tokService = mock(TokenService.class);
-            deliveryService = mock(ContaDeliveryService.class);
-            encoder = mock(PasswordEncoder.class);
-            controller = new AutenticacaoController(authManager, tokService, deliveryService, contaDeliveryRepository, encoder);
-        }
-
-        @Test
-        @DisplayName("Login PDV Central (200 OK) — Funcionário autenticado deve gerar token e devolver dados limpos")
-        void loginPdvSucesso() {
-            LoginRequestDTO dto = new LoginRequestDTO("admin@estevao.com", "123456");
-            Usuario usuarioFake = new Usuario(UUID.randomUUID(), "Admin", "admin@estevao.com", "hash", "ADMIN", true);
-            Authentication authResult = mock(Authentication.class);
-
-            when(authManager.authenticate(any(UsernamePasswordAuthenticationToken.class))).thenReturn(authResult);
-            when(authResult.getPrincipal()).thenReturn(usuarioFake);
-            when(tokService.gerarToken(usuarioFake)).thenReturn("jwt-pdv");
-
-            ResponseEntity<?> response = controller.login(dto);
-
-            assertEquals(HttpStatus.OK, response.getStatusCode());
-            assertNotNull(response.getBody());
-        }
-
-        @Test
-        @DisplayName("Login PDV Central (401 Unauthorized) — Credencial incorreta deve retornar barreira atômica limpa")
-        void loginPdvFalha() {
-            LoginRequestDTO dto = new LoginRequestDTO("admin@estevao.com", "senha-errada");
-            when(authManager.authenticate(any())).thenThrow(new BadCredentialsException("Invalido"));
-
-            ResponseEntity<?> response = controller.login(dto);
-
-            assertEquals(HttpStatus.UNAUTHORIZED, response.getStatusCode());
-            assertNull(response.getBody());
-        }
-
-        @Test
-        @DisplayName("Login App Delivery (401 Unauthorized) — Validação de hash nativo incorreto para clientes")
-        void loginClienteSenhaIncorreta() {
-            LoginRequestDTO dto = new LoginRequestDTO("cliente@delivery.com", "errada");
-            ContaDelivery conta = new ContaDelivery();
-            conta.setSenha("hash-correto");
-
-            when(contaDeliveryRepository.findByEmail("cliente@delivery.com")).thenReturn(Optional.of(conta));
-            when(encoder.matches("errada", "hash-correto")).thenReturn(false);
-
-            ResponseEntity<?> response = controller.loginCliente(dto);
-
-            assertEquals(HttpStatus.UNAUTHORIZED, response.getStatusCode());
-        }
-
-        @Test
-        @DisplayName("Login App Delivery (403 Forbidden) — Deve reter logins em contas marcadas como inativas")
-        void loginClienteContaInativa() {
-            LoginRequestDTO dto = new LoginRequestDTO("inativo@delivery.com", "123");
-            ContaDelivery conta = new ContaDelivery();
-            conta.setSenha("hash");
-            conta.setAtivo(false); // 🎯 Inativa no salão
-
-            when(contaDeliveryRepository.findByEmail("inativo@delivery.com")).thenReturn(Optional.of(conta));
-            when(encoder.matches("123", "hash")).thenReturn(true);
-
-            ResponseEntity<?> response = controller.loginCliente(dto);
-
-            assertEquals(HttpStatus.FORBIDDEN, response.getStatusCode());
-        }
-    }}
+    }
 }

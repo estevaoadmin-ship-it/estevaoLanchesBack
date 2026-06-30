@@ -8,7 +8,6 @@ import com.paullomaggio.estevaoLanches.exceptions.BusinessRuleException;
 import com.paullomaggio.estevaoLanches.exceptions.ResourceNotFoundException;
 import com.paullomaggio.estevaoLanches.repositories.ContaRepository;
 import com.paullomaggio.estevaoLanches.repositories.PagamentoRepository;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -21,8 +20,14 @@ import java.util.stream.Collectors;
 @Service
 public class PagamentoService {
 
-    @Autowired private PagamentoRepository pagamentoRepository;
-    @Autowired private ContaRepository contaRepository;
+    private final PagamentoRepository pagamentoRepository;
+    private final ContaRepository contaRepository;
+
+    // Injeção de dependência via construtor
+    public PagamentoService(PagamentoRepository pagamentoRepository, ContaRepository contaRepository) {
+        this.pagamentoRepository = pagamentoRepository;
+        this.contaRepository = contaRepository;
+    }
 
     /**
      * Registra uma entrada financeira para uma conta específica.

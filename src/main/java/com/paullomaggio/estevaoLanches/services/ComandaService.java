@@ -7,7 +7,6 @@ import com.paullomaggio.estevaoLanches.enums.StatusMesa;
 import com.paullomaggio.estevaoLanches.exceptions.BusinessRuleException;
 import com.paullomaggio.estevaoLanches.exceptions.ResourceNotFoundException;
 import com.paullomaggio.estevaoLanches.repositories.*;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -21,13 +20,20 @@ import java.util.stream.Collectors;
 @Service
 public class ComandaService {
 
-    @Autowired private ComandaRepository comandaRepository;
-    @Autowired private MesaRepository mesaRepository;
-    @Autowired private ClienteRepository clienteRepository;
-    @Autowired private ContaRepository contaRepository;
+    private final ComandaRepository comandaRepository;
+    private final MesaRepository mesaRepository;
+    private final ClienteRepository clienteRepository;
+    private final ContaRepository contaRepository;
 
     private static final UUID EMPRESA_PADRAO = UUID.fromString("11111111-1111-1111-1111-111111111111");
     private static final UUID FILIAL_PADRAO = UUID.fromString("22222222-2222-2222-2222-222222222222");
+
+    public ComandaService(ComandaRepository comandaRepository, MesaRepository mesaRepository, ClienteRepository clienteRepository, ContaRepository contaRepository) {
+        this.comandaRepository = comandaRepository;
+        this.mesaRepository = mesaRepository;
+        this.clienteRepository = clienteRepository;
+        this.contaRepository = contaRepository;
+    }
 
     /**
      * Abre a comanda da mesa. Instancia a comanda mãe e injeta automaticamente

@@ -6,7 +6,6 @@ import com.paullomaggio.estevaoLanches.entities.ContaDelivery;
 import com.paullomaggio.estevaoLanches.exceptions.BusinessRuleException;
 import com.paullomaggio.estevaoLanches.repositories.ClienteRepository;
 import com.paullomaggio.estevaoLanches.repositories.ContaDeliveryRepository;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -16,14 +15,18 @@ import java.util.ArrayList;
 @Service
 public class ContaDeliveryService {
 
-    @Autowired
-    private ContaDeliveryRepository contaDeliveryRepository;
+    private final ContaDeliveryRepository contaDeliveryRepository;
+    private final ClienteRepository clienteRepository;
+    private final PasswordEncoder passwordEncoder;
 
-    @Autowired
-    private ClienteRepository clienteRepository;
-
-    @Autowired
-    private PasswordEncoder passwordEncoder;
+    // Injeção de dependência via construtor
+    public ContaDeliveryService(ContaDeliveryRepository contaDeliveryRepository,
+                                ClienteRepository clienteRepository,
+                                PasswordEncoder passwordEncoder) {
+        this.contaDeliveryRepository = contaDeliveryRepository;
+        this.clienteRepository = clienteRepository;
+        this.passwordEncoder = passwordEncoder;
+    }
 
     @Transactional
     public void registrarNovaConta(RegistroDeliveryRequestDTO dto) {

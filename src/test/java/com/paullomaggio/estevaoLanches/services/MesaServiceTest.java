@@ -13,7 +13,6 @@ import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InOrder;
-import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
@@ -32,7 +31,8 @@ import static org.mockito.Mockito.*;
 class MesaServiceTest {
 
     @Mock private MesaRepository mesaRepository;
-    @InjectMocks private MesaService mesaService;
+    // Removido @InjectMocks
+    private MesaService mesaService;
 
     private UUID mesaId;
     private UUID empresaId;
@@ -41,6 +41,9 @@ class MesaServiceTest {
 
     @BeforeEach
     void setUp() {
+        // Instanciação manual do serviço com o mock
+        mesaService = new MesaService(mesaRepository);
+
         mesaId = UUID.randomUUID();
         empresaId = UUID.randomUUID();
         filialId = UUID.randomUUID();

@@ -13,7 +13,6 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
 import org.mockito.InOrder;
-import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.security.crypto.password.PasswordEncoder;
@@ -34,13 +33,17 @@ class ContaDeliveryServiceTest {
     @Mock private ClienteRepository clienteRepository;
     @Mock private PasswordEncoder passwordEncoder;
 
-    @InjectMocks private ContaDeliveryService contaDeliveryService;
+    // Removido @InjectMocks
+    private ContaDeliveryService contaDeliveryService;
 
     private Cliente clienteExistenteMock;
     private UUID idClienteOriginal;
 
     @BeforeEach
     void setUp() {
+        // Instanciação manual do serviço com os mocks
+        contaDeliveryService = new ContaDeliveryService(contaDeliveryRepository, clienteRepository, passwordEncoder);
+
         idClienteOriginal = UUID.randomUUID();
         clienteExistenteMock = new Cliente();
         clienteExistenteMock.setId(idClienteOriginal);
@@ -66,6 +69,7 @@ class ContaDeliveryServiceTest {
             when(clienteRepository.findByNumero("16999998888")).thenReturn(Optional.empty());
             when(clienteRepository.save(any(Cliente.class))).thenAnswer(i -> i.getArgument(0));
             when(passwordEncoder.encode("senha123")).thenReturn("hash_criptografado");
+            when(contaDeliveryRepository.save(any(ContaDelivery.class))).thenAnswer(i -> i.getArgument(0)); // Adicionado mock para save
 
             ArgumentCaptor<ContaDelivery> contaCaptor = ArgumentCaptor.forClass(ContaDelivery.class);
             assertDoesNotThrow(() -> contaDeliveryService.registrarNovaConta(dto));
@@ -85,6 +89,8 @@ class ContaDeliveryServiceTest {
             when(contaDeliveryRepository.existsByEmail("senha@test.com")).thenReturn(false);
             when(clienteRepository.findByNumero("111")).thenReturn(Optional.empty());
             when(passwordEncoder.encode("senhaPura")).thenReturn("hash_seguro_criptografado");
+            when(clienteRepository.save(any(Cliente.class))).thenAnswer(i -> i.getArgument(0)); // Adicionado mock para save
+            when(contaDeliveryRepository.save(any(ContaDelivery.class))).thenAnswer(i -> i.getArgument(0)); // Adicionado mock para save
 
             contaDeliveryService.registrarNovaConta(dto);
 
@@ -98,6 +104,9 @@ class ContaDeliveryServiceTest {
             RegistroDeliveryRequestDTO dto = new RegistroDeliveryRequestDTO("Estevao", "role@test.com", "222", "123");
             when(contaDeliveryRepository.existsByEmail("role@test.com")).thenReturn(false);
             when(clienteRepository.findByNumero("222")).thenReturn(Optional.empty());
+            when(clienteRepository.save(any(Cliente.class))).thenAnswer(i -> i.getArgument(0)); // Adicionado mock para save
+            when(passwordEncoder.encode(anyString())).thenReturn("hashed_password"); // Mock para passwordEncoder
+            when(contaDeliveryRepository.save(any(ContaDelivery.class))).thenAnswer(i -> i.getArgument(0)); // Adicionado mock para save
 
             contaDeliveryService.registrarNovaConta(dto);
 
@@ -110,6 +119,9 @@ class ContaDeliveryServiceTest {
             RegistroDeliveryRequestDTO dto = new RegistroDeliveryRequestDTO("  maggio lanches  ", "  Contato@ESTEVALANCHES.Com  ", "1699999-1111", "123");
             when(contaDeliveryRepository.existsByEmail("contato@estevalanches.com")).thenReturn(false);
             when(clienteRepository.findByNumero("16999991111")).thenReturn(Optional.empty());
+            when(clienteRepository.save(any(Cliente.class))).thenAnswer(i -> i.getArgument(0)); // Adicionado mock para save
+            when(passwordEncoder.encode(anyString())).thenReturn("hashed_password"); // Mock para passwordEncoder
+            when(contaDeliveryRepository.save(any(ContaDelivery.class))).thenAnswer(i -> i.getArgument(0)); // Adicionado mock para save
 
             contaDeliveryService.registrarNovaConta(dto);
 
@@ -131,6 +143,8 @@ class ContaDeliveryServiceTest {
             RegistroDeliveryRequestDTO dto = new RegistroDeliveryRequestDTO("Paulo App", "paulo@delivery.com", "16993939957", "123");
             when(contaDeliveryRepository.existsByEmail("paulo@delivery.com")).thenReturn(false);
             when(clienteRepository.findByNumero("16993939957")).thenReturn(Optional.of(clienteExistenteMock));
+            when(passwordEncoder.encode(anyString())).thenReturn("hashed_password"); // Mock para passwordEncoder
+            when(contaDeliveryRepository.save(any(ContaDelivery.class))).thenAnswer(i -> i.getArgument(0)); // Adicionado mock para save
 
             contaDeliveryService.registrarNovaConta(dto);
 
@@ -144,6 +158,8 @@ class ContaDeliveryServiceTest {
             RegistroDeliveryRequestDTO dto = new RegistroDeliveryRequestDTO("Paulo", "novo.email@delivery.com", "16993939957", "123");
             when(contaDeliveryRepository.existsByEmail("novo.email@delivery.com")).thenReturn(false);
             when(clienteRepository.findByNumero("16993939957")).thenReturn(Optional.of(clienteExistenteMock));
+            when(passwordEncoder.encode(anyString())).thenReturn("hashed_password"); // Mock para passwordEncoder
+            when(contaDeliveryRepository.save(any(ContaDelivery.class))).thenAnswer(i -> i.getArgument(0)); // Adicionado mock para save
 
             contaDeliveryService.registrarNovaConta(dto);
 
@@ -189,6 +205,9 @@ class ContaDeliveryServiceTest {
             RegistroDeliveryRequestDTO dto = new RegistroDeliveryRequestDTO("Estevao", "tel@test.com", "+55 (16) 99999-2222", "123");
             when(contaDeliveryRepository.existsByEmail("tel@test.com")).thenReturn(false);
             when(clienteRepository.findByNumero("5516999992222")).thenReturn(Optional.empty());
+            when(clienteRepository.save(any(Cliente.class))).thenAnswer(i -> i.getArgument(0)); // Adicionado mock para save
+            when(passwordEncoder.encode(anyString())).thenReturn("hashed_password"); // Mock para passwordEncoder
+            when(contaDeliveryRepository.save(any(ContaDelivery.class))).thenAnswer(i -> i.getArgument(0)); // Adicionado mock para save
 
             contaDeliveryService.registrarNovaConta(dto);
 
@@ -219,6 +238,8 @@ class ContaDeliveryServiceTest {
             when(contaDeliveryRepository.existsByEmail("xss@test.com")).thenReturn(false);
             when(clienteRepository.findByNumero("999")).thenReturn(Optional.empty());
             when(clienteRepository.save(any(Cliente.class))).thenAnswer(i -> i.getArgument(0));
+            when(passwordEncoder.encode(anyString())).thenReturn("hashed_password"); // Mock para passwordEncoder
+            when(contaDeliveryRepository.save(any(ContaDelivery.class))).thenAnswer(i -> i.getArgument(0)); // Adicionado mock para save
 
             assertDoesNotThrow(() -> contaDeliveryService.registrarNovaConta(dto));
             verify(clienteRepository).save(argThat(c -> c.getNome().equals("ADMIN <SCRIPT>ALERT('HACK')</SCRIPT>")));
@@ -240,6 +261,8 @@ class ContaDeliveryServiceTest {
             when(contaDeliveryRepository.existsByEmail("ordem@test.com")).thenReturn(false);
             when(clienteRepository.findByNumero("888")).thenReturn(Optional.empty());
             when(clienteRepository.save(any(Cliente.class))).thenReturn(clienteExistenteMock);
+            when(passwordEncoder.encode(anyString())).thenReturn("hashed_password"); // Mock para passwordEncoder
+            when(contaDeliveryRepository.save(any(ContaDelivery.class))).thenAnswer(i -> i.getArgument(0)); // Adicionado mock para save
 
             contaDeliveryService.registrarNovaConta(dto);
 
@@ -270,6 +293,8 @@ class ContaDeliveryServiceTest {
 
             when(clienteRepository.findByNumero("777")).thenReturn(Optional.empty());
             when(clienteRepository.save(any(Cliente.class))).thenReturn(clienteExistenteMock);
+            when(passwordEncoder.encode(anyString())).thenReturn("hashed_password"); // Mock para passwordEncoder
+            when(contaDeliveryRepository.save(any(ContaDelivery.class))).thenAnswer(i -> i.getArgument(0)); // Adicionado mock para save
 
             // Primeira transação passa limpa
             contaDeliveryService.registrarNovaConta(dto);

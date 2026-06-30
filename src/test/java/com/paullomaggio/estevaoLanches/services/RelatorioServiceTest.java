@@ -6,12 +6,14 @@ import com.paullomaggio.estevaoLanches.dtos.ProdutoRankingDTO;
 import com.paullomaggio.estevaoLanches.entities.Pedido;
 import com.paullomaggio.estevaoLanches.enums.FormaPagamento;
 import com.paullomaggio.estevaoLanches.enums.StatusPedido;
+import com.paullomaggio.estevaoLanches.enums.TipoPedido;
 import com.paullomaggio.estevaoLanches.repositories.PedidoRepository;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.ArgumentCaptor;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
@@ -19,20 +21,17 @@ import org.springframework.data.domain.Pageable;
 
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
-import java.util.Arrays;
-import java.util.Collections;
 import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
-import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.*;
 
 @ExtendWith(MockitoExtension.class)
-@DisplayName("🧪 Suíte Suprema de Engenharia Gerencial — Matriz de Blindagem de Relatórios")
+@DisplayName("RelatorioService - dashboard gerencial e PDF")
 class RelatorioServiceTest {
 
     @Mock private PedidoRepository pedidoRepository;
@@ -40,160 +39,156 @@ class RelatorioServiceTest {
 
     private LocalDateTime inicio;
     private LocalDateTime fim;
-    private List<Pedido> pedidosMock;
-    private List<MeioPagamentoItemDTO> pagamentosMock;
-    private List<ProdutoRankingDTO> topProdutosMock;
+    private List<Pedido> pedidosPeriodo;
+    private List<MeioPagamentoItemDTO> meiosPagamento;
+    private List<ProdutoRankingDTO> topProdutos;
 
     @BeforeEach
     void setUp() {
-        inicio = LocalDateTime.now().minusDays(7);
-        fim = LocalDateTime.now();
+        inicio = LocalDateTime.of(2026, 1, 1, 0, 0);
+        fim = LocalDateTime.of(2026, 1, 31, 23, 59);
 
-        Pedido p1 = new Pedido(); p1.setTotal(new BigDecimal("100.00")); p1.setStatus(StatusPedido.FINALIZADO);
-        Pedido p2 = new Pedido(); p2.setTotal(new BigDecimal("50.00")); p2.setStatus(StatusPedido.FINALIZADO);
-        Pedido p3 = new Pedido(); p3.setTotal(new BigDecimal("30.00")); p3.setStatus(StatusPedido.CANCELADO);
-        pedidosMock = Arrays.asList(p1, p2, p3);
+        pedidosPeriodo = List.of(
+                pedido(new BigDecimal("100.00"), StatusPedido.FINALIZADO, TipoPedido.MESA, FormaPagamento.PIX),
+                pedido(new BigDecimal("50.00"), StatusPedido.FINALIZADO, TipoPedido.DELIVERY, FormaPagamento.DINHEIRO),
+                pedido(new BigDecimal("30.00"), StatusPedido.CANCELADO, TipoPedido.BALCAO, FormaPagamento.CREDITO),
+                pedido(new BigDecimal("40.00"), StatusPedido.RECEBIDO, TipoPedido.MESA, null)
+        );
 
-        pagamentosMock = Arrays.asList(
+        meiosPagamento = List.of(
                 new MeioPagamentoItemDTO(FormaPagamento.PIX, new BigDecimal("100.00")),
                 new MeioPagamentoItemDTO(FormaPagamento.DINHEIRO, new BigDecimal("50.00"))
         );
 
-        topProdutosMock = Arrays.asList(
+        topProdutos = List.of(
                 new ProdutoRankingDTO("X-Bacon", 15L),
                 new ProdutoRankingDTO("Coca-Cola", 10L)
         );
     }
 
-    // =========================================================================
-    // BLOCO 1 & 4 — DASHBOARD E KPIs
-    // =========================================================================
     @Nested
-    @DisplayName("1 & 4. Camada de Blindagem — KPIs e Geração de Dashboard")
+    @DisplayName("1 e 4. Dashboard e KPIs")
     class DashboardEKpisTests {
 
         @Test
-        @DisplayName("CT-REL-001 ao CT-REL-008, CT-REL-022 ao CT-REL-026: [Preservado] Deve gerar dashboard calculando KPIs matemáticos com sucesso")
+        @DisplayName("CT-REL-001 ao CT-REL-008, CT-REL-022 ao CT-REL-026 - Calcula KPIs com pedidos finalizados e cancelados")
         void deveGerarDashboardComMatematicaCorreta() {
-            when(pedidoRepository.buscarPedidosParaRelatorio(eq(inicio), eq(fim))).thenReturn(pedidosMock);
-            when(pedidoRepository.somarFaturamentoPorMeioPagamento(eq(inicio), eq(fim), eq(StatusPedido.FINALIZADO))).thenReturn(pagamentosMock);
-            when(pedidoRepository.buscarTopProdutosJPQL(eq(inicio), eq(fim), eq(StatusPedido.FINALIZADO), any(Pageable.class))).thenReturn(topProdutosMock);
+            mockarDashboardBasico(pedidosPeriodo, meiosPagamento, topProdutos);
 
-            DashboardDataDTO resultado = relatorioService.gerarDashboard(inicio, fim, "TODOS");
+            DashboardDataDTO resultado = relatorioService.gerarDashboard(inicio, fim, "admin-123");
 
-            assertThat(resultado.getKpis().getFaturamentoTotal()).isEqualByComparingTo(new BigDecimal("150.00"));
+            assertThat(resultado.getKpis().getFaturamentoTotal()).isEqualByComparingTo("150.00");
             assertThat(resultado.getKpis().getTotalPedidos()).isEqualTo(2);
-            assertThat(resultado.getTopProdutos().get(0).getNomeProduto()).isEqualTo("X-Bacon");
+            assertThat(resultado.getKpis().getTicketMedio()).isEqualByComparingTo("75.00");
+            assertThat(resultado.getKpis().getTotalCancelamentos()).isEqualTo(1);
+            assertThat(resultado.getKpis().getPerdaCancelamentos()).isEqualByComparingTo("30.00");
         }
 
         @Test
-        @DisplayName("CT-REL-027: Filtro de Pedidos Nulos — Cenário sem vendas no período deve manter KPIs zerados sem quebrar ponteiros")
+        @DisplayName("CT-REL-027 - Periodo sem vendas mantem KPIs zerados")
         void ctRel027_kpisZeradosSemVendas() {
-            when(pedidoRepository.buscarPedidosParaRelatorio(any(), any())).thenReturn(Collections.emptyList());
+            mockarDashboardBasico(List.of(), List.of(), List.of());
+
             DashboardDataDTO resultado = relatorioService.gerarDashboard(inicio, fim, null);
+
             assertThat(resultado.getKpis().getFaturamentoTotal()).isEqualByComparingTo(BigDecimal.ZERO);
+            assertThat(resultado.getKpis().getTotalPedidos()).isZero();
+            assertThat(resultado.getKpis().getTicketMedio()).isEqualByComparingTo(BigDecimal.ZERO);
+            assertThat(resultado.getKpis().getTotalCancelamentos()).isZero();
         }
     }
 
-    // =========================================================================
-    // BLOCO 2 — CONTROLE DE PERÍODOS E JANELAS CRONOLÓGICAS
-    // =========================================================================
     @Nested
-    @DisplayName("2. Camada de Blindagem — Filtros Cronológicos e Períodos")
+    @DisplayName("2. Periodos")
     class PeriodoRelatoriosTests {
 
         @Test
-        @DisplayName("CT-REL-009 ao CT-REL-015: Janelas Temporais — Deve permitir a busca em períodos customizados ou vazios")
+        @DisplayName("CT-REL-009 ao CT-REL-015 - Consulta pedidos exatamente dentro da janela informada")
         void ctRel009_deveProcessarPeriodosValidos() {
-            when(pedidoRepository.buscarPedidosParaRelatorio(any(), any())).thenReturn(pedidosMock);
+            mockarDashboardBasico(pedidosPeriodo, meiosPagamento, topProdutos);
+
             DashboardDataDTO resultado = relatorioService.gerarDashboard(inicio, fim, "TODOS");
+
             assertNotNull(resultado);
+            verify(pedidoRepository).buscarPedidosParaRelatorio(inicio, fim);
+            verify(pedidoRepository).somarFaturamentoPorMeioPagamento(inicio, fim, StatusPedido.FINALIZADO);
         }
     }
-        // =========================================================================
-        // BLOCO 3 — TRIAGEM E HIGIENIZAÇÃO DE STRINGS DO OPERADOR
-        // =========================================================================
-        @Nested
-        @DisplayName("3. Camada de Blindagem — Operadores e Sanitização de Query")
-        class OperadorSanitizacaoTests {
 
-            @Test
-            @DisplayName("CT-REL-017 ao CT-REL-021: [Preservado] Deve higienizar strings vazias ou nulas do ID do operador")
-            void deveSanitizarIdDoOperadorParaQuery() {
-                // Arrange
-                when(pedidoRepository.buscarPedidosParaRelatorio(eq(inicio), eq(fim))).thenReturn(pedidosMock);
-                when(pedidoRepository.somarFaturamentoPorMeioPagamento(any(), any(), any())).thenReturn(pagamentosMock);
-                when(pedidoRepository.buscarTopProdutosJPQL(any(), any(), any(), any())).thenReturn(topProdutosMock);
-
-
-                relatorioService.gerarDashboard(inicio, fim, "");
-            }
-        }
-
-    // =========================================================================
-    // BLOCO 5 — MATEMÁTICA FINANCEIRA E DIVISÃO POR ZERO
-    // =========================================================================
     @Nested
-    @DisplayName("5. Camada de Blindagem — Matemática de Precisão e Divisão por Zero")
+    @DisplayName("3. Compatibilidade do usuarioId")
+    class OperadorSanitizacaoTests {
+
+        @Test
+        @DisplayName("CT-REL-017 ao CT-REL-021 - usuarioId permanece compativel, mas nao altera a query de pedidos")
+        void deveManterUsuarioIdForaDaQueryDaNovaArquitetura() {
+            mockarDashboardBasico(pedidosPeriodo, meiosPagamento, topProdutos);
+
+            relatorioService.gerarDashboard(inicio, fim, "operador-que-nao-existe-na-tabela-pedido");
+
+            verify(pedidoRepository).buscarPedidosParaRelatorio(inicio, fim);
+            verifyNoMoreInteractionsAposAgregacoes();
+        }
+    }
+
+    @Nested
+    @DisplayName("5. Matematica financeira")
     class MatematicaFinanceiraTests {
 
         @Test
-        @DisplayName("CT-REL-030 e CT-REL-088: [Preservado] Prevenção Civil — Divisão por zero em períodos sem vendas deve retornar ticket médio igual a zero")
+        @DisplayName("CT-REL-030 e CT-REL-088 - Sem pedidos finalizados, ticket medio fica zero")
         void deveLidarComPeriodoSemVendas() {
-            when(pedidoRepository.buscarPedidosParaRelatorio(any(), any())).thenReturn(Collections.emptyList());
-            when(pedidoRepository.somarFaturamentoPorMeioPagamento(any(), any(), any())).thenReturn(Collections.emptyList());
-            when(pedidoRepository.buscarTopProdutosJPQL(any(), any(), any(), any())).thenReturn(Collections.emptyList());
+            List<Pedido> apenasNaoFinalizados = List.of(
+                    pedido(new BigDecimal("30.00"), StatusPedido.CANCELADO, TipoPedido.DELIVERY, FormaPagamento.PIX),
+                    pedido(new BigDecimal("20.00"), StatusPedido.RECEBIDO, TipoPedido.MESA, null)
+            );
+            mockarDashboardBasico(apenasNaoFinalizados, List.of(), List.of());
 
             DashboardDataDTO resultado = relatorioService.gerarDashboard(inicio, fim, null);
 
+            assertThat(resultado.getKpis().getFaturamentoTotal()).isEqualByComparingTo(BigDecimal.ZERO);
             assertThat(resultado.getKpis().getTicketMedio()).isEqualByComparingTo(BigDecimal.ZERO);
+            assertThat(resultado.getKpis().getPerdaCancelamentos()).isEqualByComparingTo("30.00");
         }
     }
 
-    // =========================================================================
-    // BLOCO 6 & 7 — MEIOS DE PAGAMENTO E RANKING DO APP
-    // =========================================================================
     @Nested
-    @DisplayName("6 & 7. Camada de Blindagem — Amortizações e Top Insumos")
+    @DisplayName("6 e 7. Meios de pagamento e ranking")
     class MeiosPagamentoERankingTests {
 
         @Test
-        @DisplayName("CT-REL-034 ao CT-REL-046: Malhas de Distribuição — Garante ordenação e soma contábil correta das bandeiras")
+        @DisplayName("CT-REL-034 ao CT-REL-046 - Usa agregacoes de finalizados e limita top produtos em 5")
         void ctRel034_deveValidarEstruturasDeMapeamento() {
-            when(pedidoRepository.buscarPedidosParaRelatorio(eq(inicio), eq(fim))).thenReturn(pedidosMock);
-            when(pedidoRepository.somarFaturamentoPorMeioPagamento(eq(inicio), eq(fim), eq(StatusPedido.FINALIZADO))).thenReturn(pagamentosMock);
-            when(pedidoRepository.buscarTopProdutosJPQL(eq(inicio), eq(fim), eq(StatusPedido.FINALIZADO), any(Pageable.class))).thenReturn(topProdutosMock);
+            mockarDashboardBasico(pedidosPeriodo, meiosPagamento, topProdutos);
 
             DashboardDataDTO resultado = relatorioService.gerarDashboard(inicio, fim, "TODOS");
 
-            assertThat(resultado.getTopProdutos()).isNotEmpty();
-            assertThat(resultado.getTopProdutos().get(0).getQuantidadeVendida()).isEqualTo(15L);
+            assertThat(resultado.getMeiosPagamento()).containsExactlyElementsOf(meiosPagamento);
+            assertThat(resultado.getTopProdutos().get(0).getNomeProduto()).isEqualTo("X-Bacon");
+
+            ArgumentCaptor<Pageable> pageableCaptor = ArgumentCaptor.forClass(Pageable.class);
+            verify(pedidoRepository).buscarTopProdutosJPQL(eq(inicio), eq(fim), eq(StatusPedido.FINALIZADO), pageableCaptor.capture());
+            assertThat(pageableCaptor.getValue().getPageSize()).isEqualTo(5);
         }
     }
 
-    // =========================================================================
-    // BLOCO 8 — DOCUMENTOS EXPORTÁVEIS (PDF CONCILIADO)
-    // =========================================================================
     @Nested
-    @DisplayName("8. Camada de Blindagem — Exportação de Relatórios Fiscais PDF")
+    @DisplayName("8. Exportacao PDF")
     class ExportacaoPdfTests {
 
         @Test
-        @DisplayName("CT-REL-047 ao CT-REL-052, CT-REL-083: [Preservado] Validação de Assinatura — Geração de PDF deve conter a tag mágica obrigatória %PDF")
+        @DisplayName("CT-REL-047 ao CT-REL-052, CT-REL-083 - Exporta PDF com assinatura valida")
         void deveExportarRelatorioPdfComAssinaturaValida() {
-            when(pedidoRepository.buscarPedidosParaRelatorio(any(), any())).thenReturn(pedidosMock);
-            when(pedidoRepository.somarFaturamentoPorMeioPagamento(any(), any(), any())).thenReturn(pagamentosMock);
-            when(pedidoRepository.buscarTopProdutosJPQL(any(), any(), any(), any())).thenReturn(topProdutosMock);
+            mockarDashboardBasico(pedidosPeriodo, meiosPagamento, topProdutos);
 
             byte[] pdfBytes = relatorioService.exportarRelatorioPdf(inicio, fim, null);
 
             assertThat(pdfBytes).isNotEmpty();
-            String cabecalhoPdf = new String(pdfBytes, 0, 4);
-            assertThat(cabecalhoPdf).isEqualTo("%PDF");
+            assertThat(new String(pdfBytes, 0, 4)).isEqualTo("%PDF");
         }
 
         @Test
-        @DisplayName("CT-REL-053 e CT-REL-054: [Preservado] Propagação Catastrófica — Erros no banco durante a exportação devem ser encapsulados em RuntimeException")
+        @DisplayName("CT-REL-053 e CT-REL-054 - Falha do banco na exportacao vira RuntimeException")
         void deveLancarExcecaoAoFalharGeracaoPdf() {
             when(pedidoRepository.buscarPedidosParaRelatorio(any(), any())).thenThrow(new RuntimeException("Banco falhou"));
 
@@ -201,41 +196,62 @@ class RelatorioServiceTest {
         }
     }
 
-    // =========================================================================
-    // BLOCO 9 & 10 — COMPORTAMENTO OPERACIONAL DO REPOSITÓRIO
-    // =========================================================================
     @Nested
-    @DisplayName("9 & 10. Camada de Blindagem — Idempotência e Restrição de Status")
+    @DisplayName("9 e 10. Status operacionais")
     class RepositorioEStatusTests {
 
         @Test
-        @DisplayName("CT-REL-055 ao CT-REL-064: Filtros de Receita — Garante que somente pedidos com status FINALIZADO computam na receita")
+        @DisplayName("CT-REL-055 ao CT-REL-064 - Apenas FINALIZADO entra no faturamento")
         void ctRel060_somenteFinalizadosEntramNoFaturamento() {
-            when(pedidoRepository.buscarPedidosParaRelatorio(eq(inicio), eq(fim))).thenReturn(pedidosMock);
+            mockarDashboardBasico(pedidosPeriodo, meiosPagamento, topProdutos);
+
             DashboardDataDTO resultado = relatorioService.gerarDashboard(inicio, fim, "TODOS");
 
-            // p1(100) + p2(50) = 150. p3(30, CANCELADO) deve ser completamente expurgado
-            assertThat(resultado.getKpis().getFaturamentoTotal()).isEqualByComparingTo(new BigDecimal("150.00"));
+            assertThat(resultado.getKpis().getFaturamentoTotal()).isEqualByComparingTo("150.00");
+            assertThat(resultado.getKpis().getPerdaCancelamentos()).isEqualByComparingTo("30.00");
         }
     }
 
-    // =========================================================================
-    // BLOCO 11 ao 15 — AUDITORIA ESTÊVÃO LANCHES & CONCORRÊNCIA SIMULADA
-    // =========================================================================
     @Nested
-    @DisplayName("11 a 15. Camada de Blindagem — Regressão Multicanal e Auditoria")
+    @DisplayName("11 a 15. Multicanal")
     class AuditoriaEstevaoLanchesTests {
 
         @Test
-        @DisplayName("CT-REL-078, CT-REL-091 ao CT-REL-094: Validação de Canais — Processamento limpo em lotes de vendas de Mesa, Delivery e Retirada simultâneos")
+        @DisplayName("CT-REL-078, CT-REL-091 ao CT-REL-094 - Consolida mesa, delivery e balcao no mesmo dashboard")
         void ctRel094_fluxoMistoCanaisVenda() {
-            when(pedidoRepository.buscarPedidosParaRelatorio(eq(inicio), eq(fim))).thenReturn(pedidosMock);
-            when(pedidoRepository.somarFaturamentoPorMeioPagamento(any(), any(), any())).thenReturn(pagamentosMock);
-            when(pedidoRepository.buscarTopProdutosJPQL(any(), any(), any(), any())).thenReturn(topProdutosMock);
+            mockarDashboardBasico(pedidosPeriodo, meiosPagamento, topProdutos);
 
             DashboardDataDTO resultado = relatorioService.gerarDashboard(inicio, fim, "TODOS");
-            assertNotNull(resultado);
-            verify(pedidoRepository, times(1)).buscarPedidosParaRelatorio(inicio, fim);
+
+            assertThat(resultado.getKpis().getTotalPedidos()).isEqualTo(2);
+            assertThat(resultado.getTopProdutos()).hasSize(2);
+            verify(pedidoRepository).buscarPedidosParaRelatorio(inicio, fim);
         }
+    }
+
+    private Pedido pedido(BigDecimal total, StatusPedido status, TipoPedido tipo, FormaPagamento formaPagamento) {
+        Pedido pedido = new Pedido();
+        pedido.setTotal(total);
+        pedido.setStatus(status);
+        pedido.setTipo(tipo);
+        pedido.setFormaPagamento(formaPagamento);
+        pedido.setDataHora(inicio.plusHours(1));
+        return pedido;
+    }
+
+    private void mockarDashboardBasico(
+            List<Pedido> pedidos,
+            List<MeioPagamentoItemDTO> pagamentos,
+            List<ProdutoRankingDTO> produtos
+    ) {
+        when(pedidoRepository.buscarPedidosParaRelatorio(inicio, fim)).thenReturn(pedidos);
+        when(pedidoRepository.somarFaturamentoPorMeioPagamento(inicio, fim, StatusPedido.FINALIZADO)).thenReturn(pagamentos);
+        when(pedidoRepository.buscarTopProdutosJPQL(eq(inicio), eq(fim), eq(StatusPedido.FINALIZADO), any(Pageable.class))).thenReturn(produtos);
+    }
+
+    private void verifyNoMoreInteractionsAposAgregacoes() {
+        verify(pedidoRepository).somarFaturamentoPorMeioPagamento(inicio, fim, StatusPedido.FINALIZADO);
+        verify(pedidoRepository).buscarTopProdutosJPQL(eq(inicio), eq(fim), eq(StatusPedido.FINALIZADO), any(Pageable.class));
+        verifyNoMoreInteractions(pedidoRepository);
     }
 }

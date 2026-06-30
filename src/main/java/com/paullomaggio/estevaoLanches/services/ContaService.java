@@ -6,7 +6,6 @@ import com.paullomaggio.estevaoLanches.entities.*;
 import com.paullomaggio.estevaoLanches.exceptions.BusinessRuleException;
 import com.paullomaggio.estevaoLanches.exceptions.ResourceNotFoundException;
 import com.paullomaggio.estevaoLanches.repositories.*;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -18,9 +17,16 @@ import java.util.stream.Collectors;
 @Service
 public class ContaService {
 
-    @Autowired private ContaRepository contaRepository;
-    @Autowired private ComandaRepository comandaRepository;
-    @Autowired private ClienteRepository clienteRepository;
+    private final ContaRepository contaRepository;
+    private final ComandaRepository comandaRepository;
+    private final ClienteRepository clienteRepository;
+
+    // Injeção de dependência via construtor
+    public ContaService(ContaRepository contaRepository, ComandaRepository comandaRepository, ClienteRepository clienteRepository) {
+        this.contaRepository = contaRepository;
+        this.comandaRepository = comandaRepository;
+        this.clienteRepository = clienteRepository;
+    }
 
     /**
      * 🎯 REAJUSTADO: Cria uma subconta atrelada à Comanda Mestre e inicializa seu respectivo Cliente 1:1.

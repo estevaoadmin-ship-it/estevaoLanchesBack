@@ -126,7 +126,7 @@ class MesaE2ETest {
     class Bloco3Mesa {
 
         @Test
-        @DisplayName("MESA-E2E-006 ao MESA-E2E-010: Abrir Mesa 10 mutando estado para OCUPADA, gerando Comanda, Conta 1 e Cliente MARIA")
+        @DisplayName("MESA-E2E-006 ao MESA-E2E-010: Abrir Mesa 10 mutando estado para OCUPADA, gerando Comanda, Conta 1 e Cliente Padrão")
         void mesaE2E006To010() throws Exception {
             MvcResult result = mockMvc.perform(post("/api/comandas/abrir/10")
                             .contentType(MediaType.APPLICATION_JSON))
@@ -141,18 +141,12 @@ class MesaE2ETest {
             String responseBody = result.getResponse().getContentAsString();
             String idComanda = JsonPath.read(responseBody, "$.id");
 
-            // Simula a injeção do cliente mestre da mesa via divisão
-            Cliente maria = new Cliente();
-            maria.setNome("MARIA");
-            maria.setNumero("16999991111");
-            maria = clienteRepository.saveAndFlush(maria);
-
-            Conta conta1 = new Conta(null, 1, false, BigDecimal.ZERO, comandaRepository.findById(UUID.fromString(idComanda)).get(), maria, new ArrayList<>(), new ArrayList<>());
-            contaRepository.saveAndFlush(conta1);
-
-            List<Conta> subcontas = contaRepository.findByComandaId(UUID.fromString(idComanda));
+            // O sistema já cria a Conta 1 com um cliente padrão ("MESA 10 - CONTA 1")
+            // O teste deve validar essa criação automática, não tentar injetar outra conta
+            List<Conta> subcontas = contaRepository.findByComandaIdOrderByNumeroContaAsc(UUID.fromString(idComanda));
             assertThat(subcontas).isNotEmpty();
-            assertThat(subcontas.get(0).getCliente().getNome()).isEqualTo("MARIA");
+            assertThat(subcontas.get(0).getNumeroConta()).isEqualTo(1);
+            assertThat(subcontas.get(0).getCliente().getNome()).isEqualTo("MESA 10 - CONTA 1");
         }
     }
 

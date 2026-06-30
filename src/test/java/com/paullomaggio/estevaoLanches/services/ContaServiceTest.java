@@ -14,7 +14,6 @@ import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InOrder;
-import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
@@ -37,7 +36,8 @@ class ContaServiceTest {
     @Mock private ComandaRepository comandaRepository;
     @Mock private ClienteRepository clienteRepository;
 
-    @InjectMocks private ContaService contaService;
+    // Removido @InjectMocks
+    private ContaService contaService;
 
     private UUID comandaId;
     private UUID contaId;
@@ -48,6 +48,9 @@ class ContaServiceTest {
 
     @BeforeEach
     void setUp() {
+        // Instanciação manual do serviço com os mocks
+        contaService = new ContaService(contaRepository, comandaRepository, clienteRepository);
+
         comandaId = UUID.randomUUID();
         contaId = UUID.randomUUID();
 

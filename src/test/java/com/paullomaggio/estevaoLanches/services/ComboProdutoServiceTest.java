@@ -14,7 +14,6 @@ import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InOrder;
-import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
@@ -35,7 +34,8 @@ class ComboProdutoServiceTest {
     @Mock private ComboProdutoRepository comboProdutoRepository;
     @Mock private ProdutoRepository produtoRepository;
 
-    @InjectMocks private ComboProdutoService comboProdutoService;
+    // Removido @InjectMocks
+    private ComboProdutoService comboProdutoService;
 
     private UUID idComboPai;
     private UUID idProdutoFilho;
@@ -46,6 +46,9 @@ class ComboProdutoServiceTest {
 
     @BeforeEach
     void setUp() {
+        // Instanciação manual do serviço com os mocks
+        comboProdutoService = new ComboProdutoService(comboProdutoRepository, produtoRepository);
+
         idComboPai = UUID.randomUUID();
         idProdutoFilho = UUID.randomUUID();
         idVinculo = UUID.randomUUID();

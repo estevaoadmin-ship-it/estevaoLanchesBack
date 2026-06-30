@@ -11,7 +11,6 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
-import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.messaging.simp.SimpMessagingTemplate;
@@ -42,7 +41,8 @@ public class PedidoIntegridadeComercialTest {
     @Mock private ClienteRepository clienteRepository;
     @Mock private SimpMessagingTemplate messagingTemplate;
 
-    @InjectMocks private PedidoService pedidoService;
+    // Removido @InjectMocks
+    private PedidoService pedidoService;
 
     private UUID prodIdLanche;
     private UUID comandaId;
@@ -53,6 +53,13 @@ public class PedidoIntegridadeComercialTest {
 
     @BeforeEach
     void setUp() {
+        // Instanciação manual do serviço com os mocks
+        pedidoService = new PedidoService(
+                pedidoRepository, carrinhoRepository, caixaRepository,
+                produtoRepository, adicionalRepository, filaImpressaoRepository,
+                comandaRepository, contaRepository, messagingTemplate
+        );
+
         prodIdLanche = UUID.randomUUID();
         comandaId = UUID.randomUUID();
         contaId = UUID.randomUUID();
