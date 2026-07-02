@@ -44,7 +44,7 @@ public class SecurityConfig {
                 .cors(cors -> cors.configurationSource(corsConfigurationSource()))
                 .csrf(csrf -> csrf.disable())
                 .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
-                // ✅ Resolve CT-INT-019: Retorna 401 Unauthorized para acessos sem token
+                // Retorna 401 Unauthorized para acessos sem token ou com token inválido
                 .exceptionHandling(exceptions -> exceptions
                         .authenticationEntryPoint((request, response, authException) -> {
                             response.sendError(HttpServletResponse.SC_UNAUTHORIZED, "Não autorizado");
@@ -61,39 +61,38 @@ public class SecurityConfig {
                         // PORTAS PÚBLICAS: Swagger
                         .requestMatchers(SWAGGER_WHITELIST).permitAll()
 
-                        // PORTAS PÚBLICAS: Hubs da Ponte Física de Impressão Térmica
+                        // PORTAS PÚBLICAS: Hubs de Impressão e WebSockets
                         .requestMatchers("/api/fila-impressao/**").permitAll()
                         .requestMatchers("/api/pedidos/fila-impressao/**").permitAll()
-
-                        // Rota do WebSocket liberada
                         .requestMatchers("/ws-tevao/**").permitAll()
 
-                        // === NOVO: APP DE DELIVERY ===
-                        // Restringe as rotas do aplicativo aos clientes autenticados (e admins)
+                        // === NOVO DOMÍNIO CONTROLLER V2.0: SESSÃO DA MESA MOBILE ===
+                        .requestMatchers("/api/v1/garcom/**").hasAnyAuthority("ROLE_GARCOM", "ROLE_ADMIN")
+
+                        // APP DE DELIVERY
                         .requestMatchers("/api/delivery/pedidos/**").hasAnyAuthority("ROLE_CLIENTE", "ROLE_ADMIN")
 
-                        // PAPEL MISTO (ADMIN ou GARÇOM): Operação em Tempo Real do Salão
-                        .requestMatchers("/api/comandas/**").hasAnyRole("ADMIN", "GARCOM")
-                        .requestMatchers(HttpMethod.GET, "/api/caixas/status").hasAnyRole("ADMIN", "GARCOM")
-                        .requestMatchers(HttpMethod.GET, "/api/caixas/resumo").hasAnyRole("ADMIN", "GARCOM")
-                        .requestMatchers("/api/pedidos/balcao/checkout").hasAnyRole("ADMIN", "GARCOM") // Rota ajustada
-                        .requestMatchers("/api/clientes/**").hasAnyRole("ADMIN", "GARCOM")
-                        .requestMatchers("/api/contas/**").hasAnyRole("ADMIN", "GARCOM") // ✅ Adicionado proteção para /api/contas
+                        // COMPATIBILIDADE OPERACIONAL DO SALÃO (RETIRE GRADUALMENTE APÓS FASE 4)
+                        .requestMatchers("/api/comandas/**").hasAnyAuthority("ROLE_GARCOM", "ROLE_ADMIN")
+                        .requestMatchers(HttpMethod.GET, "/api/caixas/status").hasAnyAuthority("ROLE_GARCOM", "ROLE_ADMIN")
+                        .requestMatchers(HttpMethod.GET, "/api/caixas/resumo").hasAnyAuthority("ROLE_GARCOM", "ROLE_ADMIN")
+                        .requestMatchers("/api/pedidos/balcao/checkout").hasAnyAuthority("ROLE_GARCOM", "ROLE_ADMIN")
+                        .requestMatchers("/api/clientes/**").hasAnyAuthority("ROLE_GARCOM", "ROLE_ADMIN")
+                        .requestMatchers("/api/contas/**").hasAnyAuthority("ROLE_GARCOM", "ROLE_ADMIN")
 
-                        // PAPEL OPERACIONAL DA ESTEIRA: Produção de Cozinha e Expedição
-                        .requestMatchers("/api/pedidos/**").hasAnyRole("ADMIN", "GARCOM", "COZINHA")
+                        // ESTEIRA DE PRODUÇÃO COZINHA
+                        .requestMatchers("/api/pedidos/**").hasAnyAuthority("ROLE_COZINHA", "ROLE_GARCOM", "ROLE_ADMIN")
 
-                        // PAPEL EXCLUSIVO DO GERENTE (ADMIN)
-                        .requestMatchers("/api/caixas/**").hasRole("ADMIN")
-                        .requestMatchers("/api/relatorios/**").hasRole("ADMIN")
-                        // Regras de autorização para /api/produtos
-                        .requestMatchers(HttpMethod.GET, "/api/produtos/**").hasAnyRole("ADMIN", "GARCOM", "CLIENTE")
-                        .requestMatchers(HttpMethod.POST, "/api/produtos/**").hasRole("ADMIN")
-                        .requestMatchers(HttpMethod.PUT, "/api/produtos/**").hasRole("ADMIN")
-                        .requestMatchers(HttpMethod.DELETE, "/api/produtos/**").hasRole("ADMIN")
-                        .requestMatchers("/api/usuarios/**").hasRole("ADMIN")
-                        .requestMatchers("/api/pagamentos/**").hasRole("ADMIN") // ✅ Adicionado proteção para /api/pagamentos
-                        .requestMatchers("/api/carrinhos/**").hasAnyRole("CLIENTE", "ADMIN") // ✅ Adicionado proteção para /api/carrinhos
+                        // ACESSO ADMINISTRATIVO GERENCIAL
+                        .requestMatchers("/api/caixas/**").hasAuthority("ROLE_ADMIN")
+                        .requestMatchers("/api/relatorios/**").hasAuthority("ROLE_ADMIN")
+                        .requestMatchers(HttpMethod.GET, "/api/produtos/**").hasAnyAuthority("ROLE_ADMIN", "ROLE_GARCOM", "ROLE_CLIENTE")
+                        .requestMatchers(HttpMethod.POST, "/api/produtos/**").hasAuthority("ROLE_ADMIN")
+                        .requestMatchers(HttpMethod.PUT, "/api/produtos/**").hasAuthority("ROLE_ADMIN")
+                        .requestMatchers(HttpMethod.DELETE, "/api/produtos/**").hasAuthority("ROLE_ADMIN")
+                        .requestMatchers("/api/usuarios/**").hasAuthority("ROLE_ADMIN")
+                        .requestMatchers("/api/pagamentos/**").hasAuthority("ROLE_ADMIN")
+                        .requestMatchers("/api/carrinhos/**").hasAnyAuthority("ROLE_CLIENTE", "ROLE_ADMIN")
 
                         .anyRequest().authenticated()
                 )
@@ -104,7 +103,6 @@ public class SecurityConfig {
     @Bean
     public CorsConfigurationSource corsConfigurationSource() {
         CorsConfiguration configuration = new CorsConfiguration();
-
         configuration.setAllowedOriginPatterns(List.of("*"));
         configuration.setAllowedMethods(List.of("GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"));
         configuration.setAllowedHeaders(List.of("*"));
