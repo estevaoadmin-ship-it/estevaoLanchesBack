@@ -241,8 +241,9 @@ class ContaServiceTest {
         @Test
         @DisplayName("CT-060 ao CT-068, CT-082: Isolamento Financeiro — Multi-contas na mesma mesa devem operar de forma independente: pagar a Conta 1 não quita a Conta 2")
         void deveGarantirIsolamentoEntreSubcontasDaMesa() {
-            Conta conta1 = new Conta(UUID.randomUUID(), 1, false, BigDecimal.ZERO, comandaMock, new Cliente(), new ArrayList<>(), new ArrayList<>());
-            Conta conta2 = new Conta(UUID.randomUUID(), 2, false, BigDecimal.ZERO, comandaMock, new Cliente(), new ArrayList<>(), new ArrayList<>());
+            // 🎯 FIX: Construtor da Conta atualizado com os novos campos nomeResponsavel e telefoneResponsavel
+            Conta conta1 = new Conta(UUID.randomUUID(), 1, false, BigDecimal.ZERO, null, null, comandaMock, new Cliente(), new ArrayList<>(), new ArrayList<>());
+            Conta conta2 = new Conta(UUID.randomUUID(), 2, false, BigDecimal.ZERO, null, null, comandaMock, new Cliente(), new ArrayList<>(), new ArrayList<>());
 
             when(contaRepository.findById(conta1.getId())).thenReturn(Optional.of(conta1));
             when(contaRepository.save(any(Conta.class))).thenAnswer(i -> i.getArgument(0));

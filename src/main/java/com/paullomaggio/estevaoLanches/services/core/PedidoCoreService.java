@@ -1,19 +1,19 @@
 package com.paullomaggio.estevaoLanches.services.core;
 
 import com.paullomaggio.estevaoLanches.dtos.*;
-import com.paullomaggio.estevaoLanches.entities.ContaDelivery; // Import adicionado
+import com.paullomaggio.estevaoLanches.entities.ContaDelivery;
 import com.paullomaggio.estevaoLanches.entities.Pedido;
 import com.paullomaggio.estevaoLanches.enums.StatusPedido;
 import com.paullomaggio.estevaoLanches.enums.TipoPedido;
 import com.paullomaggio.estevaoLanches.exceptions.ResourceNotFoundException;
-import com.paullomaggio.estevaoLanches.repositories.ContaDeliveryRepository; // Import adicionado
+import com.paullomaggio.estevaoLanches.repositories.ContaDeliveryRepository;
 import com.paullomaggio.estevaoLanches.repositories.PedidoRepository;
 import com.paullomaggio.estevaoLanches.services.PedidoService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.security.access.AccessDeniedException;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.context.SecurityContextHolder;
-import org.springframework.security.core.userdetails.UserDetails; // Import adicionado
+import org.springframework.security.core.userdetails.UserDetails;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -26,12 +26,11 @@ public class PedidoCoreService {
 
     private final PedidoRepository pedidoRepository;
     private final PedidoService pedidoService;
-    private final ContaDeliveryRepository contaDeliveryRepository; // Já injetado
+    private final ContaDeliveryRepository contaDeliveryRepository;
 
     @Transactional(readOnly = true)
     public List<PedidoResponseDTO> listarHistoricoDeliveryDoClienteAutenticado() {
         UUID clienteId = getAuthenticatedClientId();
-
         return pedidoRepository.findByClienteIdAndTipo(clienteId, TipoPedido.DELIVERY)
                 .stream()
                 .map(PedidoResponseDTO::new)
@@ -41,21 +40,18 @@ public class PedidoCoreService {
     @Transactional(readOnly = true)
     public PedidoResponseDTO buscarPedidoDeliveryDoClienteAutenticado(UUID pedidoId) {
         UUID clienteId = getAuthenticatedClientId();
-
         Pedido pedido = pedidoRepository.findById(pedidoId)
                 .orElseThrow(() -> new ResourceNotFoundException("Pedido não encontrado."));
 
         if (!pedido.getCliente().getId().equals(clienteId)) {
             throw new AccessDeniedException("Acesso negado: Este pedido não pertence ao cliente autenticado.");
         }
-
         return new PedidoResponseDTO(pedido);
     }
 
     @Transactional
     public PedidoResponseDTO cancelarPedidoDeliveryDoClienteAutenticado(UUID pedidoId) {
         UUID clienteId = getAuthenticatedClientId();
-
         Pedido pedido = pedidoRepository.findById(pedidoId)
                 .orElseThrow(() -> new ResourceNotFoundException("Pedido não encontrado."));
 
@@ -67,8 +63,6 @@ public class PedidoCoreService {
         return new PedidoResponseDTO(pedidoRepository.save(pedido));
     }
 
-    // Métodos delegados para PedidoService (mantidos como estão)
-
     @Transactional
     public PedidoResponseDTO processarPedidoMobile(PedidoMobileRequestDTO dto) {
         return pedidoService.processarPedidoMobile(dto);
@@ -77,11 +71,6 @@ public class PedidoCoreService {
     @Transactional
     public PedidoResponseDTO receberPagamento(UUID id, PagamentoRequestDTO dto) {
         return pedidoService.receberPagamento(id, dto);
-    }
-
-    @Transactional
-    public PedidoResponseDTO finalizarPedido(CheckoutRequestDTO dto) {
-        return pedidoService.finalizarPedido(dto);
     }
 
     @Transactional
@@ -147,15 +136,13 @@ public class PedidoCoreService {
         } else if (principal instanceof UserDetails userDetails) {
             String username = userDetails.getUsername();
             try {
-                // Tenta interpretar o username como um UUID (útil se @WithMockUser(username = "uuid-string"))
                 return UUID.fromString(username);
             } catch (IllegalArgumentException e) {
-                // Se não for um UUID, assume que é um email e busca a ContaDelivery
                 ContaDelivery contaDelivery = contaDeliveryRepository.findByEmail(username)
                         .orElseThrow(() -> new ResourceNotFoundException("Conta de delivery não encontrada para o usuário autenticado: " + username));
                 return contaDelivery.getCliente().getId();
             }
-        } else if (principal instanceof String email) { // Adicionado para cobrir o caso de principal ser apenas String (email)
+        } else if (principal instanceof String email) {
             ContaDelivery contaDelivery = contaDeliveryRepository.findByEmail(email)
                     .orElseThrow(() -> new ResourceNotFoundException("Conta de delivery não encontrada para o email: " + email));
             return contaDelivery.getCliente().getId();

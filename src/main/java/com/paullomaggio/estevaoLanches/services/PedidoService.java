@@ -8,13 +8,11 @@ import com.paullomaggio.estevaoLanches.exceptions.ResourceNotFoundException;
 import com.paullomaggio.estevaoLanches.repositories.*;
 import lombok.RequiredArgsConstructor;
 import org.springframework.messaging.simp.SimpMessagingTemplate;
-import org.springframework.security.access.AccessDeniedException; // Importar AccessDeniedException
-import org.springframework.security.core.Authentication; // Importar Authentication
-import org.springframework.security.core.context.SecurityContextHolder; // Importar SecurityContextHolder
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
+import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Random;
@@ -43,8 +41,6 @@ public class PedidoService {
             throw new BusinessRuleException("Operação negada: O turno do caixa está fechado.");
         }
 
-        // 🎯 FIX 404 & 409 CONTA FILHA: Se a subconta (Ex: Conta 2) não existir, ela é instanciada herdando
-        // obrigatoriamente o mesmo Cliente relacional da Conta Mãe (Conta 1) daquela mesa.
         Conta conta = contaRepository.findByComandaIdAndNumeroConta(dto.comandaId(), dto.numeroConta())
                 .orElseGet(() -> {
                     Comanda comandaMestre = comandaRepository.findById(dto.comandaId())
@@ -55,10 +51,6 @@ public class PedidoService {
                     novaConta.setNumeroConta(dto.numeroConta());
                     novaConta.setValorTotal(BigDecimal.ZERO);
                     novaConta.setPago(false);
-
-                    // Envelopamento Automático: Herda o cliente da partição principal (Conta 1)
-                    contaRepository.findByComandaIdAndNumeroConta(dto.comandaId(), 1)
-                            .ifPresent(contaMae -> novaConta.setCliente(contaMae.getCliente()));
 
                     return contaRepository.save(novaConta);
                 });
@@ -74,11 +66,6 @@ public class PedidoService {
         pedido.setNumeroMesa(dto.numeroMesa());
         pedido.setTotal(BigDecimal.ZERO);
         pedido.setItens(new ArrayList<>());
-
-        // 🎯 FIX CRÍTICO 409: Satisfeita a restrição de integridade relacional 'cliente_id' NOT NULL da tabela Pedido
-        if (conta.getCliente() != null) {
-            pedido.setCliente(conta.getCliente());
-        }
 
         if (dto.cliente() != null && dto.cliente().nome() != null) {
             pedido.setNomeClienteBalcao(dto.cliente().nome().toUpperCase().trim());
@@ -99,7 +86,6 @@ public class PedidoService {
                     .reduce(BigDecimal.ZERO, BigDecimal::add);
 
             BigDecimal precoFinalItemUnitario = produto.getPreco().add(precoAdicionais);
-            // Adicionada validação para preço final do item (Correção RB019)
             if (precoFinalItemUnitario.compareTo(BigDecimal.ZERO) <= 0) {
                 throw new BusinessRuleException("Preço final do item não pode ser zero ou negativo.");
             }
@@ -166,29 +152,185 @@ public class PedidoService {
         }
     }
 
+    // ==========================================
+    // 🛠️ FLUXOS DE ATENDIMENTO E CHECKOUTS
+    // ==========================================
+
+    /**
+     * 🛵 FLUXO DELIVERY
+     */
     @Transactional
-    public PedidoResponseDTO finalizarPedido(CheckoutRequestDTO dto) {
-        if (!caixaRepository.existsByStatus(StatusCaixa.ABERTO)) {
-            throw new BusinessRuleException("Operação negada: O turno do caixa está fechado.");
-        }
+    public PedidoResponseDTO finalizarDelivery(CheckoutDeliveryRequestDTO dto) {
+        validarCaixaAberto();
 
-        Carrinho carrinho = carrinhoRepository.findByClienteId(dto.clienteId())
-                .orElseThrow(() -> new ResourceNotFoundException("Carrinho de compras não localizado para este cliente."));
-
-        if (carrinho.getItens().isEmpty()) {
-            throw new BusinessRuleException("Operação negada: Não é possível finalizar um checkout com o carrinho vazio.");
-        }
+        Carrinho carrinho = localizarCarrinho(dto.clienteId());
+        validarCarrinhoNaoVazio(carrinho);
 
         Pedido pedido = new Pedido();
         pedido.setCliente(carrinho.getCliente());
-        pedido.setTipo(dto.tipo());
+        pedido.setTipo(TipoPedido.DELIVERY);
         pedido.setEnderecoEntrega(dto.enderecoEntrega());
         pedido.setStatus(StatusPedido.RECEBIDO);
         pedido.setStatusFinanceiro(StatusFinanceiro.PAGO);
         pedido.setFormaPagamento(dto.formaPagamento());
+        pedido.setObservacaoGeral(dto.observacao());
         pedido.setItens(new ArrayList<>());
 
-        BigDecimal somaTotal = BigDecimal.ZERO;
+        copiarItensDoCarrinho(carrinho, pedido);
+        calcularEPreencherTotal(pedido);
+
+        Pedido pedidoSalvo = salvarPedido(pedido);
+        gerarFilaImpressao(pedidoSalvo);
+        limparCarrinho(carrinho);
+
+        return new PedidoResponseDTO(pedidoSalvo);
+    }
+
+    /**
+     * 📋 FLUXO RETIRADA
+     */
+    @Transactional
+    public PedidoResponseDTO finalizarRetirada(CheckoutRetiradaRequestDTO dto) {
+        validarCaixaAberto();
+
+        Carrinho carrinho = localizarCarrinho(dto.clienteId());
+        validarCarrinhoNaoVazio(carrinho);
+
+        Pedido pedido = new Pedido();
+        pedido.setCliente(carrinho.getCliente());
+        pedido.setTipo(TipoPedido.RETIRADA);
+        pedido.setStatus(StatusPedido.RECEBIDO);
+        pedido.setStatusFinanceiro(StatusFinanceiro.PAGO);
+        pedido.setFormaPagamento(dto.formaPagamento());
+        pedido.setObservacaoGeral(dto.observacao());
+        pedido.setItens(new ArrayList<>());
+
+        copiarItensDoCarrinho(carrinho, pedido);
+        calcularEPreencherTotal(pedido);
+
+        Pedido pedidoSalvo = salvarPedido(pedido);
+        gerarFilaImpressao(pedidoSalvo);
+        limparCarrinho(carrinho);
+
+        return new PedidoResponseDTO(pedidoSalvo);
+    }
+
+    /**
+     * 🪑 FLUXO MESA: Orquestra o fechamento da Conta e Comanda nativa.
+     */
+    @Transactional
+    public PedidoResponseDTO finalizarMesa(CheckoutMesaRequestDTO dto) {
+        validarCaixaAberto();
+
+        if (dto.nomeResponsavel() == null || dto.nomeResponsavel().isBlank()) {
+            throw new BusinessRuleException("Operação negada: O nome do responsável é obrigatório para o fechamento da MESA.");
+        }
+
+        Conta conta = contaRepository.findByComandaIdAndNumeroConta(dto.comandaId(), dto.numeroConta())
+                .orElseThrow(() -> new ResourceNotFoundException("Erro de domínio: Conta de atendimento da mesa não localizada."));
+
+        Comanda comanda = conta.getComanda();
+
+        // 🎯 CORREÇÃO 1: Validação imediata do estado da Conta. Lança exceção se não houver pedidos reais.
+        Pedido pedidoReferencia = (conta.getPedidos() != null && !conta.getPedidos().isEmpty())
+                ? conta.getPedidos().get(0)
+                : null;
+
+        if (pedidoReferencia == null) {
+            throw new BusinessRuleException("A conta não possui pedidos para serem finalizados.");
+        }
+
+        // Atualiza dados do responsável diretamente na Conta
+        conta.setNomeResponsavel(dto.nomeResponsavel().toUpperCase().trim());
+        if (dto.telefoneResponsavel() != null && !dto.telefoneResponsavel().isBlank()) {
+            conta.setTelefoneResponsavel(dto.telefoneResponsavel().trim());
+        }
+
+        // Calcular os totais finais da conta baseado nos pedidos já criados pelo fluxo mobile
+        BigDecimal totalConta = conta.getPedidos().stream()
+                .filter(p -> p.getStatus() != StatusPedido.CANCELADO)
+                .map(Pedido::getTotal)
+                .reduce(BigDecimal.ZERO, BigDecimal::add);
+
+        conta.setValorTotal(totalConta);
+        conta.setPago(true);
+        contaRepository.save(conta);
+
+        // Registrar o pagamento e liquidar os lotes de pedidos existentes da conta
+        for (Pedido p : conta.getPedidos()) {
+            if (p.getStatus() != StatusPedido.CANCELADO) {
+                p.setStatusFinanceiro(StatusFinanceiro.PAGO);
+                p.setFormaPagamento(dto.formaPagamento());
+                p.setValorRecebido(p.getTotal());
+                p.setStatus(StatusPedido.FINALIZADO);
+                pedidoRepository.save(p);
+            }
+        }
+
+        // Finalizar a comanda mãe se todas as subcontas ativas estiverem encerradas
+        if (comanda != null) {
+            List<Conta> todasContas = contaRepository.findByComandaId(comanda.getId());
+            boolean todasPagas = todasContas.stream()
+                    .allMatch(c -> c.getId().equals(conta.getId()) || c.getPago());
+            if (todasPagas) {
+                // 🎯 CORREÇÃO 2: Chamada do método de encapsulamento rico da entidade Comanda.
+                comanda.setStatus(StatusComanda.FECHADA);
+                comanda.setFechadaEm(LocalDateTime.now());
+                comandaRepository.save(comanda);
+
+            }
+        }
+
+        return new PedidoResponseDTO(pedidoReferencia);
+    }
+
+    /**
+     * 🛒 FLUXO BALCÃO
+     */
+    @Transactional
+    public PedidoResponseDTO finalizarBalcao(CheckoutBalcaoRequestDTO dto) {
+        validarCaixaAberto();
+
+        Pedido pedido = new Pedido();
+        pedido.setTipo(TipoPedido.BALCAO);
+        pedido.setStatus(StatusPedido.RECEBIDO);
+        pedido.setStatusFinanceiro(StatusFinanceiro.PAGO);
+        pedido.setFormaPagamento(dto.formaPagamento());
+        pedido.setObservacaoGeral(dto.observacao());
+        pedido.setNomeClienteBalcao(dto.nomeConsumidor() != null ? dto.nomeConsumidor().toUpperCase().trim() : "CONSUMIDOR PADRÃO");
+        pedido.setItens(new ArrayList<>());
+
+        copiarItensDasRequests(dto.itens(), pedido);
+        calcularEPreencherTotal(pedido);
+
+        Pedido pedidoSalvo = salvarPedido(pedido);
+        gerarFilaImpressao(pedidoSalvo);
+
+        return new PedidoResponseDTO(pedidoSalvo);
+    }
+
+    // ==========================================
+    // ⚙️ ROTINAS UTILITÁRIAS COMPARTILHADAS (GENÉRICAS)
+    // ==========================================
+
+    private void validarCaixaAberto() {
+        if (!caixaRepository.existsByStatus(StatusCaixa.ABERTO)) {
+            throw new BusinessRuleException("Operação negada: O turno do caixa está fechado.");
+        }
+    }
+
+    private Carrinho localizarCarrinho(UUID clienteId) {
+        return carrinhoRepository.findByClienteId(clienteId)
+                .orElseThrow(() -> new ResourceNotFoundException("Carrinho de compras não localizado para este cliente."));
+    }
+
+    private void validarCarrinhoNaoVazio(Carrinho carrinho) {
+        if (carrinho.getItens().isEmpty()) {
+            throw new BusinessRuleException("Operação negada: Não é possível finalizar um checkout com o carrinho vazio.");
+        }
+    }
+
+    private void copiarItensDoCarrinho(Carrinho carrinho, Pedido pedido) {
         for (ItemCarrinho itemCarrinho : carrinho.getItens()) {
             ItemPedido item = new ItemPedido();
             item.setProduto(itemCarrinho.getProduto());
@@ -197,28 +339,53 @@ public class PedidoService {
             item.setPedido(pedido);
             item.setStatusPagamento(StatusPagamento.PAGO);
             pedido.getItens().add(item);
+        }
+    }
 
+    private void copiarItensDasRequests(List<ItemPedidoRequestDTO> itens, Pedido pedido) {
+        if (itens != null) {
+            for (ItemPedidoRequestDTO itemDto : itens) {
+                Produto produto = produtoRepository.findById(itemDto.produtoId())
+                        .orElseThrow(() -> new ResourceNotFoundException("Produto do cardápio não localizado."));
+
+                ItemPedido item = new ItemPedido();
+                item.setProduto(produto);
+                item.setQuantidade(itemDto.quantidade());
+                item.setPrecoUnitario(produto.getPreco());
+                item.setPedido(pedido);
+                item.setStatusPagamento(StatusPagamento.PAGO);
+                pedido.getItens().add(item);
+            }
+        }
+    }
+
+    private void calcularEPreencherTotal(Pedido pedido) {
+        BigDecimal somaTotal = BigDecimal.ZERO;
+        for (ItemPedido item : pedido.getItens()) {
             somaTotal = somaTotal.add(item.getPrecoUnitario().multiply(BigDecimal.valueOf(item.getQuantidade())));
         }
-
         pedido.setTotal(somaTotal);
         pedido.setValorRecebido(somaTotal);
+    }
 
-        Pedido pedidoSalvo = pedidoRepository.save(pedido);
+    private Pedido salvarPedido(Pedido pedido) {
+        return pedidoRepository.save(pedido);
+    }
 
-        // Fila de impressão (movido para antes da limpeza do carrinho)
+    private void gerarFilaImpressao(Pedido pedido) {
         FilaImpressao cupomCozinha = new FilaImpressao();
-        cupomCozinha.setPedido(pedidoSalvo);
+        cupomCozinha.setPedido(pedido);
         cupomCozinha.setDestino(FilaImpressao.DestinoImpressao.COZINHA);
         cupomCozinha.setStatus(FilaImpressao.StatusImpressao.PENDENTE);
         filaImpressaoRepository.save(cupomCozinha);
+    }
 
-        // Limpeza do carrinho e salvamento (movido para depois da fila de impressão)
+    private void limparCarrinho(Carrinho carrinho) {
         carrinho.getItens().clear();
         carrinhoRepository.save(carrinho);
-
-        return new PedidoResponseDTO(pedidoSalvo);
     }
+
+    // ==========================================
 
     @Transactional
     public PedidoResponseDTO adicionarItemPedido(UUID pedidoId, ItemPedidoRequestDTO dto) {
@@ -380,11 +547,11 @@ public class PedidoService {
                     .toList();
 
             for (Pedido p : pedidosDaSubconta) {
-
-                String nomeCli = p.getNomeClienteBalcao();
-                if ((nomeCli == null || nomeCli.isBlank()) && c.getCliente() != null) {
-                    nomeCli = c.getCliente().getNome();
+                String nomeCli = c.getNomeResponsavel();
+                if (nomeCli == null || nomeCli.isBlank()) {
+                    nomeCli = p.getNomeClienteBalcao();
                 }
+
                 ItemComandaMobileResponseDTO.ClienteMesaDTO cliMesa = (nomeCli != null && !nomeCli.isBlank())
                         ? new ItemComandaMobileResponseDTO.ClienteMesaDTO(nomeCli, null)
                         : null;

@@ -186,8 +186,8 @@ public class EcosystemApocalypseTest {
         @Test void ct004_carrinhoIsolado() {
             when(caixaRepository.existsByStatus(StatusCaixa.ABERTO)).thenReturn(true);
             when(carrinhoRepository.findByClienteId(any())).thenReturn(Optional.empty());
-            CheckoutRequestDTO dto = new CheckoutRequestDTO(UUID.randomUUID(), TipoPedido.DELIVERY, "Rua", null, null, null, null, null, null, List.of());
-            assertThrows(RuntimeException.class, () -> pedidoService.finalizarPedido(dto));
+            CheckoutDeliveryRequestDTO dto = new CheckoutDeliveryRequestDTO(UUID.randomUUID(), "Rua", FormaPagamento.PIX, "Sem cebola");
+            assertThrows(ResourceNotFoundException.class, () -> pedidoService.finalizarDelivery(dto));
         }
 
         @Test void ct005_acuraciaPrecoFixo() {
@@ -335,8 +335,8 @@ public class EcosystemApocalypseTest {
             Carrinho carrinhoVazio = new Carrinho(); carrinhoVazio.setItens(new ArrayList<>());
             when(carrinhoRepository.findByClienteId(any())).thenReturn(Optional.of(carrinhoVazio));
 
-            CheckoutRequestDTO dto = new CheckoutRequestDTO(UUID.randomUUID(), TipoPedido.DELIVERY, "Rua", null, null, null, null, null, null, List.of());
-            assertThrows(BusinessRuleException.class, () -> pedidoService.finalizarPedido(dto));
+            CheckoutDeliveryRequestDTO dto = new CheckoutDeliveryRequestDTO(UUID.randomUUID(), "Rua", FormaPagamento.PIX, "Sem cebola");
+            assertThrows(BusinessRuleException.class, () -> pedidoService.finalizarDelivery(dto));
         }
     }
 
@@ -356,8 +356,8 @@ public class EcosystemApocalypseTest {
             when(carrinhoRepository.findByClienteId(cId)).thenReturn(Optional.of(carrinho));
             when(pedidoRepository.save(any())).thenReturn(pedidoCompartilhado);
 
-            CheckoutRequestDTO dto = new CheckoutRequestDTO(cId, TipoPedido.DELIVERY, "Rua", null, null, null, null, FormaPagamento.PIX, BigDecimal.ZERO, new ArrayList<>());
-            assertNotNull(pedidoService.finalizarPedido(dto));
+            CheckoutDeliveryRequestDTO dto = new CheckoutDeliveryRequestDTO(cId, "Rua", FormaPagamento.PIX, "Sem cebola");
+            assertNotNull(pedidoService.finalizarDelivery(dto));
         }
     }
 

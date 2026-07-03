@@ -355,7 +355,8 @@ class CaixaServiceTest {
         void setUpConta() {
             pedidoId = UUID.randomUUID();
             Comanda comanda = new Comanda(); comanda.setId(UUID.randomUUID());
-            conta = new Conta(UUID.randomUUID(), 1, false, new BigDecimal("100.00"), comanda, null, new ArrayList<>(), new ArrayList<>());
+            // 🎯 FIX: Construtor da Conta atualizado com os novos campos nomeResponsavel e telefoneResponsavel
+            conta = new Conta(UUID.randomUUID(), 1, false, new BigDecimal("100.00"), null, null, comanda, null, new ArrayList<>(), new ArrayList<>());
             pedido = new Pedido(); pedido.setId(pedidoId); pedido.setConta(conta);
         }
 
@@ -399,7 +400,8 @@ class CaixaServiceTest {
         void setUpFaturamento() {
             pedidoId = UUID.randomUUID();
             Comanda comanda = new Comanda(); comanda.setId(UUID.randomUUID());
-            conta = new Conta(UUID.randomUUID(), 1, false, new BigDecimal("50.00"), comanda, null, new ArrayList<>(), new ArrayList<>());
+            // 🎯 FIX: Construtor da Conta atualizado com os novos campos nomeResponsavel e telefoneResponsavel
+            conta = new Conta(UUID.randomUUID(), 1, false, new BigDecimal("50.00"), null, null, comanda, null, new ArrayList<>(), new ArrayList<>());
             pedido = new Pedido(); pedido.setId(pedidoId); pedido.setConta(conta);
         }
 
@@ -450,7 +452,8 @@ class CaixaServiceTest {
             Comanda comanda = new Comanda(); comanda.setId(UUID.randomUUID());
 
             // 🎯 TRAVA DE SEGURANÇA MANTIDA: Configura a conta como PAGO = TRUE de partida
-            Conta contaJaPaga = new Conta(UUID.randomUUID(), 1, true, new BigDecimal("50.00"), comanda, null, new ArrayList<>(), new ArrayList<>());
+            // 🎯 FIX: Construtor da Conta atualizado com os novos campos nomeResponsavel e telefoneResponsavel
+            Conta contaJaPaga = new Conta(UUID.randomUUID(), 1, true, new BigDecimal("50.00"), null, null, comanda, null, new ArrayList<>(), new ArrayList<>());
             pedido.setConta(contaJaPaga);
 
             when(caixaRepository.existsByStatus(StatusCaixa.ABERTO)).thenReturn(true);
@@ -560,7 +563,8 @@ class CaixaServiceTest {
 
                 Pedido pedido = new Pedido();
                 Comanda comanda = new Comanda(); comanda.setId(UUID.randomUUID());
-                Conta conta = new Conta(UUID.randomUUID(), 1, false, BigDecimal.TEN, comanda, null, new ArrayList<>(), new ArrayList<>());
+                // 🎯 FIX: Construtor da Conta atualizado com os novos campos nomeResponsavel e telefoneResponsavel
+                Conta conta = new Conta(UUID.randomUUID(), 1, false, BigDecimal.TEN, null, null, comanda, null, new ArrayList<>(), new ArrayList<>());
                 pedido.setConta(conta);
 
                 when(pedidoRepository.findById(pedidoId)).thenReturn(Optional.of(pedido));
@@ -596,4 +600,3 @@ class CaixaServiceTest {
             assertThat(caixaAbertoPadrao.getUsuarioFechamento().getNome()).isEqualTo("ESTEVAO ADMINISTRADOR");
             assertThat(caixaAbertoPadrao.getJustificativaDiferenca()).isEqualTo("Auditoria 15");
         }}}}
-

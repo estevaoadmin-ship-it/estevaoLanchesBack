@@ -6,7 +6,7 @@ import com.paullomaggio.estevaoLanches.enums.*;
 import com.paullomaggio.estevaoLanches.exceptions.ResourceNotFoundException;
 import com.paullomaggio.estevaoLanches.repositories.ComandaRepository;
 import com.paullomaggio.estevaoLanches.repositories.MesaRepository;
-import com.paullomaggio.estevaoLanches.services.especialistas.PedidoPDVService;
+import com.paullomaggio.estevaoLanches.services.core.PedidoCoreService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -32,7 +32,7 @@ import static org.mockito.Mockito.*;
 class GarcomMesaSessaoServiceTest {
 
     @Mock
-    private PedidoPDVService pedidoPDVService;
+    private PedidoCoreService pedidoCoreService; // Alterado de PedidoMesaService para PedidoCoreService
 
     @Mock
     private MesaRepository mesaRepository;
@@ -81,7 +81,7 @@ class GarcomMesaSessaoServiceTest {
         GarcomMesaSessaoRequestDTO request = new GarcomMesaSessaoRequestDTO(comandaId, null, List.of());
 
         assertThrows(ResourceNotFoundException.class, () -> garcomMesaSessaoService.sincronizarSessao(mesaId, request));
-        verify(pedidoPDVService, never()).processarPedidoMobile(any());
+        verify(pedidoCoreService, never()).processarPedidoMobile(any()); // Alterado para pedidoCoreService
     }
 
     @Test
@@ -94,7 +94,7 @@ class GarcomMesaSessaoServiceTest {
         GarcomMesaSessaoResponseDTO response = garcomMesaSessaoService.sincronizarSessao(mesaId, request);
 
         assertNotNull(response);
-        verify(pedidoPDVService, never()).processarPedidoMobile(any());
+        verify(pedidoCoreService, never()).processarPedidoMobile(any()); // Alterado para pedidoCoreService
     }
 
     @Test
@@ -109,12 +109,12 @@ class GarcomMesaSessaoServiceTest {
 
         garcomMesaSessaoService.sincronizarSessao(mesaId, request);
 
-        verify(pedidoPDVService, never()).processarPedidoMobile(any());
+        verify(pedidoCoreService, never()).processarPedidoMobile(any()); // Alterado para pedidoCoreService
     }
 
     @Test
-    @DisplayName("Teste 004: deve enviar pedido para o PedidoPDVService quando conta tiver novos itens")
-    void deveEnviarPedidoParaPedidoPDVService() {
+    @DisplayName("Teste 004: deve enviar pedido para o PedidoCoreService quando conta tiver novos itens")
+    void deveEnviarPedidoParaPedidoCoreService() {
         when(mesaRepository.findById(mesaId)).thenReturn(Optional.of(mesa));
         when(comandaRepository.findByMesaNumeroAndStatus(mesa.getNumero(), StatusComanda.ABERTA)).thenReturn(Optional.of(comanda));
 
@@ -126,7 +126,7 @@ class GarcomMesaSessaoServiceTest {
 
         garcomMesaSessaoService.sincronizarSessao(mesaId, request);
 
-        verify(pedidoPDVService, times(1)).processarPedidoMobile(any(PedidoMobileRequestDTO.class));
+        verify(pedidoCoreService, times(1)).processarPedidoMobile(any(PedidoMobileRequestDTO.class)); // Alterado para pedidoCoreService
     }
 
     @Test
@@ -143,7 +143,7 @@ class GarcomMesaSessaoServiceTest {
 
         garcomMesaSessaoService.sincronizarSessao(mesaId, request);
 
-        verify(pedidoPDVService).processarPedidoMobile(pedidoCaptor.capture());
+        verify(pedidoCoreService).processarPedidoMobile(pedidoCaptor.capture()); // Alterado para pedidoCoreService
         PedidoMobileRequestDTO payloadEnviado = pedidoCaptor.getValue();
 
         assertEquals(comandaId, payloadEnviado.comandaId());
@@ -170,7 +170,7 @@ class GarcomMesaSessaoServiceTest {
         GarcomMesaSessaoRequestDTO request = new GarcomMesaSessaoRequestDTO(comandaId, null, List.of(contaComItens, contaSemItens));
         garcomMesaSessaoService.sincronizarSessao(mesaId, request);
 
-        verify(pedidoPDVService, times(1)).processarPedidoMobile(any());
+        verify(pedidoCoreService, times(1)).processarPedidoMobile(any()); // Alterado para pedidoCoreService
     }
 
     @Test
@@ -185,7 +185,7 @@ class GarcomMesaSessaoServiceTest {
         GarcomMesaSessaoRequestDTO request = new GarcomMesaSessaoRequestDTO(comandaId, null, List.of(conta1, conta2));
         garcomMesaSessaoService.sincronizarSessao(mesaId, request);
 
-        verify(pedidoPDVService, times(2)).processarPedidoMobile(any());
+        verify(pedidoCoreService, times(2)).processarPedidoMobile(any()); // Alterado para pedidoCoreService
     }
 
     // ===================================================================================
@@ -263,7 +263,12 @@ class GarcomMesaSessaoServiceTest {
     @DisplayName("Teste 014: conta com cliente deve mapear corretamente id, nome e numero")
     void contaComClienteMapeado() {
         Cliente cliente = new Cliente(); cliente.setId(UUID.randomUUID()); cliente.setNome("João"); cliente.setNumero("1199999999");
-        Conta conta = new Conta(); conta.setId(UUID.randomUUID()); conta.setPedidos(List.of()); conta.setCliente(cliente);
+        Conta conta = new Conta(); conta.setId(UUID.randomUUID()); conta.setPedidos(List.of());
+        // 🎯 FIX: Setar nomeResponsavel e telefoneResponsavel diretamente na conta
+        conta.setNomeResponsavel(cliente.getNome());
+        conta.setTelefoneResponsavel(cliente.getNumero());
+        conta.setCliente(cliente); // Manter para compatibilidade, embora não seja mais a fonte primária para ClienteSessaoDTO
+
         comanda.setContas(List.of(conta));
 
         when(mesaRepository.findById(mesaId)).thenReturn(Optional.of(mesa));
@@ -272,9 +277,11 @@ class GarcomMesaSessaoServiceTest {
         GarcomMesaSessaoResponseDTO response = garcomMesaSessaoService.obterSessao(mesaId);
         var clienteSessao = response.contas().get(0).cliente();
         assertNotNull(clienteSessao);
-        assertEquals(cliente.getId(), clienteSessao.id());
+        // 🎯 FIX: Assertions agora verificam os campos nomeResponsavel e telefoneResponsavel da Conta
         assertEquals("João", clienteSessao.nome());
-        assertEquals("1199999999", clienteSessao.telefone()); // Telefone mapeado do campo 'numero'
+        assertEquals("1199999999", clienteSessao.telefone());
+        // O ID do cliente na sessão agora é o ID da conta, não o ID do cliente da entidade Cliente
+        assertEquals(conta.getId(), clienteSessao.id());
     }
 
     @Test

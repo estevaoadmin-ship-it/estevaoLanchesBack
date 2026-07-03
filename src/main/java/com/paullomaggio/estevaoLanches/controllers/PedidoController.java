@@ -2,7 +2,8 @@ package com.paullomaggio.estevaoLanches.controllers;
 
 import com.paullomaggio.estevaoLanches.dtos.*;
 import com.paullomaggio.estevaoLanches.services.core.PedidoCoreService;
-import com.paullomaggio.estevaoLanches.services.especialistas.PedidoPDVService;
+import com.paullomaggio.estevaoLanches.services.especialistas.PedidoBalcaoService;
+import com.paullomaggio.estevaoLanches.services.especialistas.PedidoMesaService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.responses.ApiResponse;
 import io.swagger.v3.oas.annotations.responses.ApiResponses;
@@ -23,12 +24,13 @@ import java.util.UUID;
 public class PedidoController {
 
     private final PedidoCoreService coreService;
-    private final PedidoPDVService pdvService;
+    private final PedidoBalcaoService balcaoService;
+    private final PedidoMesaService mesaService;
 
     // === BALCÃO ===
 
     @Operation(summary = "Finaliza um pedido no balcão (PDV)",
-               description = "Processa o checkout de um pedido feito diretamente no balcão, gerando o pedido e o pagamento.")
+            description = "Processa o checkout de um pedido feito diretamente no balcão, gerando o pedido e o pagamento.")
     @ApiResponses(value = {
             @ApiResponse(responseCode = "200", description = "Pedido finalizado com sucesso"),
             @ApiResponse(responseCode = "400", description = "Dados de checkout inválidos"),
@@ -37,13 +39,13 @@ public class PedidoController {
     })
     @PostMapping("/balcao/checkout")
     public ResponseEntity<PedidoResponseDTO> finalizarPedidoBalcao(@RequestBody @Valid CheckoutBalcaoRequestDTO dto) {
-        return ResponseEntity.ok(pdvService.checkoutBalcao(dto));
+        return ResponseEntity.ok(balcaoService.checkoutBalcao(dto));
     }
 
     // === MOBILE / MESA ===
 
     @Operation(summary = "Finaliza um pedido via aplicativo mobile ou mesa",
-               description = "Processa um pedido originado de um aplicativo mobile ou de uma mesa, criando o pedido no sistema.")
+            description = "Processa um pedido originado de um aplicativo mobile ou de uma mesa, criando o pedido no sistema.")
     @ApiResponses(value = {
             @ApiResponse(responseCode = "200", description = "Pedido mobile processado com sucesso"),
             @ApiResponse(responseCode = "400", description = "Dados de pedido mobile inválidos"),
@@ -52,11 +54,11 @@ public class PedidoController {
     })
     @PostMapping("/mobile")
     public ResponseEntity<PedidoResponseDTO> finalizarPedidoMobile(@RequestBody @Valid PedidoMobileRequestDTO dto) {
-        return ResponseEntity.ok(pdvService.processarPedidoMobile(dto));
+        return ResponseEntity.ok(coreService.processarPedidoMobile(dto));
     }
 
     @Operation(summary = "Busca itens de pedido por ID da comanda",
-               description = "Retorna a lista de itens de um pedido associado a uma comanda mestra específica.")
+            description = "Retorna a lista de itens de um pedido associado a uma comanda mestra específica.")
     @ApiResponses(value = {
             @ApiResponse(responseCode = "200", description = "Itens da comanda retornados com sucesso"),
             @ApiResponse(responseCode = "404", description = "Comanda não encontrada"),
@@ -71,7 +73,7 @@ public class PedidoController {
     // === OPERAÇÕES DE CAIXA E MONITOR ===
 
     @Operation(summary = "Lista pedidos ativos para monitoramento",
-               description = "Retorna uma lista de pedidos que estão em andamento e precisam ser monitorados (ex: na cozinha ou aguardando entrega).")
+            description = "Retorna uma lista de pedidos que estão em andamento e precisam ser monitorados (ex: na cozinha ou aguardando entrega).")
     @ApiResponses(value = {
             @ApiResponse(responseCode = "200", description = "Lista de pedidos ativos retornada com sucesso"),
             @ApiResponse(responseCode = "401", description = "Não autenticado"),
@@ -83,7 +85,7 @@ public class PedidoController {
     }
 
     @Operation(summary = "Lista todos os pedidos",
-               description = "Retorna uma lista completa de todos os pedidos registrados no sistema.")
+            description = "Retorna uma lista completa de todos os pedidos registrados no sistema.")
     @ApiResponses(value = {
             @ApiResponse(responseCode = "200", description = "Lista de todos os pedidos retornada com sucesso"),
             @ApiResponse(responseCode = "401", description = "Não autenticado"),
@@ -95,7 +97,7 @@ public class PedidoController {
     }
 
     @Operation(summary = "Busca um pedido pelo ID",
-               description = "Retorna os detalhes de um pedido específico com base no seu ID.")
+            description = "Retorna os detalhes de um pedido específico com base no seu ID.")
     @ApiResponses(value = {
             @ApiResponse(responseCode = "200", description = "Pedido encontrado com sucesso"),
             @ApiResponse(responseCode = "404", description = "Pedido não encontrado"),
@@ -108,7 +110,7 @@ public class PedidoController {
     }
 
     @Operation(summary = "Lista o histórico de pedidos de um cliente",
-               description = "Retorna todos os pedidos feitos por um cliente específico, usando seu ID.")
+            description = "Retorna todos os pedidos feitos por um cliente específico, usando seu ID.")
     @ApiResponses(value = {
             @ApiResponse(responseCode = "200", description = "Histórico de pedidos do cliente retornado com sucesso"),
             @ApiResponse(responseCode = "404", description = "Cliente não encontrado"),
@@ -121,7 +123,7 @@ public class PedidoController {
     }
 
     @Operation(summary = "Atualiza o status de um pedido",
-               description = "Altera o status de um pedido (ex: 'EM_PREPARO', 'PRONTO', 'ENTREGUE').")
+            description = "Altera o status de um pedido (ex: 'EM_PREPARO', 'PRONTO', 'ENTREGUE').")
     @ApiResponses(value = {
             @ApiResponse(responseCode = "200", description = "Status do pedido atualizado com sucesso"),
             @ApiResponse(responseCode = "400", description = "Status inválido ou transição não permitida"),
@@ -135,7 +137,7 @@ public class PedidoController {
     }
 
     @Operation(summary = "Registra o pagamento de um pedido",
-               description = "Processa o recebimento do pagamento para um pedido, atualizando seu status financeiro.")
+            description = "Processa o recebimento do pagamento para um pedido, atualizando seu status financeiro.")
     @ApiResponses(value = {
             @ApiResponse(responseCode = "200", description = "Pagamento registrado com sucesso"),
             @ApiResponse(responseCode = "400", description = "Dados de pagamento inválidos"),
@@ -149,7 +151,7 @@ public class PedidoController {
     }
 
     @Operation(summary = "Cancela um pedido",
-               description = "Altera o status de um pedido para 'CANCELADO'.")
+            description = "Altera o status de um pedido para 'CANCELADO'.")
     @ApiResponses(value = {
             @ApiResponse(responseCode = "200", description = "Pedido cancelado com sucesso"),
             @ApiResponse(responseCode = "404", description = "Pedido não encontrado"),
@@ -164,7 +166,7 @@ public class PedidoController {
     // === MANIPULAÇÃO DE ITENS (PDV) ===
 
     @Operation(summary = "Adiciona um item a um pedido existente",
-               description = "Permite adicionar um novo item a um pedido que ainda não foi finalizado.")
+            description = "Permite adicionar um novo item a um pedido que ainda não foi finalizado.")
     @ApiResponses(value = {
             @ApiResponse(responseCode = "200", description = "Item adicionado ao pedido com sucesso"),
             @ApiResponse(responseCode = "400", description = "Dados do item inválidos"),
@@ -178,7 +180,7 @@ public class PedidoController {
     }
 
     @Operation(summary = "Remove um item de um pedido existente",
-               description = "Permite remover um item específico de um pedido que ainda não foi finalizado.")
+            description = "Permite remover um item específico de um pedido que ainda não foi finalizado.")
     @ApiResponses(value = {
             @ApiResponse(responseCode = "200", description = "Item removido do pedido com sucesso"),
             @ApiResponse(responseCode = "404", description = "Pedido ou item não encontrado"),
@@ -191,7 +193,7 @@ public class PedidoController {
     }
 
     @Operation(summary = "Atualiza adicionais de um item de pedido",
-               description = "Permite modificar os adicionais de um item específico dentro de um pedido.")
+            description = "Permite modificar os adicionais de um item específico dentro de um pedido.")
     @ApiResponses(value = {
             @ApiResponse(responseCode = "200", description = "Adicionais do item atualizados com sucesso"),
             @ApiResponse(responseCode = "400", description = "Dados de adicionais inválidos"),

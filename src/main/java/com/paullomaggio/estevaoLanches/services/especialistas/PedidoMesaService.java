@@ -1,6 +1,6 @@
 package com.paullomaggio.estevaoLanches.services.especialistas;
 
-import com.paullomaggio.estevaoLanches.dtos.CheckoutBalcaoRequestDTO;
+import com.paullomaggio.estevaoLanches.dtos.CheckoutMesaRequestDTO;
 import com.paullomaggio.estevaoLanches.dtos.PedidoResponseDTO;
 import com.paullomaggio.estevaoLanches.services.PedidoService;
 import lombok.RequiredArgsConstructor;
@@ -11,11 +11,11 @@ import jakarta.validation.Valid;
 @Service
 @RequiredArgsConstructor
 @Validated
-public class PedidoBalcaoService {
+public class PedidoMesaService {
 
     private final PedidoService pedidoService;
 
-    public PedidoResponseDTO checkoutBalcao(@Valid CheckoutBalcaoRequestDTO dto) {
-        return pedidoService.finalizarBalcao(dto);
+    public PedidoResponseDTO checkoutMesa(@Valid CheckoutMesaRequestDTO dto) {
+        return pedidoService.finalizarMesa(dto);
     }
 }

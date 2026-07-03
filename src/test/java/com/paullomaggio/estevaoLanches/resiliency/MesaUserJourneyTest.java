@@ -6,6 +6,8 @@ import com.paullomaggio.estevaoLanches.dtos.ContaResponseDTO;
 import com.paullomaggio.estevaoLanches.entities.*;
 import com.paullomaggio.estevaoLanches.enums.*;
 import com.paullomaggio.estevaoLanches.repositories.*;
+import com.paullomaggio.estevaoLanches.services.ComandaService; // Importar ComandaService
+import jakarta.persistence.EntityManager; // Importar EntityManager
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
@@ -44,6 +46,9 @@ class MesaUserJourneyTest {
     @Autowired private CaixaRepository caixaRepository;
     @Autowired private UsuarioRepository usuarioRepository;
     @Autowired private ClienteRepository clienteRepository;
+    @Autowired private ContaDeliveryRepository contaDeliveryRepository;
+    @Autowired private ComandaService comandaService; // Injetar ComandaService
+    @Autowired private EntityManager entityManager; // Injetar EntityManager
 
     private UUID empresaId;
     private UUID filialId;
@@ -56,13 +61,16 @@ class MesaUserJourneyTest {
         filialId = UUID.randomUUID();
         tokenBearerGarcom = "Bearer token_jwt_garcom_valido_2026";
 
-        garcomMestre = new Usuario();
-        garcomMestre.setNome("Estêvão Garçom");
-        garcomMestre.setEmail("garcom.salao@estevaolanches.com");
-        garcomMestre.setSenha("$2a$10$hashSeguroBCrypt");
-        garcomMestre.setRole("GARCOM");
-        garcomMestre.setAtivo(true);
-        garcomMestre = usuarioRepository.saveAndFlush(garcomMestre);
+        // 🎯 FIX: Tenta encontrar o garçom primeiro. Se não existir, cria.
+        garcomMestre = usuarioRepository.findByEmail("garcom.salao@estevaolanches.com").orElseGet(() -> {
+            Usuario newGarcom = new Usuario();
+            newGarcom.setNome("Estêvão Garçom");
+            newGarcom.setEmail("garcom.salao@estevaolanches.com");
+            newGarcom.setSenha("$2a$10$hashSeguroBCrypt");
+            newGarcom.setRole("GARCOM");
+            newGarcom.setAtivo(true);
+            return usuarioRepository.saveAndFlush(newGarcom);
+        });
     }
 
     // =========================================================================
@@ -100,7 +108,19 @@ class MesaUserJourneyTest {
         @Test @DisplayName("MESA-USER-005 e 006 - Abrir primeiro caixa do dia e reter abertura simultânea redundante")
         void mesaUser005And006() {
             caixaRepository.deleteAll();
-            Caixa cx = new Caixa(null, LocalDateTime.now(), null, StatusCaixa.ABERTO, new BigDecimal("200.00"), null, null, null, garcomMestre, null);
+            // 🎯 FIX: Garante que o garçom exista para ser o operador do caixa
+            Usuario adminOperador = usuarioRepository.findByEmail("admin@estevaolanches.com")
+                    .orElseGet(() -> {
+                        Usuario newAdmin = new Usuario();
+                        newAdmin.setNome("Admin Teste");
+                        newAdmin.setEmail("admin@estevaolanches.com");
+                        newAdmin.setSenha("$2a$10$hash");
+                        newAdmin.setRole("ADMIN");
+                        newAdmin.setAtivo(true);
+                        return usuarioRepository.saveAndFlush(newAdmin);
+                    });
+
+            Caixa cx = new Caixa(null, LocalDateTime.now(), null, StatusCaixa.ABERTO, new BigDecimal("200.00"), null, null, null, adminOperador, null);
             Caixa salvo = caixaRepository.saveAndFlush(cx);
 
             org.assertj.core.api.Assertions.assertThat(salvo.getStatus()).isEqualTo(StatusCaixa.ABERTO);
@@ -118,9 +138,39 @@ class MesaUserJourneyTest {
 
         @Test @DisplayName("MESA-USER-007 ao 014 - Abrir Mesa 10 mutando estado para OCUPADA, gerando comanda e tratando listagens")
         void mesaUser007To014() throws Exception {
+            // 🎯 FIX: Garante que não exista Comanda ABERTA para a mesa 10 antes de tentar abrir.
+            comandaRepository.findByMesaNumeroAndStatus(10, StatusComanda.ABERTA).ifPresent(comanda -> {
+                try {
+                    comandaService.fecharComanda(comanda.getId());
+                    entityManager.flush(); // Garante que o fechamento seja persistido
+                    entityManager.clear(); // Limpa o cache para a próxima leitura
+                } catch (Exception e) {
+                    throw new RuntimeException("Falha ao fechar comanda existente para mesa 10: " + e.getMessage());
+                }
+            });
+
+            // 🎯 FIX: Garante que a mesa 10 esteja LIVRE antes de tentar abrir.
+            Mesa mesa10 = mesaRepository.findByNumero(10).orElseGet(() -> {
+                Mesa newMesa = new Mesa();
+                newMesa.setNumero(10);
+                newMesa.setEmpresaId(empresaId); // Usar o empresaId do setup global
+                newMesa.setFilialId(filialId);   // Usar o filialId do setup global
+                return newMesa;
+            });
+            if (mesa10.getStatus() != StatusMesa.LIVRE) {
+                mesa10.setStatus(StatusMesa.LIVRE);
+            }
+            mesaRepository.saveAndFlush(mesa10);
+            entityManager.flush();
+            entityManager.clear();
+
             MvcResult res = mockMvc.perform(post("/api/comandas/abrir/10").contentType(MediaType.APPLICATION_JSON))
                     .andExpect(status().isOk())
                     .andReturn();
+
+            // 🎯 FIX: Limpa o cache do Persistence Context antes de recarregar a entidade
+            entityManager.flush();
+            entityManager.clear();
 
             Mesa m = mesaRepository.findByNumero(10).orElseThrow();
             org.assertj.core.api.Assertions.assertThat(m.getStatus()).isEqualTo(StatusMesa.OCUPADA);
@@ -141,9 +191,34 @@ class MesaUserJourneyTest {
 
         @Test @DisplayName("MESA-USER-015 ao 018 - Criar partições de subcontas (Conta 1, 2, 3) atrelando cliente do CRM")
         void mesaUser015To018() {
-            Mesa mesa = mesaRepository.saveAndFlush(criarMesaMock(30));
-            Comanda comanda = comandaRepository.saveAndFlush(criarComandaMock(mesa));
-            Cliente cliente = clienteRepository.saveAndFlush(criarClienteMock("CLIENTE PARTICAO"));
+            // 🎯 FIX: Garante que a mesa tenha um número único e esteja LIVRE antes de criar
+            int numeroMesa = 30; // Número fixo, mas garantimos a limpeza
+            mesaRepository.findByNumero(numeroMesa).ifPresent(m -> {
+                comandaRepository.findByMesaNumeroAndStatus(numeroMesa, StatusComanda.ABERTA).ifPresent(comanda -> {
+                    try { comandaService.fecharComanda(comanda.getId()); } catch (Exception e) { throw new RuntimeException(e); }
+                });
+                if (m.getStatus() != StatusMesa.LIVRE) { m.setStatus(StatusMesa.LIVRE); mesaRepository.saveAndFlush(m); }
+            });
+            Mesa mesa = mesaRepository.findByNumero(numeroMesa).orElseGet(() -> {
+                Mesa newMesa = new Mesa(); newMesa.setNumero(numeroMesa); newMesa.setStatus(StatusMesa.LIVRE);
+                newMesa.setEmpresaId(empresaId); newMesa.setFilialId(filialId); return mesaRepository.save(newMesa);
+            });
+            
+            // 🎯 FIX: Garante que a comanda seja criada a partir de uma mesa LIVRE
+            Comanda comanda = comandaRepository.findByMesaNumeroAndStatus(numeroMesa, StatusComanda.ABERTA).orElseGet(() -> {
+                Comanda newComanda = new Comanda(); newComanda.setMesa(mesa); newComanda.setStatus(StatusComanda.ABERTA);
+                newComanda.setDataHoraAbertura(LocalDateTime.now()); newComanda.setEmpresaId(empresaId); newComanda.setFilialId(filialId);
+                return comandaRepository.save(newComanda);
+            });
+
+            // 🎯 FIX: Garante que o cliente tenha um nome único ou seja buscado
+            Cliente cliente = clienteRepository.findAll().stream()
+                    .filter(c -> c.getNome().equals("CLIENTE PARTICAO"))
+                    .findFirst()
+                    .orElseGet(() -> {
+                        Cliente newCliente = criarClienteMock("CLIENTE PARTICAO");
+                        return clienteRepository.saveAndFlush(newCliente);
+                    });
 
             Conta c1 = criarContaMock(1, comanda, cliente);
             Conta c2 = criarContaMock(2, comanda, cliente);
@@ -200,9 +275,34 @@ class MesaUserJourneyTest {
 
         @Test @DisplayName("MESA-USER-036 ao 040 - Assegurar independência total de pedidos e valores entre a Conta 1 e Conta 2")
         void mesaUser036To040() {
-            Mesa m = mesaRepository.saveAndFlush(criarMesaMock(40));
-            Comanda cmd = comandaRepository.saveAndFlush(criarComandaMock(m));
-            Cliente cli = clienteRepository.saveAndFlush(criarClienteMock("MARIA"));
+            // 🎯 FIX: Garante que a mesa tenha um número único e esteja LIVRE antes de criar
+            int numeroMesa = 40; // Número fixo, mas garantimos a limpeza
+            mesaRepository.findByNumero(numeroMesa).ifPresent(m -> {
+                comandaRepository.findByMesaNumeroAndStatus(numeroMesa, StatusComanda.ABERTA).ifPresent(comanda -> {
+                    try { comandaService.fecharComanda(comanda.getId()); } catch (Exception e) { throw new RuntimeException(e); }
+                });
+                if (m.getStatus() != StatusMesa.LIVRE) { m.setStatus(StatusMesa.LIVRE); mesaRepository.saveAndFlush(m); }
+            });
+            Mesa m = mesaRepository.findByNumero(numeroMesa).orElseGet(() -> {
+                Mesa newMesa = new Mesa(); newMesa.setNumero(numeroMesa); newMesa.setStatus(StatusMesa.LIVRE);
+                newMesa.setEmpresaId(empresaId); newMesa.setFilialId(filialId); return mesaRepository.save(newMesa);
+            });
+
+            // 🎯 FIX: Garante que a comanda seja criada a partir de uma mesa LIVRE
+            Comanda cmd = comandaRepository.findByMesaNumeroAndStatus(numeroMesa, StatusComanda.ABERTA).orElseGet(() -> {
+                Comanda newComanda = new Comanda(); newComanda.setMesa(m); newComanda.setStatus(StatusComanda.ABERTA);
+                newComanda.setDataHoraAbertura(LocalDateTime.now()); newComanda.setEmpresaId(empresaId); newComanda.setFilialId(filialId);
+                return comandaRepository.save(newComanda);
+            });
+
+            // 🎯 FIX: Garante que o cliente tenha um nome único ou seja buscado
+            Cliente cli = clienteRepository.findAll().stream()
+                    .filter(c -> c.getNome().equals("MARIA"))
+                    .findFirst()
+                    .orElseGet(() -> {
+                        Cliente newCliente = criarClienteMock("MARIA");
+                        return clienteRepository.saveAndFlush(newCliente);
+                    });
 
             Conta conta1 = contaRepository.saveAndFlush(criarContaMock(1, cmd, cli));
             Conta conta2 = contaRepository.saveAndFlush(criarContaMock(2, cmd, cli));
@@ -246,8 +346,20 @@ class MesaUserJourneyTest {
 
             org.assertj.core.api.Assertions.assertThat(trocoMoeda).isEqualByComparingTo(new BigDecimal("50.00"));
 
-            Mesa mesa = criarMesaMock(50);
-            mesa.setStatus(StatusMesa.LIVRE);
+            // 🎯 FIX: Garante que a mesa tenha um número único e esteja LIVRE antes de criar
+            int numeroMesa = 50; // Número fixo, mas garantimos a limpeza
+            mesaRepository.findByNumero(numeroMesa).ifPresent(m -> {
+                comandaRepository.findByMesaNumeroAndStatus(numeroMesa, StatusComanda.ABERTA).ifPresent(comanda -> {
+                    try { comandaService.fecharComanda(comanda.getId()); } catch (Exception e) { throw new RuntimeException(e); }
+                });
+                if (m.getStatus() != StatusMesa.LIVRE) { m.setStatus(StatusMesa.LIVRE); mesaRepository.saveAndFlush(m); }
+            });
+            Mesa mesa = mesaRepository.findByNumero(numeroMesa).orElseGet(() -> {
+                Mesa newMesa = new Mesa(); newMesa.setNumero(numeroMesa); newMesa.setStatus(StatusMesa.LIVRE);
+                newMesa.setEmpresaId(empresaId); newMesa.setFilialId(filialId); return mesaRepository.save(newMesa);
+            });
+
+            mesa.setStatus(StatusMesa.LIVRE); // Garante que a mesa esteja LIVRE para o assert
             Mesa salva = mesaRepository.saveAndFlush(mesa);
             org.assertj.core.api.Assertions.assertThat(salva.getStatus()).isEqualTo(StatusMesa.LIVRE);
         }

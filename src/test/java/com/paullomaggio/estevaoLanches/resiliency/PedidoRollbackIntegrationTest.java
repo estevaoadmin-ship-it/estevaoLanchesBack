@@ -116,10 +116,9 @@ public class PedidoRollbackIntegrationTest {
         lenient().when(pedidoRepository.findByIdForUpdate(pedidoId)).thenReturn(Optional.of(pedidoMock));
     }
 
-    private CheckoutRequestDTO criarCheckoutDTO() {
-        return new CheckoutRequestDTO(
-                clienteId, TipoPedido.DELIVERY, "Rua Central, 10", null, "Sem pimenta",
-                "Estevão", "16999999999", FormaPagamento.PIX, new BigDecimal("42.00"), new ArrayList<>()
+    private CheckoutDeliveryRequestDTO criarCheckoutDTO() {
+        return new CheckoutDeliveryRequestDTO(
+                clienteId, "Rua Central, 10", FormaPagamento.PIX, "Sem pimenta"
         );
     }
 
@@ -127,6 +126,15 @@ public class PedidoRollbackIntegrationTest {
         PedidoMobileRequestDTO.ClientePayloadDTO cli = new PedidoMobileRequestDTO.ClientePayloadDTO("Carlos", "11999999999");
         PedidoMobileRequestDTO.ItemPedidoPayloadDTO item = new PedidoMobileRequestDTO.ItemPedidoPayloadDTO(produtoId, "BURGER", 1, 42.00, "Ao ponto", new ArrayList<>());
         return new PedidoMobileRequestDTO(comandaId, 7, numConta, cli, List.of(item));
+    }
+
+    private UUID addItemToPedidoMock() {
+        ItemPedido item = new ItemPedido();
+        item.setId(UUID.randomUUID());
+        item.setPrecoUnitario(BigDecimal.TEN);
+        item.setQuantidade(1);
+        pedidoMock.getItens().add(item);
+        return item.getId();
     }
 
     // =========================================================================
@@ -140,7 +148,7 @@ public class PedidoRollbackIntegrationTest {
         @DisplayName("RB001 - Falha ao salvar Pedido -> Carrinho permanece intacto")
         void rb001() {
             when(pedidoRepository.save(any(Pedido.class))).thenThrow(new RuntimeException("Falha de persistência"));
-            assertThrows(RuntimeException.class, () -> pedidoService.finalizarPedido(criarCheckoutDTO()));
+            assertThrows(RuntimeException.class, () -> pedidoService.finalizarDelivery(criarCheckoutDTO()));
             assertThat(carrinhoMock.getItens()).hasSize(1);
         }
 
@@ -148,7 +156,7 @@ public class PedidoRollbackIntegrationTest {
         @DisplayName("RB002 - Falha ao limpar Carrinho -> Fila não é criada")
         void rb002() {
             when(carrinhoRepository.save(any(Carrinho.class))).thenThrow(new RuntimeException("Falha ao limpar carrinho"));
-            assertThrows(RuntimeException.class, () -> pedidoService.finalizarPedido(criarCheckoutDTO()));
+            assertThrows(RuntimeException.class, () -> pedidoService.finalizarDelivery(criarCheckoutDTO()));
             // A asserção verify(filaImpressaoRepository, never()).save(any()); foi removida
             // pois entra em conflito com a ordem correta das operações transacionais.
             // A exceção lançada e o @Transactional garantem o rollback.
@@ -158,7 +166,7 @@ public class PedidoRollbackIntegrationTest {
         @DisplayName("RB003 - Falha ao criar FilaImpressao -> Pedido sofre rollback e carrinho continua cheio")
         void rb003() {
             when(filaImpressaoRepository.save(any(FilaImpressao.class))).thenThrow(new RuntimeException("Erro impressora física"));
-            assertThrows(RuntimeException.class, () -> pedidoService.finalizarPedido(criarCheckoutDTO()));
+            assertThrows(RuntimeException.class, () -> pedidoService.finalizarDelivery(criarCheckoutDTO()));
             assertThat(carrinhoMock.getItens()).hasSize(1);
         }
 
@@ -166,49 +174,49 @@ public class PedidoRollbackIntegrationTest {
         @DisplayName("RB004 - Erro RuntimeException após salvar fila -> Rollback completo")
         void rb004() {
             when(filaImpressaoRepository.save(any())).thenAnswer(i -> { throw new RuntimeException("Erro tardio"); });
-            assertThrows(RuntimeException.class, () -> pedidoService.finalizarPedido(criarCheckoutDTO()));
+            assertThrows(RuntimeException.class, () -> pedidoService.finalizarDelivery(criarCheckoutDTO()));
         }
 
         @Test
         @DisplayName("RB005 - Erro DataIntegrityViolationException -> Rollback")
         void rb005() {
             when(pedidoRepository.save(any())).thenThrow(new DataIntegrityViolationException("Chave estrangeira violada"));
-            assertThrows(DataIntegrityViolationException.class, () -> pedidoService.finalizarPedido(criarCheckoutDTO()));
+            assertThrows(DataIntegrityViolationException.class, () -> pedidoService.finalizarDelivery(criarCheckoutDTO()));
         }
 
         @Test
         @DisplayName("RB006 - Erro ConstraintViolationException -> Rollback")
         void rb006() {
             when(pedidoRepository.save(any())).thenThrow(new ConstraintViolationException("Valores inválidos", null));
-            assertThrows(ConstraintViolationException.class, () -> pedidoService.finalizarPedido(criarCheckoutDTO()));
+            assertThrows(ConstraintViolationException.class, () -> pedidoService.finalizarDelivery(criarCheckoutDTO()));
         }
 
         @Test
         @DisplayName("RB007 - Erro OptimisticLockException -> Rollback")
         void rb007() {
             when(pedidoRepository.save(any())).thenThrow(new ObjectOptimisticLockingFailureException(Pedido.class, "id"));
-            assertThrows(ObjectOptimisticLockingFailureException.class, () -> pedidoService.finalizarPedido(criarCheckoutDTO()));
+            assertThrows(ObjectOptimisticLockingFailureException.class, () -> pedidoService.finalizarDelivery(criarCheckoutDTO()));
         }
 
         @Test
         @DisplayName("RB008 - Erro DeadlockLoserDataAccessException -> Rollback")
         void rb008() {
             when(pedidoRepository.save(any())).thenThrow(new DeadlockLoserDataAccessException("Deadlock detectado", null));
-            assertThrows(DeadlockLoserDataAccessException.class, () -> pedidoService.finalizarPedido(criarCheckoutDTO()));
+            assertThrows(DeadlockLoserDataAccessException.class, () -> pedidoService.finalizarDelivery(criarCheckoutDTO()));
         }
 
         @Test
         @DisplayName("RB009 - Erro TransactionSystemException -> Rollback")
         void rb009() {
             when(pedidoRepository.save(any())).thenThrow(new TransactionSystemException("Falha no commit"));
-            assertThrows(TransactionSystemException.class, () -> pedidoService.finalizarPedido(criarCheckoutDTO()));
+            assertThrows(TransactionSystemException.class, () -> pedidoService.finalizarDelivery(criarCheckoutDTO()));
         }
 
         @Test
         @DisplayName("RB010 - Erro inesperado NullPointerException -> Rollback")
         void rb010() {
             when(pedidoRepository.save(any())).thenThrow(new NullPointerException("Erro de ponteiro nulo inesperado"));
-            assertThrows(NullPointerException.class, () -> pedidoService.finalizarPedido(criarCheckoutDTO()));
+            assertThrows(NullPointerException.class, () -> pedidoService.finalizarDelivery(criarCheckoutDTO()));
         }
     }
 
@@ -386,10 +394,7 @@ public class PedidoRollbackIntegrationTest {
         @Test
         @DisplayName("RB026 - Erro ao salvar -> Item continua presente e total volta ao original")
         void rb026() {
-            UUID itemId = UUID.randomUUID();
-            ItemPedido item = new ItemPedido(); item.setId(itemId); item.setPrecoUnitario(BigDecimal.TEN); item.setQuantidade(1);
-            pedidoMock.getItens().add(item);
-
+            UUID itemId = addItemToPedidoMock(); // Corrigido: Obtém o ID de um item adicionado
             when(pedidoRepository.save(any())).thenThrow(new RuntimeException("Bloqueio de escrita"));
             assertThrows(RuntimeException.class, () -> pedidoService.removerItemPedido(pedidoId, itemId));
         }
@@ -397,13 +402,7 @@ public class PedidoRollbackIntegrationTest {
         @Test
         @DisplayName("RB027 - Erro ao recalcular -> Rollback")
         void rb027() {
-            UUID itemId = UUID.randomUUID();
-            ItemPedido item = new ItemPedido(); // Cria um item
-            item.setId(itemId); // Define seu ID para corresponder ao que será removido
-            item.setPrecoUnitario(BigDecimal.TEN); // Define um preço para o cálculo
-            item.setQuantidade(1); // Define uma quantidade
-            pedidoMock.getItens().add(item); // Adiciona o item ao pedido mockado
-
+            UUID itemId = addItemToPedidoMock(); // Corrigido: Obtém o ID de um item adicionado
             when(pedidoRepository.save(any())).thenThrow(new ArithmeticException("Overflow financeiro"));
             assertThrows(ArithmeticException.class, () -> pedidoService.removerItemPedido(pedidoId, itemId));
         }
@@ -411,7 +410,7 @@ public class PedidoRollbackIntegrationTest {
         @Test
         @DisplayName("RB028 - Erro Runtime -> Rollback")
         void rb028() {
-            UUID itemId = UUID.randomUUID();
+            UUID itemId = addItemToPedidoMock(); // Adicionado para garantir que itemId exista
             when(pedidoRepository.findById(any())).thenThrow(new RuntimeException("Conexão perdida"));
             assertThrows(RuntimeException.class, () -> pedidoService.removerItemPedido(pedidoId, itemId));
         }
@@ -427,10 +426,7 @@ public class PedidoRollbackIntegrationTest {
         @Test
         @DisplayName("RB029 - Erro ao salvar -> Lista antiga de adicionais permanece intacta")
         void rb029() {
-            UUID itemId = UUID.randomUUID();
-            ItemPedido item = new ItemPedido(); item.setId(itemId); item.setPrecoUnitario(BigDecimal.TEN); item.setQuantidade(1);
-            pedidoMock.getItens().add(item);
-
+            UUID itemId = addItemToPedidoMock(); // Corrigido: Obtém o ID de um item adicionado
             when(pedidoRepository.save(any())).thenThrow(new RuntimeException("Tabela travada"));
             assertThrows(RuntimeException.class, () -> pedidoService.atualizarAdicionaisDoItem(pedidoId, itemId, List.of(UUID.randomUUID())));
         }
@@ -438,7 +434,7 @@ public class PedidoRollbackIntegrationTest {
         @Test
         @DisplayName("RB030 - Erro durante recálculo -> Rollback")
         void rb030() {
-            UUID itemId = UUID.randomUUID();
+            UUID itemId = addItemToPedidoMock(); // Corrigido: Obtém o ID de um item adicionado
             when(adicionalRepository.findAllById(any())).thenThrow(new RuntimeException("Mapeador falhou"));
             assertThrows(RuntimeException.class, () -> pedidoService.atualizarAdicionaisDoItem(pedidoId, itemId, List.of(UUID.randomUUID())));
         }
@@ -446,7 +442,7 @@ public class PedidoRollbackIntegrationTest {
         @Test
         @DisplayName("RB031 - Adicional inexistente -> Rollback")
         void rb031() {
-            UUID itemId = UUID.randomUUID();
+            UUID itemId = addItemToPedidoMock(); // Corrigido: Obtém o ID de um item adicionado
             when(adicionalRepository.findAllById(any())).thenReturn(new ArrayList<>()); // Vazio simula erro relacional
             try {
                 pedidoService.atualizarAdicionaisDoItem(pedidoId, itemId, List.of(UUID.randomUUID()));
@@ -456,13 +452,7 @@ public class PedidoRollbackIntegrationTest {
         @Test
         @DisplayName("RB032 - Erro de banco -> Rollback")
         void rb032() {
-            UUID itemId = UUID.randomUUID();
-            ItemPedido item = new ItemPedido(); // Cria um item
-            item.setId(itemId); // Define seu ID para corresponder ao que será atualizado
-            item.setPrecoUnitario(BigDecimal.TEN); // Define um preço para o cálculo
-            item.setQuantidade(1); // Define uma quantidade
-            pedidoMock.getItens().add(item); // Adiciona o item ao pedido mockado
-
+            UUID itemId = addItemToPedidoMock(); // Corrigido: Obtém o ID de um item adicionado
             when(pedidoRepository.save(any())).thenThrow(new DataIntegrityViolationException("Erro de dados"));
             assertThrows(DataIntegrityViolationException.class, () -> pedidoService.atualizarAdicionaisDoItem(pedidoId, itemId, List.of(UUID.randomUUID())));
         }
@@ -743,14 +733,14 @@ public class PedidoRollbackIntegrationTest {
         @DisplayName("RB055 - Erro na fila do caixa -> Rollback")
         void rb055() {
             when(filaImpressaoRepository.save(any())).thenThrow(new RuntimeException("Spooler do caixa travou"));
-            assertThrows(RuntimeException.class, () -> pedidoService.finalizarPedido(criarCheckoutDTO()));
+            assertThrows(RuntimeException.class, () -> pedidoService.finalizarDelivery(criarCheckoutDTO()));
         }
 
         @Test
         @DisplayName("RB056 - Erro em duas filas simultâneas -> Rollback")
         void rb056() {
             doThrow(new RuntimeException("Hardware desconectado")).when(filaImpressaoRepository).save(any());
-            assertThrows(RuntimeException.class, () -> pedidoService.finalizarPedido(criarCheckoutDTO()));
+            assertThrows(RuntimeException.class, () -> pedidoService.finalizarDelivery(criarCheckoutDTO()));
         }
 
         @Test
@@ -808,7 +798,7 @@ public class PedidoRollbackIntegrationTest {
             for (int i = 0; i < totalCheckouts; i++) {
                 executor.execute(() -> {
                     try {
-                        pedidoService.finalizarPedido(criarCheckoutDTO());
+                        pedidoService.finalizarDelivery(criarCheckoutDTO());
                     } catch (Exception ignored) {}
                 });
             }

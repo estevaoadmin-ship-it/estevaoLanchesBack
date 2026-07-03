@@ -10,7 +10,8 @@ import java.util.UUID;
 
 /**
  * Entidade que representa a partição financeira (subconta) de um atendimento.
- * Pertence a uma Comanda e vincula-se de forma exclusiva a um Cliente.
+ * Pertence a uma Comanda e vincula-se de forma opcional a um Cliente (Delivery/Retirada)
+ * ou possui identificação direta do responsável (Mesa).
  */
 @Entity
 @Table(name = "conta")
@@ -36,6 +37,12 @@ public class Conta {
     @Column(nullable = false, precision = 10, scale = 2)
     private BigDecimal valorTotal = BigDecimal.ZERO;
 
+    @Column(length = 100)
+    private String nomeResponsavel;
+
+    @Column(length = 20)
+    private String telefoneResponsavel;
+
     /**
      * 🎯 NOVA LÓGICA: Vinculo reverso com a Comanda Mestre da mesa.
      */
@@ -44,9 +51,12 @@ public class Conta {
     @JsonIgnoreProperties("contas")
     private Comanda comanda;
 
-
+    /**
+     * Mantido para compatibilidade com Delivery e Retirada.
+     * nullable alterado para true para suportar o fluxo puro de Mesa.
+     */
     @ManyToOne(fetch = FetchType.LAZY)
-    @JoinColumn(name = "cliente_id", nullable = false)
+    @JoinColumn(name = "cliente_id", nullable = true)
     @JsonIgnoreProperties("contas")
     private Cliente cliente;
 

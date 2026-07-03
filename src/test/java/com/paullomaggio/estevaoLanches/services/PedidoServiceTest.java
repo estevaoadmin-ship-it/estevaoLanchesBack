@@ -18,6 +18,7 @@ import org.springframework.messaging.simp.SimpMessagingTemplate;
 import java.math.BigDecimal;
 import java.util.*;
 
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.*;
@@ -128,15 +129,23 @@ class PedidoServiceTest {
             when(pedidoRepository.saveAndFlush(any())).thenReturn(pedidoMock);
             assertNotNull(pedidoService.processarPedidoMobile(criarRequestMobile(2)));
         }
-        @Test void ct006_novaContaHerdaClienteConta1() {
+        @Test @DisplayName("ct006_novaContaCriadaSemClienteHerdado") // Renomeado para refletir a nova regra
+        void ct006_novaContaCriadaSemClienteHerdado() {
             when(caixaRepository.existsByStatus(StatusCaixa.ABERTO)).thenReturn(true);
             when(contaRepository.findByComandaIdAndNumeroConta(comandaId, 2)).thenReturn(Optional.empty());
             when(comandaRepository.findById(comandaId)).thenReturn(Optional.of(comandaMock));
-            when(contaRepository.findByComandaIdAndNumeroConta(comandaId, 1)).thenReturn(Optional.of(contaMock));
-            when(contaRepository.save(any())).thenAnswer(i -> i.getArgument(0));
+            // REMOVIDO: when(contaRepository.findByComandaIdAndNumeroConta(comandaId, 1)).thenReturn(Optional.of(contaMock)); // Obsoleto
+            when(contaRepository.save(any(Conta.class))).thenAnswer(i -> {
+                Conta savedConta = i.getArgument(0);
+                // Assert that the newly created account does NOT have a client set by the service in this path
+                assertThat(savedConta.getCliente()).isNull(); // New assertion
+                return savedConta;
+            });
             when(produtoRepository.findById(produtoId)).thenReturn(Optional.of(produtoMock));
             when(pedidoRepository.saveAndFlush(any())).thenReturn(pedidoMock);
-            assertNotNull(pedidoService.processarPedidoMobile(criarRequestMobile(2)));
+            
+            PedidoResponseDTO response = pedidoService.processarPedidoMobile(criarRequestMobile(2));
+            assertNotNull(response);
         }
         @Test void ct007_novaContaAtributosIniciais() {
             Conta nConta = new Conta(); nConta.setPago(false); nConta.setValorTotal(BigDecimal.ZERO);
@@ -278,34 +287,31 @@ class PedidoServiceTest {
             when(carrinhoRepository.findByClienteId(clienteId)).thenReturn(Optional.of(carrinhoMock));
             when(pedidoRepository.save(any())).thenReturn(pedidoMock);
 
-            // 🎯 FIX: Construtor com todos os 10 argumentos corretos do record CheckoutRequestDTO
-            CheckoutRequestDTO dto = new CheckoutRequestDTO(
-                    clienteId, TipoPedido.DELIVERY, "Rua 1", null, "Sem cebola",
-                    "Carlos", "16999999999", FormaPagamento.PIX, new BigDecimal("35.00"), new ArrayList<>()
+            // 🎯 FIX: Construtor com todos os argumentos corretos do record CheckoutDeliveryRequestDTO
+            CheckoutDeliveryRequestDTO dto = new CheckoutDeliveryRequestDTO(
+                    clienteId, "Rua 1", FormaPagamento.PIX, "Sem cebola"
             );
-            assertNotNull(pedidoService.finalizarPedido(dto));
+            assertNotNull(pedidoService.finalizarDelivery(dto));
         }
         @Test void ct056_carrinhoInexistente() {
             when(caixaRepository.existsByStatus(StatusCaixa.ABERTO)).thenReturn(true);
             when(carrinhoRepository.findByClienteId(clienteId)).thenReturn(Optional.empty());
 
-            // 🎯 FIX: Construtor com todos os 10 argumentos corretos do record CheckoutRequestDTO
-            CheckoutRequestDTO dto = new CheckoutRequestDTO(
-                    clienteId, TipoPedido.DELIVERY, "Rua 1", null, "Sem cebola",
-                    "Carlos", "16999999999", FormaPagamento.PIX, new BigDecimal("35.00"), new ArrayList<>()
+            // 🎯 FIX: Construtor com todos os argumentos corretos do record CheckoutDeliveryRequestDTO
+            CheckoutDeliveryRequestDTO dto = new CheckoutDeliveryRequestDTO(
+                    clienteId, "Rua 1", FormaPagamento.PIX, "Sem cebola"
             );
-            assertThrows(ResourceNotFoundException.class, () -> pedidoService.finalizarPedido(dto));
+            assertThrows(ResourceNotFoundException.class, () -> pedidoService.finalizarDelivery(dto));
         }
         @Test void ct057_carrinhoVazio() {
             when(caixaRepository.existsByStatus(StatusCaixa.ABERTO)).thenReturn(true);
             when(carrinhoRepository.findByClienteId(clienteId)).thenReturn(Optional.of(carrinhoMock));
 
-            // 🎯 FIX: Construtor com todos os 10 argumentos corretos do record CheckoutRequestDTO
-            CheckoutRequestDTO dto = new CheckoutRequestDTO(
-                    clienteId, TipoPedido.DELIVERY, "Rua 1", null, "Sem cebola",
-                    "Carlos", "16999999999", FormaPagamento.PIX, new BigDecimal("35.00"), new ArrayList<>()
+            // 🎯 FIX: Construtor com todos os argumentos corretos do record CheckoutDeliveryRequestDTO
+            CheckoutDeliveryRequestDTO dto = new CheckoutDeliveryRequestDTO(
+                    clienteId, "Rua 1", FormaPagamento.PIX, "Sem cebola"
             );
-            assertThrows(BusinessRuleException.class, () -> pedidoService.finalizarPedido(dto));
+            assertThrows(BusinessRuleException.class, () -> pedidoService.finalizarDelivery(dto));
         }
         @Test void ct058_converterItemCarrinho() { assertTrue(true); }
         @Test void ct059_limparCarrinho() { assertTrue(true); }

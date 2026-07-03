@@ -6,6 +6,8 @@ import com.paullomaggio.estevaoLanches.dtos.*;
 import com.paullomaggio.estevaoLanches.entities.*;
 import com.paullomaggio.estevaoLanches.enums.*;
 import com.paullomaggio.estevaoLanches.repositories.*;
+import com.paullomaggio.estevaoLanches.services.ComandaService;
+import jakarta.persistence.EntityManager; // Importar EntityManager
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
@@ -26,6 +28,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
 import java.util.stream.Collectors;
+
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.hamcrest.Matchers.*;
@@ -50,6 +53,8 @@ class EstevaoLanchesE2ETest {
     @Autowired private ProdutoRepository produtoRepository;
     @Autowired private CategoriaRepository categoriaRepository;
     @Autowired private ObjectMapper objectMapper; // Injetar ObjectMapper
+    @Autowired private ComandaService comandaService; // Injetar ComandaService
+    @Autowired private EntityManager entityManager; // Injetar EntityManager
 
     private UUID empresaId;
     private UUID filialId;
@@ -64,13 +69,16 @@ class EstevaoLanchesE2ETest {
         tokenGarcomBearer = "Bearer token_simulado_garcom_jwt_2026";
 
         // Garante a existência de um usuário administrador para manipulação de caixas
-        Usuario admin = new Usuario();
-        admin.setNome("Estevão Adm");
-        admin.setEmail("admin@estevaolanches.com");
-        admin.setSenha("$2a$10$hash");
-        admin.setRole("ADMIN");
-        admin.setAtivo(true);
-        usuarioRepository.saveAndFlush(admin);
+        // 🎯 FIX: Tenta encontrar o usuário ADMIN primeiro. Se não existir, cria.
+        usuarioRepository.findByEmail("admin@estevaolanches.com").orElseGet(() -> {
+            Usuario newAdmin = new Usuario();
+            newAdmin.setNome("Estevão Adm");
+            newAdmin.setEmail("admin@estevaolanches.com");
+            newAdmin.setSenha("$2a$10$hash"); // Senha codificada
+            newAdmin.setRole("ADMIN");
+            newAdmin.setAtivo(true);
+            return usuarioRepository.saveAndFlush(newAdmin);
+        });
     }
 
     // =========================================================================
@@ -88,47 +96,71 @@ class EstevaoLanchesE2ETest {
         @BeforeEach
         void setupDeliveryTests() throws Exception {
             // Configura um cliente para operações de carrinho e checkout
-            RegistroDeliveryRequestDTO registro = new RegistroDeliveryRequestDTO("Cliente Teste", "cliente.teste@gmail.com", "11987654321", "senha123");
-            mockMvc.perform(post("/api/auth/registrar")
-                            .contentType(MediaType.APPLICATION_JSON)
-                            .content("{\"nome\":\"Cliente Teste\",\"email\":\"cliente.teste@gmail.com\",\"telefone\":\"11987654321\",\"senha\":\"senha123\"}"))
-                    .andExpect(status().isCreated());
-
-            ContaDelivery conta = contaDeliveryRepository.findByEmail("cliente.teste@gmail.com").orElseThrow();
-            clienteId = conta.getCliente().getId();
+            // 🎯 FIX: Tenta encontrar o cliente primeiro. Se não existir, registra.
+            ContaDelivery contaDelivery = contaDeliveryRepository.findByEmail("cliente.teste@gmail.com").orElseGet(() -> {
+                try {
+                    mockMvc.perform(post("/api/auth/registrar")
+                                    .contentType(MediaType.APPLICATION_JSON)
+                                    .content("{\"nome\":\"Cliente Teste\",\"email\":\"cliente.teste@gmail.com\",\"telefone\":\"11987654321\",\"senha\":\"senha123\"}"))
+                            .andExpect(status().isCreated());
+                    return contaDeliveryRepository.findByEmail("cliente.teste@gmail.com").orElseThrow();
+                } catch (Exception e) {
+                    throw new RuntimeException("Falha ao registrar cliente de teste: " + e.getMessage());
+                }
+            });
+            clienteId = contaDelivery.getCliente().getId();
 
             // Configura categoria
-            categoriaPrincipal = new Categoria();
-            categoriaPrincipal.setNome("Lanches");
-            categoriaPrincipal.setDescricao("Lanches diversos");
-            categoriaPrincipal.setOrdemExibicao(1);
-            categoriaRepository.save(categoriaPrincipal);
+            // 🎯 FIX: Tenta encontrar a categoria primeiro. Se não existir, cria.
+            categoriaPrincipal = categoriaRepository.findAll().stream()
+                    .filter(c -> c.getNome().equals("Lanches"))
+                    .findFirst()
+                    .orElseGet(() -> {
+                        Categoria newCategoria = new Categoria();
+                        newCategoria.setNome("Lanches");
+                        newCategoria.setDescricao("Lanches diversos");
+                        newCategoria.setOrdemExibicao(1);
+                        return categoriaRepository.save(newCategoria);
+                    });
+
 
             // Configura produtos
-            produto1 = new Produto();
-            produto1.setNome("Produto A");
-            produto1.setDescricao("Descricao Produto A");
-            produto1.setPreco(new BigDecimal("10.00"));
-            produto1.setStatus(StatusProduto.DISPONIVEL);
-            produto1.setCategoria(categoriaPrincipal);
-            produtoRepository.save(produto1);
+            // 🎯 FIX: Tenta encontrar o produto primeiro. Se não existir, cria.
+            produto1 = produtoRepository.findAll().stream()
+                    .filter(p -> p.getNome().equals("Produto A"))
+                    .findFirst()
+                    .orElseGet(() -> {
+                        Produto newProduto = new Produto();
+                        newProduto.setNome("Produto A");
+                        newProduto.setDescricao("Descricao Produto A");
+                        newProduto.setPreco(new BigDecimal("10.00"));
+                        newProduto.setStatus(StatusProduto.DISPONIVEL);
+                        newProduto.setCategoria(categoriaPrincipal);
+                        return produtoRepository.save(newProduto);
+                    });
 
-            produto2 = new Produto();
-            produto2.setNome("Produto B");
-            produto2.setDescricao("Descricao Produto B");
-            produto2.setPreco(new BigDecimal("15.00"));
-            produto2.setStatus(StatusProduto.DISPONIVEL);
-            produto2.setCategoria(categoriaPrincipal);
-            produtoRepository.save(produto2);
+            produto2 = produtoRepository.findAll().stream()
+                    .filter(p -> p.getNome().equals("Produto B"))
+                    .findFirst()
+                    .orElseGet(() -> {
+                        Produto newProduto = new Produto();
+                        newProduto.setNome("Produto B");
+                        newProduto.setDescricao("Descricao Produto B");
+                        newProduto.setPreco(new BigDecimal("15.00"));
+                        newProduto.setStatus(StatusProduto.DISPONIVEL);
+                        newProduto.setCategoria(categoriaPrincipal);
+                        return produtoRepository.save(newProduto);
+                    });
             produtoRepository.flush();
 
             // Configura: Abrir um caixa para permitir o checkout
-            Usuario operador = usuarioRepository.findAll().stream()
-                    .filter(u -> u.getRole().equals("ADMIN"))
-                    .findFirst()
-                    .orElseThrow(() -> new RuntimeException("Usuário ADMIN não encontrado para abrir o caixa."));
-            Caixa caixa = new Caixa(null, LocalDateTime.now(), null, StatusCaixa.ABERTO, BigDecimal.ZERO, null, null, null, operador, null);
-            caixaRepository.saveAndFlush(caixa);
+            // 🎯 FIX: Tenta encontrar um caixa aberto primeiro. Se não existir, abre um.
+            caixaRepository.findByStatus(StatusCaixa.ABERTO).orElseGet(() -> {
+                Usuario operador = usuarioRepository.findByEmail("admin@estevaolanches.com")
+                        .orElseThrow(() -> new RuntimeException("Usuário ADMIN não encontrado para abrir o caixa."));
+                Caixa caixa = new Caixa(null, LocalDateTime.now(), null, StatusCaixa.ABERTO, BigDecimal.ZERO, null, null, null, operador, null);
+                return caixaRepository.saveAndFlush(caixa);
+            });
         }
 
         @Test
@@ -148,21 +180,33 @@ class EstevaoLanchesE2ETest {
         @DisplayName("DELIVERY-E2E-003: Varredura de Catálogo Digital — Exibir Apenas Produtos Ativos")
         void deliveryE2E003() throws Exception {
             // Setup: Cria produtos ativos e inativos
-            Produto produtoAtivo = new Produto();
-            produtoAtivo.setNome("Hamburguer Ativo");
-            produtoAtivo.setDescricao("Delicioso hamburguer");
-            produtoAtivo.setPreco(new BigDecimal("25.00"));
-            produtoAtivo.setStatus(StatusProduto.DISPONIVEL);
-            produtoAtivo.setCategoria(categoriaPrincipal);
-            produtoRepository.save(produtoAtivo);
+            // 🎯 FIX: Tenta encontrar o produto primeiro. Se não existir, cria.
+            Produto produtoAtivo = produtoRepository.findAll().stream()
+                    .filter(p -> p.getNome().equals("Hamburguer Ativo"))
+                    .findFirst()
+                    .orElseGet(() -> {
+                        Produto newProduto = new Produto();
+                        newProduto.setNome("Hamburguer Ativo");
+                        newProduto.setDescricao("Delicioso hamburguer");
+                        newProduto.setPreco(new BigDecimal("25.00"));
+                        newProduto.setStatus(StatusProduto.DISPONIVEL);
+                        newProduto.setCategoria(categoriaPrincipal);
+                        return produtoRepository.save(newProduto);
+                    });
 
-            Produto produtoInativo = new Produto();
-            produtoInativo.setNome("Refrigerante Inativo");
-            produtoInativo.setDescricao("Refrigerante vencido");
-            produtoInativo.setPreco(new BigDecimal("7.00"));
-            produtoInativo.setStatus(StatusProduto.INDISPONIVEL);
-            produtoInativo.setCategoria(categoriaPrincipal);
-            produtoRepository.save(produtoInativo);
+
+            Produto produtoInativo = produtoRepository.findAll().stream()
+                    .filter(p -> p.getNome().equals("Refrigerante Inativo"))
+                    .findFirst()
+                    .orElseGet(() -> {
+                        Produto newProduto = new Produto();
+                        newProduto.setNome("Refrigerante Inativo");
+                        newProduto.setDescricao("Refrigerante vencido");
+                        newProduto.setPreco(new BigDecimal("7.00"));
+                        newProduto.setStatus(StatusProduto.INDISPONIVEL);
+                        newProduto.setCategoria(categoriaPrincipal);
+                        return produtoRepository.save(newProduto);
+                    });
             produtoRepository.flush();
 
             mockMvc.perform(get("/api/produtos")
@@ -356,8 +400,7 @@ class EstevaoLanchesE2ETest {
                     clienteId,
                     "Rua Teste, 123 - Bairro - Cidade - Estado - 12345-678",
                     FormaPagamento.PIX,
-                    "Observacao do pedido",
-                    null // Sem cupom por enquanto
+                    "Observacao do pedido"
             );
 
             MvcResult checkoutResult = mockMvc.perform(post("/api/delivery/pedidos/checkout")
@@ -434,13 +477,21 @@ class EstevaoLanchesE2ETest {
     class Teste2PedidoMesa {
 
         @Test
+        @WithMockUser(username = "garcom@tevao.com", roles = {"GARCOM"}) // 🎯 FIX: Adicionado autenticação
         @DisplayName("MESA-E2E-001 ao 002: Autenticação de Garçom e Garantia de Turno de Caixa Ativo")
         void mesaE2E001To002() throws Exception {
-            Usuario g = new DummyUsuarioBuilder().comRole("GARCOM").build();
-            usuarioRepository.saveAndFlush(g);
+            // 🎯 FIX: Tenta encontrar o usuário GARCOM primeiro. Se não existir, cria.
+            Usuario garcom = usuarioRepository.findByEmail("garcom@tevao.com").orElseGet(() -> {
+                Usuario newGarcom = new DummyUsuarioBuilder().comRole("GARCOM").build();
+                newGarcom.setEmail("garcom@tevao.com"); // Garante o email correto para o @WithMockUser
+                return usuarioRepository.saveAndFlush(newGarcom);
+            });
 
-            Caixa cx = new Caixa(null, LocalDateTime.now(), null, StatusCaixa.ABERTO, new BigDecimal("100.00"), null, null, null, g, null);
-            caixaRepository.saveAndFlush(cx);
+            // 🎯 FIX: Tenta encontrar um caixa aberto primeiro. Se não existir, abre um.
+            caixaRepository.findByStatus(StatusCaixa.ABERTO).orElseGet(() -> {
+                Caixa cx = new Caixa(null, LocalDateTime.now(), null, StatusCaixa.ABERTO, new BigDecimal("100.00"), null, null, null, garcom, null);
+                return caixaRepository.saveAndFlush(cx);
+            });
 
             assertThat(caixaRepository.existsByStatus(StatusCaixa.ABERTO)).isTrue();
         }
@@ -449,12 +500,41 @@ class EstevaoLanchesE2ETest {
         @WithMockUser(username = "garcom@tevao.com", roles = {"GARCOM"}) // Adicionado para simular autenticação
         @DisplayName("MESA-E2E-003 ao 006: Abertura Física de Mesa, Comanda e Vinculação de Subconta 1")
         void mesaE2E003To006() throws Exception {
-            // Removido .header("Authorization", tokenGarcomBearer)
+            // 🎯 FIX: Garante que não exista Comanda ABERTA para a mesa 5 antes de tentar abrir.
+            // Isso garante que o ComandaService.abrirPorNumeroMesa() realmente crie/altere o status da mesa.
+            comandaRepository.findByMesaNumeroAndStatus(5, StatusComanda.ABERTA).ifPresent(comanda -> {
+                try {
+                    // Fechar a comanda existente para garantir um estado consistente
+                    comandaService.fecharComanda(comanda.getId());
+                    entityManager.flush(); // Garante que o fechamento seja persistido
+                    entityManager.clear(); // Limpa o cache para a próxima leitura
+                } catch (Exception e) {
+                    throw new RuntimeException("Falha ao fechar comanda existente para mesa 5: " + e.getMessage());
+                }
+            });
+
+            // 🎯 FIX: Garante que a mesa esteja LIVRE antes de tentar abrir.
+            // Isso é importante para que o ComandaService.abrirPorNumeroMesa() altere o status para OCUPADA.
+            mesaRepository.findByNumero(5).ifPresent(m -> {
+                if (m.getStatus() != StatusMesa.LIVRE) {
+                    m.setStatus(StatusMesa.LIVRE);
+                    mesaRepository.saveAndFlush(m);
+                    entityManager.flush(); // Garante que o status LIVRE seja persistido
+                    entityManager.clear(); // Limpa o cache para a próxima leitura
+                }
+            });
+
             mockMvc.perform(post("/api/comandas/abrir/5"))
                     .andExpect(status().isOk())
                     .andExpect(jsonPath("$.status").value("ABERTA"))
                     .andExpect(jsonPath("$.numeroMesa").value(5));
 
+            // 🎯 FIX: Limpa o cache do Persistence Context antes de recarregar a entidade
+            entityManager.flush();
+            entityManager.clear();
+
+
+            // 🎯 FIX: Busca a Mesa novamente do repositório para garantir o estado mais recente após a operação
             Mesa mesa = mesaRepository.findByNumero(5).orElseThrow();
             assertThat(mesa.getStatus()).isEqualTo(StatusMesa.OCUPADA);
         }
@@ -490,16 +570,42 @@ class EstevaoLanchesE2ETest {
         }
 
         @Test
+        @WithMockUser(username = "garcom@tevao.com", roles = {"GARCOM"}) // 🎯 FIX: Adicionado autenticação
         @DisplayName("MESA-E2E-030: Encerramento de Sessão e Liberação do Status Físico da Mesa para LIVRE")
         void mesaE2E030() throws Exception {
-            Mesa mesa = mesaRepository.findByNumero(5).orElse(new Mesa());
-            mesa.setNumero(5);
+            // 🎯 FIX: Garante que a mesa exista e esteja OCUPADA antes de tentar liberá-la
+            // Para este teste, vamos garantir que a mesa 5 esteja OCUPADA com uma comanda aberta
+            // para simular o cenário de fechamento.
+            comandaRepository.findByMesaNumeroAndStatus(5, StatusComanda.ABERTA).ifPresent(comanda -> {
+                try {
+                    comandaService.fecharComanda(comanda.getId()); // Fecha qualquer comanda aberta
+                    entityManager.flush(); // Garante que o fechamento seja persistido
+                    entityManager.clear(); // Limpa o cache para a próxima leitura
+                } catch (Exception e) {
+                    throw new RuntimeException("Falha ao fechar comanda existente para mesa 5: " + e.getMessage());
+                }
+            });
+            // Abre uma nova comanda para garantir que a mesa esteja OCUPADA
+            mockMvc.perform(post("/api/comandas/abrir/5"))
+                    .andExpect(status().isOk());
+
+            // 🎯 FIX: Limpa o cache do Persistence Context antes de recarregar a entidade
+            entityManager.flush();
+            entityManager.clear();
+
+            Mesa mesa = mesaRepository.findByNumero(5).orElseThrow();
+            assertThat(mesa.getStatus()).isEqualTo(StatusMesa.OCUPADA); // Garante que a mesa está ocupada antes de liberar
+
+
             mesa.setStatus(StatusMesa.LIVRE);
-            mesa.setEmpresaId(empresaId);
-            mesa.setFilialId(filialId);
             Mesa salva = mesaRepository.saveAndFlush(mesa);
 
-            assertThat(salva.getStatus()).isEqualTo(StatusMesa.LIVRE);
+            // 🎯 FIX: Limpa o cache do Persistence Context antes de recarregar a entidade
+            entityManager.flush();
+            entityManager.clear();
+
+            Mesa mesaVerificada = mesaRepository.findByNumero(5).orElseThrow();
+            assertThat(mesaVerificada.getStatus()).isEqualTo(StatusMesa.LIVRE);
         }
     }
 
@@ -510,55 +616,114 @@ class EstevaoLanchesE2ETest {
     @WithMockUser(username = "gerente@tevao.com", roles = {"ADMIN"})
     @DisplayName("⚡ MEGA-ESTRESSE-E2E: Simulação de Pico de Atendimento com Carga Concorrente Total")
     void megaStressE2EDoSalao() throws Exception {
-        Usuario operador = usuarioRepository.findAll().get(0);
+        // 🎯 FIX: Garante que o operador exista e seja o ADMIN
+        Usuario operador = usuarioRepository.findByEmail("admin@estevaolanches.com")
+                .orElseThrow(() -> new RuntimeException("Usuário ADMIN não encontrado para abrir o caixa."));
 
         // 1. Abertura forçada de caixa limpo
-        caixaRepository.deleteAll();
+        caixaRepository.deleteAll(); // Limpa caixas existentes para garantir um novo
         Caixa caixaReal = new Caixa(null, LocalDateTime.now(), null, StatusCaixa.ABERTO, new BigDecimal("500.00"), null, null, null, operador, null);
         caixaRepository.saveAndFlush(caixaReal);
 
         List<String> comandasIds = new ArrayList<>();
+        List<Integer> mesasNumeros = new ArrayList<>(); // Para armazenar os números das mesas
+        List<Mesa> mesasCriadas = new ArrayList<>(); // Para armazenar as entidades Mesa criadas
 
         // 2. Abrir 10 Mesas Simultâneas de forma sequencial rápida
         for (int i = 1; i <= 10; i++) {
-            MvcResult res = mockMvc.perform(post("/api/comandas/abrir/" + i)
+            final int numeroMesa = i;
+            mesasNumeros.add(numeroMesa); // Adiciona o número da mesa à lista
+
+            // 🎯 FIX: Garante que não exista Comanda ABERTA para esta mesa antes de tentar abrir.
+            comandaRepository.findByMesaNumeroAndStatus(numeroMesa, StatusComanda.ABERTA).ifPresent(comanda -> {
+                try {
+                    comandaService.fecharComanda(comanda.getId());
+                    entityManager.flush(); // Garante que o fechamento seja persistido
+                    entityManager.clear(); // Limpa o cache para a próxima leitura
+                } catch (Exception e) {
+                    throw new RuntimeException("Falha ao fechar comanda existente para mesa " + numeroMesa + ": " + e.getMessage());
+                }
+            });
+
+            // 🎯 FIX: Garante que a mesa esteja LIVRE antes de tentar abrir
+            mesaRepository.findByNumero(numeroMesa).ifPresent(m -> {
+                if (m.getStatus() != StatusMesa.LIVRE) {
+                    m.setStatus(StatusMesa.LIVRE);
+                    mesaRepository.saveAndFlush(m);
+                    entityManager.flush(); // Garante que o status LIVRE seja persistido
+                    entityManager.clear(); // Limpa o cache para a próxima leitura
+                }
+            });
+
+            MvcResult res = mockMvc.perform(post("/api/comandas/abrir/" + numeroMesa)
                             .contentType(MediaType.APPLICATION_JSON))
                     .andExpect(status().isOk())
                     .andReturn();
 
+            // 🎯 FIX: Limpa o cache do Persistence Context após a operação do MockMvc
+            entityManager.flush();
+            entityManager.clear();
+
             String idComanda = JsonPath.read(res.getResponse().getContentAsString(), "$.id");
             comandasIds.add(idComanda);
 
+            // Armazena a entidade Mesa que foi aberta
+            Mesa mesaAberta = mesaRepository.findByNumero(numeroMesa).orElseThrow();
+            mesasCriadas.add(mesaAberta);
+
+
             // 3. Criar 3 subcontas associadas em cada mesa ativa
             for (int nrConta = 2; nrConta <= 4; nrConta++) {
-                Conta c = new Conta();
-                c.setNumeroConta(nrConta);
-                c.setPago(false);
-                c.setValorTotal(BigDecimal.ZERO);
-                c.setComanda(comandaRepository.findById(UUID.fromString(idComanda)).get());
-                c.setCliente(clienteRepository.findAll().get(0));
-                contaRepository.save(c);
+                final int numeroConta = nrConta;
+                // 🎯 FIX: Tenta encontrar a conta primeiro. Se não existir, cria.
+                contaRepository.findByComandaIdAndNumeroConta(UUID.fromString(idComanda), numeroConta).orElseGet(() -> {
+                    Conta c = new Conta();
+                    c.setNumeroConta(numeroConta);
+                    c.setPago(false);
+                    c.setValorTotal(BigDecimal.ZERO);
+                    c.setComanda(comandaRepository.findById(UUID.fromString(idComanda)).get());
+                    // 🎯 FIX: Garante que o cliente exista ou cria um novo
+                    Cliente clientePadrao = clienteRepository.findAll().stream().findFirst().orElseGet(() -> {
+                        Cliente newCliente = new Cliente();
+                        newCliente.setNome("Cliente Padrão");
+                        return clienteRepository.save(newCliente);
+                    });
+                    c.setCliente(clientePadrao);
+                    return contaRepository.save(c);
+                });
             }
         }
         contaRepository.flush();
+
+        // 🎯 FIX: Limpa o cache do Persistence Context antes de recarregar as entidades
+        entityManager.flush();
+        entityManager.clear();
 
         // 4. Lançar carga massiva de pedidos e validações de filas de produção
         for (String idComanda : comandasIds) {
             Comanda cmd = comandaRepository.findById(UUID.fromString(idComanda)).orElseThrow();
             assertThat(cmd.getStatus()).isEqualTo(StatusComanda.ABERTA);
-            assertThat(cmd.getMesa().getStatus()).isEqualTo(StatusMesa.OCUPADA);
+            // 🎯 FIX: Busca a Mesa diretamente do repositório para garantir o estado mais recente
+            Mesa mesa = mesaRepository.findByNumero(cmd.getMesa().getNumero()).orElseThrow();
+            assertThat(mesa.getStatus()).isEqualTo(StatusMesa.OCUPADA);
         }
 
         // 5. Simular fechamento parcial de subcontas, rebatimento em gaveta e encerramento
-        for (int i = 1; i <= 10; i++) {
-            Mesa m = mesaRepository.findByNumero(i).get();
-            m.setStatus(StatusMesa.LIVRE);
-            mesaRepository.save(m);
+        // 🎯 FIX: Itera sobre as entidades Mesa que foram criadas no teste
+        for (Mesa mesa : mesasCriadas) {
+            mesa.setStatus(StatusMesa.LIVRE);
+            mesaRepository.save(mesa);
         }
         mesaRepository.flush();
 
+        // 🎯 FIX: Limpa o cache do Persistence Context antes de recarregar as entidades
+        entityManager.flush();
+        entityManager.clear();
+
         // Prova Real e Reconciliação Final de Estado
-        assertThat(mesaRepository.findAll().stream().allMatch(m -> m.getStatus() == StatusMesa.LIVRE)).isTrue();
+        // 🎯 FIX: Valida apenas as mesas criadas pelo teste
+        assertThat(mesasCriadas.stream() // Agora valida sobre a lista de Mesas criadas
+                .allMatch(m -> mesaRepository.findByNumero(m.getNumero()).orElseThrow().getStatus() == StatusMesa.LIVRE)).isTrue();
         assertThat(caixaRepository.existsByStatus(StatusCaixa.ABERTO)).isTrue();
     }
 

@@ -5,7 +5,7 @@ import com.paullomaggio.estevaoLanches.entities.*;
 import com.paullomaggio.estevaoLanches.enums.*;
 import com.paullomaggio.estevaoLanches.exceptions.ResourceNotFoundException;
 import com.paullomaggio.estevaoLanches.repositories.*;
-import com.paullomaggio.estevaoLanches.services.especialistas.PedidoPDVService;
+import com.paullomaggio.estevaoLanches.services.core.PedidoCoreService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -18,7 +18,8 @@ import java.util.UUID;
 @RequiredArgsConstructor
 public class GarcomMesaSessaoService {
 
-    private final PedidoPDVService pedidoPDVService;
+    // 🎯 CORREÇÃO: Injeção do serviço correto para processamento de lotes mobile
+    private final PedidoCoreService coreService;
     private final MesaRepository mesaRepository;
     private final ComandaRepository comandaRepository;
 
@@ -36,28 +37,27 @@ public class GarcomMesaSessaoService {
         for (var contaSync : request.contas()) {
             if (contaSync.novosItens() != null && !contaSync.novosItens().isEmpty()) {
 
-                // 🎯 FIX: Passando os 6 argumentos exigidos pelo construtor do seu ItemPedidoPayloadDTO
                 List<PedidoMobileRequestDTO.ItemPedidoPayloadDTO> itensParaLegado = contaSync.novosItens().stream()
                         .map(itemNovo -> new PedidoMobileRequestDTO.ItemPedidoPayloadDTO(
                                 itemNovo.produtoId(),
-                                null, // nome (O seu PedidoPDVService resolve internamente pelo ID)
+                                null,
                                 itemNovo.quantidade(),
-                                null, // precoCalculado (O seu PedidoPDVService calcula nativamente no backend)
+                                null,
                                 itemNovo.observacao(),
                                 itemNovo.adicionaisIds()
                         )).toList();
 
-                // 🎯 FIX: Organizada a ordem exata dos parâmetros do seu PedidoMobileRequestDTO mestre
+                // Organizada a ordem exata dos parâmetros do seu PedidoMobileRequestDTO mestre
                 PedidoMobileRequestDTO loteRequest = new PedidoMobileRequestDTO(
-                        request.comandaId(),      // comandaId
-                        mesa.getNumero(),         // numeroMesa
-                        contaSync.numeroConta(),  // numeroConta
-                        null,                     // cliente payload (Opcional no fluxo de inserção de itens)
-                        itensParaLegado           // lista de itens
+                        request.comandaId(),
+                        mesa.getNumero(),
+                        contaSync.numeroConta(),
+                        null,
+                        itensParaLegado
                 );
 
-                // Dispara a sua regra de negócio nativa (calcula preço, valida caixa e manda imprimir)
-                pedidoPDVService.processarPedidoMobile(loteRequest);
+                // 🎯 CORREÇÃO: Roteamento para a infraestrutura correta da aplicação
+                coreService.processarPedidoMobile(loteRequest);
             }
         }
 
@@ -114,7 +114,7 @@ public class GarcomMesaSessaoService {
                                         valorTotalItem,
                                         item.getObservacaoItem(),
                                         item.getProduto().getPrecisaPreparo(),
-                                        true, // Se veio do banco, o item já foi "enviado" (Fica cinza na UI)
+                                        true,
                                         adicionaisDTO
                                 );
                             }).toList();
@@ -124,20 +124,19 @@ public class GarcomMesaSessaoService {
                             .map(GarcomMesaSessaoResponseDTO.ItemSessaoDTO::valorTotal)
                             .reduce(BigDecimal.ZERO, BigDecimal::add);
 
-                    // Mapeia o cliente vinculado à subconta (se houver)
+                    // 🎯 CORREÇÃO: Alinhamento de Domínio. Mesa não possui entidade Cliente persistida.
+                    // Os dados são extraídos de forma segura dos campos do responsável da própria subconta.
                     GarcomMesaSessaoResponseDTO.ClienteSessaoDTO clienteDTO = null;
-                    if (conta.getCliente() != null) {
-                        // 🎯 FIX: getTelefone() alterado para getNumero() conforme mapeado na sua Entidade Cliente
+                    if (conta.getNomeResponsavel() != null && !conta.getNomeResponsavel().isBlank()) {
                         clienteDTO = new GarcomMesaSessaoResponseDTO.ClienteSessaoDTO(
-                                conta.getCliente().getId(),
-                                conta.getCliente().getNome(),
-                                conta.getCliente().getNumero()
+                                conta.getId(),
+                                conta.getNomeResponsavel(),
+                                conta.getTelefoneResponsavel()
                         );
                     }
 
                     // Define os status visuais e de estado para o aplicativo
                     boolean isSelecionada = conta.getId().equals(contaSelecionadaId);
-                    // 🎯 FIX: StatusConta fantasma alterado para usar seu StatusPagamento oficial
                     StatusPagamento statusConta = conta.getPago() ? StatusPagamento.PAGO : StatusPagamento.ABERTO;
 
                     return new GarcomMesaSessaoResponseDTO.ContaSessaoDTO(
