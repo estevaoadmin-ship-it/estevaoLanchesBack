@@ -1,5 +1,7 @@
 package com.paullomaggio.estevaoLanches.services;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.SerializationFeature;
 import com.paullomaggio.estevaoLanches.dtos.*;
 import com.paullomaggio.estevaoLanches.entities.*;
 import com.paullomaggio.estevaoLanches.enums.*;
@@ -7,6 +9,8 @@ import com.paullomaggio.estevaoLanches.exceptions.BusinessRuleException;
 import com.paullomaggio.estevaoLanches.exceptions.ResourceNotFoundException;
 import com.paullomaggio.estevaoLanches.repositories.*;
 import lombok.RequiredArgsConstructor;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.messaging.simp.SimpMessagingTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -21,6 +25,8 @@ import java.util.UUID;
 @Service
 @RequiredArgsConstructor
 public class PedidoService {
+
+    private static final Logger log = LoggerFactory.getLogger(PedidoService.class);
 
     private final PedidoRepository pedidoRepository;
     private final CarrinhoRepository carrinhoRepository;
@@ -59,16 +65,42 @@ public class PedidoService {
             throw new BusinessRuleException("Bloqueio comercial: Esta subconta já foi encerrada e paga no caixa.");
         }
 
+        // AUDITORIA 3
+        log.info("==============================");
+        log.info("CRIANDO PEDIDO - PedidoService.processarPedidoMobile()");
+        log.info("==============================");
+        log.info("Mesa Número: {}", dto.numeroMesa());
+        log.info("Conta ID: {}", conta.getId());
+        log.info("Conta Número: {}", conta.getNumeroConta());
+        log.info("Itens recebidos no DTO: {}", dto.itens().size());
+
+        for (var itemDto : dto.itens()) {
+            log.info(
+                "  Produto ID: {} | Quantidade: {} | Observação: {}",
+                itemDto.produtoId(),
+                itemDto.quantidade(),
+                itemDto.observacao()
+            );
+        }
+        log.info("==============================");
+
+
         Pedido pedido = new Pedido();
-        pedido.setConta(conta);
+        pedido.setConta(conta); // AUDITORIA 9: Vinculando Pedido à Conta
         pedido.setStatus(StatusPedido.RECEBIDO);
         pedido.setTipo(TipoPedido.MESA);
         pedido.setNumeroMesa(dto.numeroMesa());
         pedido.setTotal(BigDecimal.ZERO);
         pedido.setItens(new ArrayList<>());
 
+        // Lógica existente para preencher o nome do cliente, se fornecido no DTO
         if (dto.cliente() != null && dto.cliente().nome() != null) {
             pedido.setNomeClienteBalcao(dto.cliente().nome().toUpperCase().trim());
+        }
+
+        // Fallback: Se o nome do cliente não foi preenchido pela lógica acima, vincular o responsável da mesa
+        if (pedido.getNomeClienteBalcao() == null || pedido.getNomeClienteBalcao().isBlank()) {
+            vincularResponsavelMesa(pedido, conta);
         }
 
         BigDecimal subtotalLote = BigDecimal.ZERO;
@@ -95,7 +127,7 @@ public class PedidoService {
             item.setQuantidade(itemDto.quantidade());
             item.setPrecoUnitario(precoFinalItemUnitario);
             item.setAdicionais(adicionaisVinculados);
-            item.setPedido(pedido);
+            item.setPedido(pedido); // AUDITORIA 9: Vinculando ItemPedido ao Pedido
             item.setObservacaoItem(itemDto.observacao());
             item.setNumeroConta(dto.numeroConta());
             item.setStatusPagamento(StatusPagamento.ABERTO);
@@ -109,7 +141,94 @@ public class PedidoService {
         }
 
         pedido.setTotal(subtotalLote);
-        Pedido pedidoSalvo = pedidoRepository.saveAndFlush(pedido);
+        Pedido pedidoSalvo = pedidoRepository.saveAndFlush(pedido); // AUDITORIA 4: Pedido salvo aqui
+
+        // AUDITORIA 4
+        log.info("=============================");
+        log.info("AUDITORIA 4 - PedidoService.processarPedidoMobile() - Pedido Salvo");
+        log.info("=============================");
+        log.info("Pedido salvo:");
+        log.info("  ID: {}", pedidoSalvo.getId());
+        log.info("  Conta ID: {}", pedidoSalvo.getConta().getId());
+        log.info("  Mesa Número: {}", pedidoSalvo.getNumeroMesa());
+        log.info("  Quantidade de itens no Pedido salvo: {}", pedidoSalvo.getItens().size());
+        log.info("  Itens do Pedido salvo:");
+        pedidoSalvo.getItens().forEach(item -> {
+            log.info("    - UUID: {}", item.getId());
+            log.info("      Produto: {}", item.getProduto().getNome());
+            log.info("      Quantidade: {}", item.getQuantidade());
+            log.info("      Valor Unitário: {}", item.getPrecoUnitario());
+            log.info("      Valor Total Item: {}", item.getPrecoUnitario().multiply(BigDecimal.valueOf(item.getQuantidade())));
+        });
+        log.info("=============================");
+
+        // AUDITORIA 5
+        log.info("=============================");
+        log.info("AUDITORIA 5 - PedidoService.processarPedidoMobile() - Verificando Pedido no Banco (findById)");
+        log.info("=============================");
+        Pedido pedidoBanco = pedidoRepository.findById(pedidoSalvo.getId())
+                .orElseThrow(() -> new ResourceNotFoundException("Pedido salvo não encontrado no banco."));
+        log.info("Pedido ID do banco: {}", pedidoBanco.getId());
+        log.info("pedidoBanco.getItens().size(): {}", pedidoBanco.getItens().size());
+        pedidoBanco.getItens().forEach(item -> {
+            log.info("    - Item ID: {}, Produto: {}, Quantidade: {}", item.getId(), item.getProduto().getNome(), item.getQuantidade());
+        });
+        log.info("=============================");
+
+        // AUDITORIA FINAL - CONTA EM MEMÓRIA
+        log.info("==========================================");
+        log.info("AUDITORIA FINAL - CONTA EM MEMÓRIA");
+        log.info("==========================================");
+
+        log.info("Conta ID: {}", conta.getId());
+        log.info("Pedidos na memória: {}", conta.getPedidos().size());
+
+        for (Pedido p : conta.getPedidos()) {
+            log.info("Pedido ID: {}", p.getId());
+
+            if (p.getItens() != null) {
+                log.info("Quantidade de itens: {}", p.getItens().size());
+
+                for (ItemPedido item : p.getItens()) {
+                    log.info(
+                        "Produto={} Quantidade={}",
+                        item.getProduto().getNome(),
+                        item.getQuantidade()
+                    );
+                }
+            }
+        }
+        log.info("==========================================");
+
+        // Recarregue a Conta do banco.
+        Conta contaBanco = contaRepository.findById(conta.getId())
+                .orElseThrow(() -> new ResourceNotFoundException("Conta não encontrada após salvar pedido."));
+
+        // AUDITORIA FINAL - CONTA RECARREGADA DO BANCO
+        log.info("==========================================");
+        log.info("AUDITORIA FINAL - CONTA RECARREGADA DO BANCO");
+        log.info("==========================================");
+
+        log.info("Conta ID: {}", contaBanco.getId());
+        log.info("Pedidos no banco: {}", contaBanco.getPedidos().size());
+
+        for (Pedido p : contaBanco.getPedidos()) {
+            log.info("Pedido ID: {}", p.getId());
+
+            if (p.getItens() != null) {
+                log.info("Quantidade de itens: {}", p.getItens().size());
+
+                for (ItemPedido item : p.getItens()) {
+                    log.info(
+                        "Produto={} Quantidade={}",
+                        item.getProduto().getNome(),
+                        item.getQuantidade()
+                    );
+                }
+            }
+        }
+        log.info("==========================================");
+
 
         if (necessitaPreparoCozinha) {
             FilaImpressao cupomCozinha = new FilaImpressao();
@@ -575,5 +694,23 @@ public class PedidoService {
             }
         }
         return listagemFinal;
+    }
+
+    private void vincularResponsavelMesa(Pedido pedido, Conta conta) {
+        String clienteNome;
+        if (conta.hasRealResponsavel()) {
+            clienteNome = conta.getNomeResponsavel().trim().toUpperCase();
+        } else {
+            clienteNome = String.format(
+                    "MESA %d - CONTA %d",
+                    conta.getComanda().getMesa().getNumero(),
+                    conta.getNumeroConta()
+            );
+        }
+        pedido.setNomeClienteBalcao(clienteNome);
+        log.info("[PEDIDO-MESA] Mesa: {}, Conta: {}, Cliente propagado: {}",
+                conta.getComanda().getMesa().getNumero(),
+                conta.getNumeroConta(),
+                clienteNome);
     }
 }

@@ -7,6 +7,8 @@ import java.math.BigDecimal;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 /**
  * Entidade que representa a partição financeira (subconta) de um atendimento.
@@ -67,4 +69,28 @@ public class Conta {
     @OneToMany(mappedBy = "conta", cascade = CascadeType.ALL, orphanRemoval = true)
     @JsonIgnoreProperties("conta")
     private List<Pagamento> pagamentos = new ArrayList<>();
+
+    /**
+     * Verifica se a conta já possui um responsável "real" cadastrado,
+     * ou seja, um nome que não seja o padrão gerado automaticamente.
+     *
+     * @return true se um responsável real já estiver cadastrado, false caso contrário.
+     */
+    public boolean hasRealResponsavel() {
+        if (nomeResponsavel == null || nomeResponsavel.isBlank()) {
+            return false;
+        }
+
+        // Regex para identificar o padrão "MESA X - CONTA Y"
+        Pattern pattern = Pattern.compile("^MESA \\d+ - CONTA \\d+$");
+        Matcher matcher = pattern.matcher(nomeResponsavel);
+
+        // Se o nome for o padrão automático, não é um responsável real
+        if (matcher.matches()) {
+            return false;
+        }
+
+        // Se o nome não for o padrão e não for vazio, e o telefone também estiver presente, é um responsável real
+        return telefoneResponsavel != null && !telefoneResponsavel.isBlank();
+    }
 }

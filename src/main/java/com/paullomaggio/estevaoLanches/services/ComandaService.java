@@ -95,7 +95,7 @@ public class ComandaService {
         Comanda comanda = comandaRepository.findById(id)
                 .orElseThrow(() -> new ResourceNotFoundException("Comanda não localizada com o ID: " + id));
         comanda.setStatus(novoStatus);
-        return new ComandaResponseDTO(comandaRepository.save(comanda), false);
+        return new ComandaResponseDTO(comandaRepository.save(comanda), true);
     }
 
     @Transactional
@@ -116,21 +116,21 @@ public class ComandaService {
             mesaRepository.save(mesa);
         }
 
-        return new ComandaResponseDTO(comandaRepository.save(comanda), false);
+        return new ComandaResponseDTO(comandaRepository.save(comanda), true);
     }
 
     @Transactional(readOnly = true)
     public ComandaResponseDTO buscarPorId(UUID id) {
         Comanda comanda = comandaRepository.findById(id)
                 .orElseThrow(() -> new ResourceNotFoundException("Comanda não localizada com o ID: " + id));
-        return new ComandaResponseDTO(comanda, false);
+        return new ComandaResponseDTO(comanda, true);
     }
 
     @Transactional(readOnly = true)
     public List<ComandaResponseDTO> listarTodasAtivas() {
         // ✅ Busca otimizada com delegação de filtro para o banco
         return comandaRepository.findByStatus(StatusComanda.ABERTA).stream()
-                .map(c -> new ComandaResponseDTO(c, false))
+                .map(c -> new ComandaResponseDTO(c, true))
                 .collect(Collectors.toList());
     }
 }

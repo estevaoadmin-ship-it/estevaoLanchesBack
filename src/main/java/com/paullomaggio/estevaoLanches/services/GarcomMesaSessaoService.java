@@ -1,12 +1,17 @@
 package com.paullomaggio.estevaoLanches.services;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.SerializationFeature;
 import com.paullomaggio.estevaoLanches.dtos.*;
 import com.paullomaggio.estevaoLanches.entities.*;
 import com.paullomaggio.estevaoLanches.enums.*;
+import com.paullomaggio.estevaoLanches.exceptions.BusinessRuleException;
 import com.paullomaggio.estevaoLanches.exceptions.ResourceNotFoundException;
 import com.paullomaggio.estevaoLanches.repositories.*;
 import com.paullomaggio.estevaoLanches.services.core.PedidoCoreService;
 import lombok.RequiredArgsConstructor;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -18,10 +23,11 @@ import java.util.UUID;
 @RequiredArgsConstructor
 public class GarcomMesaSessaoService {
 
-    // 🎯 CORREÇÃO: Injeção do serviço correto para processamento de lotes mobile
+    private static final Logger log = LoggerFactory.getLogger(GarcomMesaSessaoService.class);
     private final PedidoCoreService coreService;
     private final MesaRepository mesaRepository;
     private final ComandaRepository comandaRepository;
+    private final ContaRepository contaRepository; // Inject ContaRepository
 
     /**
      * 📥 ESCRITA (SYNC): Recebe os itens novos (verdes) do Mobile e persiste no banco.
@@ -62,7 +68,35 @@ public class GarcomMesaSessaoService {
         }
 
         // 3. Retorna a foto atualizada do banco para limpar os itens verdes no Mobile
-        return obterSessao(mesaId);
+        GarcomMesaSessaoResponseDTO dto = obterSessao(mesaId);
+
+        // AUDITORIA 2
+        log.info("=============================");
+        log.info("AUDITORIA 2 - sincronizarSessao");
+        log.info("=============================");
+        log.info("Quantidade de contas: {}", dto.contas().size());
+        int totalPedidos = dto.contas().stream().mapToInt(c -> c.itens().size()).sum(); // Assuming items are flattened from pedidos
+        log.info("Quantidade de itens: {}", totalPedidos);
+
+        try {
+            ObjectMapper mapper = new ObjectMapper();
+            mapper.enable(SerializationFeature.INDENT_OUTPUT);
+            String json = mapper.writeValueAsString(dto);
+            log.info("JSON completo do DTO retornado por sincronizarSessao:\n{}", json);
+
+            boolean hasEmptyItems = dto.contas().stream().anyMatch(c -> c.itens().isEmpty());
+            if (hasEmptyItems) {
+                log.info("Existe conta com lista de itens vazia: {}", hasEmptyItems);
+            } else {
+                log.info("Todas as contas possuem itens.");
+            }
+
+        } catch (Exception e) {
+            log.error("Erro ao serializar DTO em sincronizarSessao", e);
+        }
+        log.info("=============================");
+
+        return dto;
     }
 
     /**
@@ -85,9 +119,41 @@ public class GarcomMesaSessaoService {
                 .findFirst()
                 .orElse(comanda.getContas().isEmpty() ? null : comanda.getContas().get(0).getId());
 
+        // AUDITORIA FINAL - obterSessao()
+        log.info("==========================================");
+        log.info("AUDITORIA FINAL - obterSessao()");
+        log.info("==========================================");
+
+        for (Conta conta : comanda.getContas()) {
+            log.info("Conta {}", conta.getNumeroConta());
+            log.info("Pedidos: {}", conta.getPedidos().size());
+            for (Pedido pedido : conta.getPedidos()) {
+                log.info("Pedido {}", pedido.getId());
+                log.info("Itens: {}", pedido.getItens().size());
+            }
+        }
+        log.info("==========================================");
+
         // 4. Mapeia a árvore de Contas -> Pedidos -> Itens -> Adicionais
         List<GarcomMesaSessaoResponseDTO.ContaSessaoDTO> contasDTO = comanda.getContas().stream()
                 .map(conta -> {
+                    // AUDITORIA 7
+                    log.info("=============================");
+                    log.info("AUDITORIA 7 - GarcomMesaSessaoService.obterSessao() - Conta carregada");
+                    log.info("=============================");
+                    log.info("Conta UUID: {}", conta.getId());
+                    log.info("Conta Número: {}", conta.getNumeroConta());
+                    log.info("conta.getPedidos().size(): {}", conta.getPedidos().size());
+                    if (!conta.getPedidos().isEmpty()) {
+                        conta.getPedidos().forEach(p -> {
+                            log.info("  - Pedido ID: {}", p.getId());
+                            log.info("    Itens no Pedido: {}", p.getItens().size());
+                            p.getItens().forEach(item -> log.info("      - Item ID: {}, Produto: {}, Quantidade: {}", item.getId(), item.getProduto().getNome(), item.getQuantidade()));
+                        });
+                    } else {
+                        log.info("  Nenhum pedido encontrado na Conta carregada em obterSessao.");
+                    }
+                    log.info("=============================");
 
                     // Coleta e achata todos os itens de todos os pedidos ativos (não cancelados) da subconta
                     List<GarcomMesaSessaoResponseDTO.ItemSessaoDTO> itensDTO = conta.getPedidos().stream()
@@ -151,7 +217,7 @@ public class GarcomMesaSessaoService {
                 }).toList();
 
         // 5. Consolida e retorna o DTO Agregador pronto para o JSON
-        return new GarcomMesaSessaoResponseDTO(
+        GarcomMesaSessaoResponseDTO dto = new GarcomMesaSessaoResponseDTO(
                 mesa.getId(),
                 mesa.getNumero(),
                 mesa.getStatus(),
@@ -161,5 +227,63 @@ public class GarcomMesaSessaoService {
                 contaSelecionadaId,
                 contasDTO
         );
+
+        // AUDITORIA 1 e 4
+        log.info("=============================");
+        log.info("AUDITORIA 1 e 4 - obterSessao");
+        log.info("=============================");
+        log.info("Mesa: {}", dto.numeroMesa());
+        log.info("UUID da Mesa: {}", dto.mesaId());
+        log.info("Quantidade de contas: {}", dto.contas().size());
+
+        for (int i = 0; i < dto.contas().size(); i++) {
+            GarcomMesaSessaoResponseDTO.ContaSessaoDTO conta = dto.contas().get(i);
+            log.info("Conta {}:", i + 1);
+            log.info("  UUID: {}", conta.id());
+            log.info("  Número: {}", conta.numeroConta());
+            if (conta.cliente() != null) {
+                log.info("  Cliente: {}", conta.cliente().nome());
+            } else {
+                log.info("  Cliente: N/A");
+            }
+            log.info("  Quantidade de pedidos (itens): {}", conta.itens().size()); // Assuming items are flattened from pedidos
+
+            // AUDITORIA 8
+            log.info("AUDITORIA 8 - Detalhes da Conta {}", i + 1);
+            log.info("  Conta UUID: {}", conta.id());
+            log.info("  Número da Conta: {}", conta.numeroConta());
+            log.info("  Quantidade de itens: {}", conta.itens().size());
+            log.info("  Lista dos itens:");
+            conta.itens().forEach(item -> log.info("    - {} ({}x)", item.nomeProduto(), item.quantidade()));
+        }
+
+        try {
+            ObjectMapper mapper = new ObjectMapper();
+            mapper.enable(SerializationFeature.INDENT_OUTPUT);
+            String json = mapper.writeValueAsString(dto);
+            log.info("JSON completo do DTO retornado por obterSessao:\n{}", json);
+        } catch (Exception e) {
+            log.error("Erro ao serializar DTO em obterSessao", e);
+        }
+        log.info("=============================");
+
+        return dto;
+    }
+
+    @Transactional
+    public GarcomMesaSessaoResponseDTO salvarResponsavel(UUID contaId, SalvarResponsavelRequestDTO dto) {
+        Conta conta = contaRepository.findById(contaId)
+                .orElseThrow(() -> new ResourceNotFoundException("Conta não encontrada com o ID: " + contaId));
+
+        if (conta.hasRealResponsavel()) {
+            throw new BusinessRuleException("Já existe um responsável cadastrado para esta conta.");
+        }
+
+        conta.setNomeResponsavel(dto.nome());
+        conta.setTelefoneResponsavel(dto.telefone());
+        contaRepository.save(conta);
+
+        // Return updated session DTO
+        return obterSessao(conta.getComanda().getMesa().getId());
     }
 }

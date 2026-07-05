@@ -39,6 +39,7 @@ class ComandaControllerTest {
     private UUID comandaId;
     private UUID empresaId;
     private UUID filialId;
+    private UUID mesaId; // Declarado mesaId
 
     @BeforeEach
     void setUp() {
@@ -46,6 +47,7 @@ class ComandaControllerTest {
         comandaId = UUID.randomUUID();
         empresaId = UUID.randomUUID();
         filialId = UUID.randomUUID();
+        mesaId = UUID.randomUUID(); // Inicializado mesaId
 
         comandaResponseMock = new ComandaResponseDTO(
                 comandaId,
@@ -55,12 +57,14 @@ class ComandaControllerTest {
                 empresaId,
                 filialId,
                 8,
+                mesaId, // 🎯 FIX: Adicionado o novo campo mesaId
                 false
         );
     }
 
-    private ComandaResponseDTO criarTemplate(StatusComanda status, Integer mesa, LocalDateTime fechadaEm) {
-        return new ComandaResponseDTO(comandaId, status, LocalDateTime.now().minusHours(1), fechadaEm, empresaId, filialId, mesa, false);
+    private ComandaResponseDTO criarTemplate(StatusComanda status, Integer numeroMesa, LocalDateTime fechadaEm) {
+        // 🎯 FIX: Adicionado o novo campo mesaId
+        return new ComandaResponseDTO(comandaId, status, LocalDateTime.now().minusHours(1), fechadaEm, empresaId, filialId, numeroMesa, UUID.randomUUID(), false);
     }
 
     // =========================================================================
