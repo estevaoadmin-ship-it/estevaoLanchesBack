@@ -11,22 +11,27 @@ import com.paullomaggio.estevaoLanches.repositories.*;
 import lombok.RequiredArgsConstructor;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.messaging.simp.SimpMessagingTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
+import java.sql.SQLException;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Random;
 import java.util.UUID;
+import java.util.Optional;
 
 @Service
 @RequiredArgsConstructor
 public class PedidoService {
 
     private static final Logger log = LoggerFactory.getLogger(PedidoService.class);
+    private static final String UNIQUE_CONSTRAINT_CONTA_NUMERO = "uk_comanda_id_numero_conta"; // Nome da constraint
+    private static final String SQLSTATE_UNIQUE_VIOLATION = "23505"; // SQLState padrão para violação de unicidade (PostgreSQL)
 
     private final PedidoRepository pedidoRepository;
     private final CarrinhoRepository carrinhoRepository;
@@ -47,25 +52,32 @@ public class PedidoService {
             throw new BusinessRuleException("Operação negada: O turno do caixa está fechado.");
         }
 
-        Conta conta = contaRepository.findByComandaIdAndNumeroConta(dto.comandaId(), dto.numeroConta())
-                .orElseGet(() -> {
-                    Comanda comandaMestre = comandaRepository.findById(dto.comandaId())
-                            .orElseThrow(() -> new ResourceNotFoundException("Sessão de comanda mestre não localizada."));
+        // DEBUG MOCK - Logs temporários
+        log.info("========== DEBUG MOCK ==========");
+        log.info("DTO comandaId={}", dto.comandaId());
+        log.info("DTO numeroConta={}", dto.numeroConta());
+        log.info("================================");
 
-                    Conta novaConta = new Conta();
-                    novaConta.setComanda(comandaMestre);
-                    novaConta.setNumeroConta(dto.numeroConta());
-                    novaConta.setValorTotal(BigDecimal.ZERO);
-                    novaConta.setPago(false);
+        // CORREÇÃO OBRIGATÓRIA: Restaurar o comportamento antigo de buscar a Conta primeiro
+        // A blindagem (getOrCreateAccountWithConcurrencyProtection) será chamada SOMENTE se a Conta não existir.
+        Optional<Conta> contaExistente =
+                contaRepository.findByComandaIdAndNumeroConta(dto.comandaId(), dto.numeroConta());
 
-                    return contaRepository.save(novaConta);
-                });
+
+        log.info("Conta encontrada? {}", contaExistente.isPresent());
+
+        Conta conta = contaExistente.orElseGet(() ->
+                getOrCreateAccountWithConcurrencyProtection(
+                        dto.comandaId(),
+                        dto.numeroConta()
+                )
+        );
 
         if (conta.getPago()) {
             throw new BusinessRuleException("Bloqueio comercial: Esta subconta já foi encerrada e paga no caixa.");
         }
 
-        // AUDITORIA 3
+        // AUDITORIA 3 (Logs existentes)
         log.info("==============================");
         log.info("CRIANDO PEDIDO - PedidoService.processarPedidoMobile()");
         log.info("==============================");
@@ -76,35 +88,34 @@ public class PedidoService {
 
         for (var itemDto : dto.itens()) {
             log.info(
-                "  Produto ID: {} | Quantidade: {} | Observação: {}",
-                itemDto.produtoId(),
-                itemDto.quantidade(),
-                itemDto.observacao()
+                    "  Produto ID: {} | Quantidade: {} | Observação: {}",
+                    itemDto.produtoId(),
+                    itemDto.quantidade(),
+                    itemDto.observacao()
             );
         }
         log.info("==============================");
 
 
         Pedido pedido = new Pedido();
-        pedido.setConta(conta); // AUDITORIA 9: Vinculando Pedido à Conta
+        pedido.setConta(conta);
         pedido.setStatus(StatusPedido.RECEBIDO);
         pedido.setTipo(TipoPedido.MESA);
         pedido.setNumeroMesa(dto.numeroMesa());
         pedido.setTotal(BigDecimal.ZERO);
         pedido.setItens(new ArrayList<>());
 
-        // Lógica existente para preencher o nome do cliente, se fornecido no DTO
         if (dto.cliente() != null && dto.cliente().nome() != null) {
             pedido.setNomeClienteBalcao(dto.cliente().nome().toUpperCase().trim());
         }
 
-        // Fallback: Se o nome do cliente não foi preenchido pela lógica acima, vincular o responsável da mesa
         if (pedido.getNomeClienteBalcao() == null || pedido.getNomeClienteBalcao().isBlank()) {
             vincularResponsavelMesa(pedido, conta);
         }
 
         BigDecimal subtotalLote = BigDecimal.ZERO;
         boolean necessitaPreparoCozinha = false;
+
 
         for (PedidoMobileRequestDTO.ItemPedidoPayloadDTO itemDto : dto.itens()) {
             Produto produto = produtoRepository.findById(itemDto.produtoId())
@@ -127,7 +138,7 @@ public class PedidoService {
             item.setQuantidade(itemDto.quantidade());
             item.setPrecoUnitario(precoFinalItemUnitario);
             item.setAdicionais(adicionaisVinculados);
-            item.setPedido(pedido); // AUDITORIA 9: Vinculando ItemPedido ao Pedido
+            item.setPedido(pedido);
             item.setObservacaoItem(itemDto.observacao());
             item.setNumeroConta(dto.numeroConta());
             item.setStatusPagamento(StatusPagamento.ABERTO);
@@ -141,9 +152,9 @@ public class PedidoService {
         }
 
         pedido.setTotal(subtotalLote);
-        Pedido pedidoSalvo = pedidoRepository.saveAndFlush(pedido); // AUDITORIA 4: Pedido salvo aqui
+        Pedido pedidoSalvo = pedidoRepository.saveAndFlush(pedido);
 
-        // AUDITORIA 4
+        // AUDITORIA 4 (Logs existentes)
         log.info("=============================");
         log.info("AUDITORIA 4 - PedidoService.processarPedidoMobile() - Pedido Salvo");
         log.info("=============================");
@@ -162,20 +173,7 @@ public class PedidoService {
         });
         log.info("=============================");
 
-        // AUDITORIA 5
-        log.info("=============================");
-        log.info("AUDITORIA 5 - PedidoService.processarPedidoMobile() - Verificando Pedido no Banco (findById)");
-        log.info("=============================");
-        Pedido pedidoBanco = pedidoRepository.findById(pedidoSalvo.getId())
-                .orElseThrow(() -> new ResourceNotFoundException("Pedido salvo não encontrado no banco."));
-        log.info("Pedido ID do banco: {}", pedidoBanco.getId());
-        log.info("pedidoBanco.getItens().size(): {}", pedidoBanco.getItens().size());
-        pedidoBanco.getItens().forEach(item -> {
-            log.info("    - Item ID: {}, Produto: {}, Quantidade: {}", item.getId(), item.getProduto().getNome(), item.getQuantidade());
-        });
-        log.info("=============================");
-
-        // AUDITORIA FINAL - CONTA EM MEMÓRIA
+        // AUDITORIA FINAL - CONTA EM MEMÓRIA (Logs existentes)
         log.info("==========================================");
         log.info("AUDITORIA FINAL - CONTA EM MEMÓRIA");
         log.info("==========================================");
@@ -191,43 +189,43 @@ public class PedidoService {
 
                 for (ItemPedido item : p.getItens()) {
                     log.info(
-                        "Produto={} Quantidade={}",
-                        item.getProduto().getNome(),
-                        item.getQuantidade()
+                            "Produto={} Quantidade={}",
+                            item.getProduto().getNome(),
+                            item.getQuantidade()
                     );
                 }
             }
         }
         log.info("==========================================");
 
-        // Recarregue a Conta do banco.
-        Conta contaBanco = contaRepository.findById(conta.getId())
-                .orElseThrow(() -> new ResourceNotFoundException("Conta não encontrada após salvar pedido."));
+        // REMOVIDO: Recarregue a Conta do banco. (Logs existentes)
+        // REMOVIDO: Conta contaBanco = contaRepository.findById(conta.getId())
+        // REMOVIDO:         .orElseThrow(() -> new ResourceNotFoundException("Conta não encontrada após salvar pedido."));
 
-        // AUDITORIA FINAL - CONTA RECARREGADA DO BANCO
-        log.info("==========================================");
-        log.info("AUDITORIA FINAL - CONTA RECARREGADA DO BANCO");
-        log.info("==========================================");
+        // REMOVIDO: AUDITORIA FINAL - CONTA RECARREGADA DO BANCO (Logs existentes)
+        // REMOVIDO: log.info("==========================================");
+        // REMOVIDO: log.info("AUDITORIA FINAL - CONTA RECARREGADA DO BANCO");
+        // REMOVIDO: log.info("==========================================");
 
-        log.info("Conta ID: {}", contaBanco.getId());
-        log.info("Pedidos no banco: {}", contaBanco.getPedidos().size());
+        // REMOVIDO: log.info("Conta ID: {}", contaBanco.getId());
+        // REMOVIDO: log.info("Pedidos no banco: {}", contaBanco.getPedidos().size());
 
-        for (Pedido p : contaBanco.getPedidos()) {
-            log.info("Pedido ID: {}", p.getId());
+        // REMOVIDO: for (Pedido p : contaBanco.getPedidos()) {
+        // REMOVIDO:     log.info("Pedido ID: {}", p.getId());
 
-            if (p.getItens() != null) {
-                log.info("Quantidade de itens: {}", p.getItens().size());
+        // REMOVIDO:     if (p.getItens() != null) {
+        // REMOVIDO:         log.info("Quantidade de itens: {}", p.getItens().size());
 
-                for (ItemPedido item : p.getItens()) {
-                    log.info(
-                        "Produto={} Quantidade={}",
-                        item.getProduto().getNome(),
-                        item.getQuantidade()
-                    );
-                }
-            }
-        }
-        log.info("==========================================");
+        // REMOVIDO:         for (ItemPedido item : p.getItens()) {
+        // REMOVIDO:             log.info(
+        // REMOVIDO:                 "Produto={} Quantidade={}",
+        // REMOVIDO:                 item.getProduto().getNome(),
+        // REMOVIDO:                 item.getQuantidade()
+        // REMOVIDO:             );
+        // REMOVIDO:         }
+        // REMOVIDO:     }
+        // REMOVIDO: }
+        // REMOVIDO: log.info("==========================================");
 
 
         if (necessitaPreparoCozinha) {
@@ -238,11 +236,95 @@ public class PedidoService {
             filaImpressaoRepository.save(cupomCozinha);
         }
 
+
         PedidoResponseDTO responseDTO = new PedidoResponseDTO(pedidoSalvo);
         messagingTemplate.convertAndSend("/topic/caixa", responseDTO);
         messagingTemplate.convertAndSend("/topic/cozinha", responseDTO);
 
         return responseDTO;
+    }
+
+    /**
+     * Método privado que encapsula toda a lógica de localizar, criar, tratar concorrência,
+     * recuperar após conflito e validar uma Conta.
+     *
+     * @param comandaId O ID da Comanda à qual a Conta pertence.
+     * @param numeroConta O número da Conta a ser localizada ou criada.
+     * @return A Conta localizada ou criada, garantindo unicidade.
+     * @throws BusinessRuleException Se houver inconsistência na recuperação da Conta após conflito.
+     * @throws ResourceNotFoundException Se a Comanda mestre não for encontrada.
+     */
+    private Conta getOrCreateAccountWithConcurrencyProtection(UUID comandaId, Integer numeroConta) {
+        Comanda comandaMestre = comandaRepository.findById(comandaId)
+                .orElseThrow(() -> new ResourceNotFoundException("Sessão de comanda mestre não localizada."));
+
+        Conta novaConta = new Conta();
+        novaConta.setComanda(comandaMestre);
+        novaConta.setNumeroConta(numeroConta);
+        novaConta.setValorTotal(BigDecimal.ZERO);
+        novaConta.setPago(false);
+
+        try {
+            log.info("[CONCORRENCIA] Thread {} - Tentando salvar nova Conta {} para Comanda {}", Thread.currentThread().getName(), numeroConta, comandaId);
+            // AJUSTE FINAL: Utilizar saveAndFlush() para detecção imediata da violação de unicidade
+            return contaRepository.saveAndFlush(novaConta);
+        } catch (DataIntegrityViolationException e) {
+            // AJUSTE 1: Verificar se a exceção é causada pela constraint uk_comanda_id_numero_conta
+            if (isUniqueConstraintViolation(e, UNIQUE_CONSTRAINT_CONTA_NUMERO)) {
+                log.warn("[CONCORRENCIA] Thread {} - Conflito detectado ({}). Re-buscando Conta existente. Comanda ID: {}, Numero Conta: {}. Erro: {}",
+                        Thread.currentThread().getName(), UNIQUE_CONSTRAINT_CONTA_NUMERO, comandaId, numeroConta, e.getMessage());
+
+                // AJUSTE 2: Validar a conta recuperada
+                Conta contaRecuperada = contaRepository.findByComandaIdAndNumeroConta(comandaId, numeroConta)
+                        .orElseThrow(() -> {
+                            log.error("[CONCORRENCIA] Thread {} - Erro grave: Conta não encontrada após conflito de concorrência esperado. Comanda ID: {}, Numero Conta: {}", Thread.currentThread().getName(), comandaId, numeroConta);
+                            return new BusinessRuleException("Erro de concorrência: Conta deveria existir, mas não foi encontrada após conflito. Comanda ID: " + comandaId + ", Numero Conta: " + numeroConta);
+                        });
+
+                // Further validation for AJUSTE 2
+                if (!contaRecuperada.getNumeroConta().equals(numeroConta) || !contaRecuperada.getComanda().getId().equals(comandaId)) {
+                    log.error("[CONCORRENCIA] Thread {} - Erro grave: Conta recuperada após conflito não corresponde aos dados esperados. Esperado Comanda ID: {}, Numero Conta: {}. Encontrado Comanda ID: {}, Numero Conta: {}",
+                            Thread.currentThread().getName(), comandaId, numeroConta, contaRecuperada.getComanda().getId(), contaRecuperada.getNumeroConta());
+                    throw new BusinessRuleException("Erro de concorrência: Conta recuperada após conflito não corresponde aos dados esperados. Comanda ID: " + comandaId + ", Numero Conta: " + numeroConta);
+                }
+                log.info("[CONCORRENCIA] Thread {} - Conta {} para Comanda {} recuperada com sucesso após conflito.", Thread.currentThread().getName(), contaRecuperada.getNumeroConta(), contaRecuperada.getComanda().getId());
+                return contaRecuperada;
+            } else {
+                // Se não for a constraint esperada, relançar a exceção original
+                log.error("[CONCORRENCIA] Thread {} - DataIntegrityViolationException inesperada ao criar Conta {} para Comanda {}. Relançando. Causa: {}",
+                        Thread.currentThread().getName(), numeroConta, comandaId, e.getMostSpecificCause() != null ? e.getMostSpecificCause().getMessage() : e.getMessage());
+                throw e;
+            }
+        }
+    }
+
+    /**
+     * Documentação da Limitação:
+     * Este método verifica se uma DataIntegrityViolationException é causada por uma violação de unicidade
+     * específica (uk_comanda_id_numero_conta). Ele depende do SQLState padrão '23505' para violações de unicidade
+     * (comum em PostgreSQL) e da presença do nome da constraint na mensagem de erro da SQLException.
+     *
+     * Limitação: A análise da mensagem de erro (sqlException.getMessage().contains(constraintName)) é frágil
+     * e pode ser afetada por mudanças na versão do banco de dados, driver JDBC ou configurações de idioma.
+     *
+     * Justificativa: Dentro das restrições do projeto (não adicionar bibliotecas, não alterar arquitetura
+     * para mecanismos de tradução de exceções mais sofisticados, não usar @Lock, @Version, etc.), esta é a
+     * abordagem mais robusta e específica para identificar a violação da *nossa* constraint de unicidade.
+     * O SQLState '23505' já garante que é uma violação de unicidade, e a verificação da mensagem refina para
+     * a constraint específica, evitando mascarar outras possíveis violações de integridade.
+     */
+    private boolean isUniqueConstraintViolation(DataIntegrityViolationException e, String constraintName) {
+        Throwable mostSpecificCause = e.getMostSpecificCause();
+
+        if (mostSpecificCause instanceof SQLException) {
+            SQLException sqlException = (SQLException) mostSpecificCause;
+            if (SQLSTATE_UNIQUE_VIOLATION.equals(sqlException.getSQLState())) {
+                // A string do nome da constraint deve aparecer na mensagem de erro para identificação específica.
+                // Esta é a parte mais frágil, mas necessária para diferenciar entre múltiplas UNIQUE constraints.
+                return sqlException.getMessage() != null && sqlException.getMessage().contains(constraintName);
+            }
+        }
+        return false;
     }
 
     @Transactional
@@ -633,6 +715,7 @@ public class PedidoService {
                 .toList();
     }
 
+
     @Transactional(readOnly = true)
     public List<PedidoResponseDTO> listarTodos() {
         return pedidoRepository.findAll().stream().map(PedidoResponseDTO::new).toList();
@@ -651,6 +734,7 @@ public class PedidoService {
                 .map(PedidoResponseDTO::new)
                 .toList();
     }
+
 
     @Transactional(readOnly = true)
     public List<ItemComandaMobileResponseDTO> buscarItensPorComandaMestre(UUID comandaId) {

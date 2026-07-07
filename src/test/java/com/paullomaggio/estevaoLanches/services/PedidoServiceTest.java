@@ -124,7 +124,7 @@ class PedidoServiceTest {
             when(caixaRepository.existsByStatus(StatusCaixa.ABERTO)).thenReturn(true);
             when(contaRepository.findByComandaIdAndNumeroConta(comandaId, 2)).thenReturn(Optional.empty());
             when(comandaRepository.findById(comandaId)).thenReturn(Optional.of(comandaMock));
-            when(contaRepository.save(any())).thenReturn(contaMock);
+            when(contaRepository.saveAndFlush(any())).thenReturn(contaMock); // ALTERADO AQUI
             when(produtoRepository.findById(produtoId)).thenReturn(Optional.of(produtoMock));
             when(pedidoRepository.saveAndFlush(any())).thenReturn(pedidoMock);
             assertNotNull(pedidoService.processarPedidoMobile(criarRequestMobile(2)));
@@ -135,7 +135,7 @@ class PedidoServiceTest {
             when(contaRepository.findByComandaIdAndNumeroConta(comandaId, 2)).thenReturn(Optional.empty());
             when(comandaRepository.findById(comandaId)).thenReturn(Optional.of(comandaMock));
             // REMOVIDO: when(contaRepository.findByComandaIdAndNumeroConta(comandaId, 1)).thenReturn(Optional.of(contaMock)); // Obsoleto
-            when(contaRepository.save(any(Conta.class))).thenAnswer(i -> {
+            when(contaRepository.saveAndFlush(any(Conta.class))).thenAnswer(i -> { // ALTERADO AQUI
                 Conta savedConta = i.getArgument(0);
                 // Assert that the newly created account does NOT have a client set by the service in this path
                 assertThat(savedConta.getCliente()).isNull(); // New assertion
@@ -143,7 +143,7 @@ class PedidoServiceTest {
             });
             when(produtoRepository.findById(produtoId)).thenReturn(Optional.of(produtoMock));
             when(pedidoRepository.saveAndFlush(any())).thenReturn(pedidoMock);
-            
+
             PedidoResponseDTO response = pedidoService.processarPedidoMobile(criarRequestMobile(2));
             assertNotNull(response);
         }
