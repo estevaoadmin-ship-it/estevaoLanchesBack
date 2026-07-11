@@ -154,6 +154,48 @@ public class PedidoService {
         pedido.setTotal(subtotalLote);
         Pedido pedidoSalvo = pedidoRepository.saveAndFlush(pedido);
 
+        log.info("================================================");
+        log.info("AUDITORIA - RELACIONAMENTO CONTA -> PEDIDOS");
+        log.info("================================================");
+
+        log.info("Conta ID: {}", conta.getId());
+        log.info("Conta Número: {}", conta.getNumeroConta());
+
+        log.info("Quantidade de pedidos na coleção da Conta: {}", conta.getPedidos().size());
+
+        for (Pedido p : conta.getPedidos()) {
+            log.info("Pedido presente na coleção:");
+            log.info("  ID: {}", p.getId());
+            log.info("  Status: {}", p.getStatus());
+            log.info("  Quantidade de itens: {}", p.getItens() != null ? p.getItens().size() : 0);
+        }
+
+        log.info("Pedido recém salvo:");
+        log.info("  ID: {}", pedidoSalvo.getId());
+        log.info("  Status: {}", pedidoSalvo.getStatus());
+        log.info("  Quantidade de itens: {}", pedidoSalvo.getItens().size());
+
+        boolean encontrado = conta.getPedidos().stream()
+                .anyMatch(p -> p.getId().equals(pedidoSalvo.getId()));
+
+        log.info("O pedido salvo está presente na coleção da Conta? {}", encontrado);
+
+        log.info("================================================");
+
+        // ================================================
+        log.info("================================================");
+        log.info("PEDIDO APÓS SAVEANDFLUSH");
+        log.info("================================================");
+        log.info("pedido.getId(): {}", pedido.getId());
+        log.info("pedido.getConta().getId(): {}", pedido.getConta().getId());
+        log.info("conta.getId(): {}", conta.getId());
+        log.info("conta.getPedidos().size(): {}", conta.getPedidos().size());
+        for (Pedido p : conta.getPedidos()) {
+            log.info("  Pedido na conta - ID: {}, Status: {}, Itens Size: {}", p.getId(), p.getStatus(), p.getItens().size());
+        }
+        log.info("================================================");
+        // ================================================
+
         // AUDITORIA 4 (Logs existentes)
         log.info("=============================");
         log.info("AUDITORIA 4 - PedidoService.processarPedidoMobile() - Pedido Salvo");
@@ -198,34 +240,16 @@ public class PedidoService {
         }
         log.info("==========================================");
 
-        // REMOVIDO: Recarregue a Conta do banco. (Logs existentes)
-        // REMOVIDO: Conta contaBanco = contaRepository.findById(conta.getId())
-        // REMOVIDO:         .orElseThrow(() -> new ResourceNotFoundException("Conta não encontrada após salvar pedido."));
-
-        // REMOVIDO: AUDITORIA FINAL - CONTA RECARREGADA DO BANCO (Logs existentes)
-        // REMOVIDO: log.info("==========================================");
-        // REMOVIDO: log.info("AUDITORIA FINAL - CONTA RECARREGADA DO BANCO");
-        // REMOVIDO: log.info("==========================================");
-
-        // REMOVIDO: log.info("Conta ID: {}", contaBanco.getId());
-        // REMOVIDO: log.info("Pedidos no banco: {}", contaBanco.getPedidos().size());
-
-        // REMOVIDO: for (Pedido p : contaBanco.getPedidos()) {
-        // REMOVIDO:     log.info("Pedido ID: {}", p.getId());
-
-        // REMOVIDO:     if (p.getItens() != null) {
-        // REMOVIDO:         log.info("Quantidade de itens: {}", p.getItens().size());
-
-        // REMOVIDO:         for (ItemPedido item : p.getItens()) {
-        // REMOVIDO:             log.info(
-        // REMOVIDO:                 "Produto={} Quantidade={}",
-        // REMOVIDO:                 item.getProduto().getNome(),
-        // REMOVIDO:                 item.getQuantidade()
-        // REMOVIDO:             );
-        // REMOVIDO:         }
-        // REMOVIDO:     }
-        // REMOVIDO: }
-        // REMOVIDO: log.info("==========================================");
+        // PASSO 4: Antes de retornar de processarPedidoMobile()
+        log.info("================================================");
+        log.info("AUDITORIA - PASSO 4: PedidoService.processarPedidoMobile() - Antes de retornar");
+        log.info("================================================");
+        List<Conta> contasNoBancoAntesRetorno = contaRepository.findByComandaId(dto.comandaId());
+        log.info("Quantidade de contas no banco (findByComandaId): {}", contasNoBancoAntesRetorno.size());
+        for (Conta c : contasNoBancoAntesRetorno) {
+            log.info("  Conta UUID: {}, Número: {}", c.getId(), c.getNumeroConta());
+        }
+        log.info("================================================");
 
 
         if (necessitaPreparoCozinha) {
@@ -264,10 +288,41 @@ public class PedidoService {
         novaConta.setValorTotal(BigDecimal.ZERO);
         novaConta.setPago(false);
 
+        // PASSO 1: Antes do save
+        log.info("================================================");
+        log.info("AUDITORIA - PASSO 1: getOrCreateAccountWithConcurrencyProtection() - Antes do save");
+        log.info("================================================");
+        log.info("  Comanda ID: {}", comandaId);
+        log.info("  Conta a ser criada UUID: {}", novaConta.getId()); // Será null antes do save
+        log.info("  Conta a ser criada Número: {}", novaConta.getNumeroConta());
+        log.info("================================================");
+
         try {
             log.info("[CONCORRENCIA] Thread {} - Tentando salvar nova Conta {} para Comanda {}", Thread.currentThread().getName(), numeroConta, comandaId);
             // AJUSTE FINAL: Utilizar saveAndFlush() para detecção imediata da violação de unicidade
-            return contaRepository.saveAndFlush(novaConta);
+            Conta contaSalva = contaRepository.saveAndFlush(novaConta);
+
+            // PASSO 1: Depois do save e depois do flush
+            log.info("================================================");
+            log.info("AUDITORIA - PASSO 1: getOrCreateAccountWithConcurrencyProtection() - Depois do save e flush");
+            log.info("================================================");
+            log.info("  Comanda ID: {}", comandaId);
+            log.info("  Conta criada UUID: {}", contaSalva.getId());
+            log.info("  Conta criada Número: {}", contaSalva.getNumeroConta());
+            log.info("================================================");
+
+            // PASSO 2: Imediatamente após contaRepository.saveAndFlush()
+            log.info("================================================");
+            log.info("AUDITORIA - PASSO 2: getOrCreateAccountWithConcurrencyProtection() - Após saveAndFlush, findByComandaId");
+            log.info("================================================");
+            List<Conta> contasNoBanco = contaRepository.findByComandaId(comandaId);
+            log.info("Quantidade encontrada (findByComandaId): {}", contasNoBanco.size());
+            for (Conta c : contasNoBanco) {
+                log.info("  Conta UUID: {}, Número: {}", c.getId(), c.getNumeroConta());
+            }
+            log.info("================================================");
+
+            return contaSalva;
         } catch (DataIntegrityViolationException e) {
             // AJUSTE 1: Verificar se a exceção é causada pela constraint uk_comanda_id_numero_conta
             if (isUniqueConstraintViolation(e, UNIQUE_CONSTRAINT_CONTA_NUMERO)) {
@@ -308,7 +363,7 @@ public class PedidoService {
      * e pode ser afetada por mudanças na versão do banco de dados, driver JDBC ou configurações de idioma.
      *
      * Justificativa: Dentro das restrições do projeto (não adicionar bibliotecas, não alterar arquitetura
-     * para mecanismos de tradução de exceções mais sofisticados, não usar @Lock, @Version, etc.), esta é a
+     * para mecanismos de tradução de exceções mais sofisticadas, não usar @Lock, @Version, etc.), esta é a
      * abordagem mais robusta e específica para identificar a violação da *nossa* constraint de unicidade.
      * O SQLState '23505' já garante que é uma violação de unicidade, e a verificação da mensagem refina para
      * a constraint específica, evitando mascarar outras possíveis violações de integridade.

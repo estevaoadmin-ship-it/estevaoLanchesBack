@@ -13,6 +13,7 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
+import java.util.UUID; // Adicionado import para UUID
 
 @RestController
 @RequestMapping("/api/usuarios")
@@ -46,5 +47,46 @@ public class UsuarioController {
     @PostMapping
     public ResponseEntity<UsuarioResponseDTO> criar(@RequestBody UsuarioRequestDTO dto) {
         return ResponseEntity.status(HttpStatus.CREATED).body(usuarioService.salvar(dto));
+    }
+
+    @Operation(summary = "Busca um usuário por ID",
+               description = "Retorna os detalhes de um usuário (funcionário) específico pelo seu ID.")
+    @ApiResponses(value = {
+            @ApiResponse(responseCode = "200", description = "Usuário encontrado com sucesso"),
+            @ApiResponse(responseCode = "404", description = "Usuário não encontrado"),
+            @ApiResponse(responseCode = "401", description = "Não autenticado"),
+            @ApiResponse(responseCode = "403", description = "Sem permissão (apenas ADMIN)")
+    })
+    @GetMapping("/{id}")
+    public ResponseEntity<UsuarioResponseDTO> buscarPorId(@PathVariable UUID id) {
+        return ResponseEntity.ok(usuarioService.buscarPorId(id));
+    }
+
+    @Operation(summary = "Atualiza um usuário existente",
+               description = "Atualiza os dados de um usuário (funcionário) existente pelo seu ID.")
+    @ApiResponses(value = {
+            @ApiResponse(responseCode = "200", description = "Usuário atualizado com sucesso"),
+            @ApiResponse(responseCode = "400", description = "Dados do usuário inválidos"),
+            @ApiResponse(responseCode = "404", description = "Usuário não encontrado"),
+            @ApiResponse(responseCode = "401", description = "Não autenticado"),
+            @ApiResponse(responseCode = "403", description = "Sem permissão (apenas ADMIN)")
+    })
+    @PutMapping("/{id}")
+    public ResponseEntity<UsuarioResponseDTO> atualizar(@PathVariable UUID id, @RequestBody UsuarioRequestDTO dto) {
+        return ResponseEntity.ok(usuarioService.atualizar(id, dto));
+    }
+
+    @Operation(summary = "Inativa um usuário",
+               description = "Inativa (soft delete) um usuário (funcionário) pelo seu ID.")
+    @ApiResponses(value = {
+            @ApiResponse(responseCode = "204", description = "Usuário inativado com sucesso"),
+            @ApiResponse(responseCode = "404", description = "Usuário não encontrado"),
+            @ApiResponse(responseCode = "401", description = "Não autenticado"),
+            @ApiResponse(responseCode = "403", description = "Sem permissão (apenas ADMIN)")
+    })
+    @DeleteMapping("/{id}")
+    public ResponseEntity<Void> deletar(@PathVariable UUID id) {
+        usuarioService.deletarOuInativar(id);
+        return ResponseEntity.noContent().build();
     }
 }

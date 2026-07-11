@@ -14,10 +14,14 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.hibernate.Hibernate; // Importar Hibernate para isInitialized
+import jakarta.persistence.EntityManager;
+import jakarta.persistence.PersistenceContext;
 
 import java.math.BigDecimal;
 import java.util.List;
 import java.util.UUID;
+import java.util.stream.Collectors;
 
 @Service
 @RequiredArgsConstructor
@@ -28,6 +32,10 @@ public class GarcomMesaSessaoService {
     private final MesaRepository mesaRepository;
     private final ComandaRepository comandaRepository;
     private final ContaRepository contaRepository; // Inject ContaRepository
+    private final PedidoRepository pedidoRepository; // Inject PedidoRepository
+
+    @PersistenceContext
+    private EntityManager entityManager;
 
     /**
      * 📥 ESCRITA (SYNC): Recebe os itens novos (verdes) do Mobile e persiste no banco.
@@ -108,9 +116,28 @@ public class GarcomMesaSessaoService {
         Mesa mesa = mesaRepository.findById(mesaId)
                 .orElseThrow(() -> new ResourceNotFoundException("Mesa não encontrada no sistema."));
 
+        // PASSO 2
+        log.info("================================================");
+        log.info("AUDITORIA PERSISTENCE CONTEXT");
+        log.info("================================================");
+        log.info("EntityManager Hash: {}", System.identityHashCode(entityManager));
+        log.info("Mesa Hash: {}", System.identityHashCode(mesa));
+        log.info("Mesa Gerenciada: {}", entityManager.contains(mesa));
+        log.info("================================================");
+
         // 2. Localiza a Comanda Ativa daquela Mesa
         Comanda comanda = comandaRepository.findByMesaNumeroAndStatus(mesa.getNumero(), StatusComanda.ABERTA)
                 .orElseThrow(() -> new ResourceNotFoundException("Nenhuma comanda aberta localizada para a mesa número " + mesa.getNumero()));
+
+        // PASSO 3
+        log.info("=========== COMANDA ===========");
+        log.info("Comanda ID: {}", comanda.getId());
+        log.info("Comanda Hash: {}", System.identityHashCode(comanda));
+        log.info("Comanda Gerenciada: {}", entityManager.contains(comanda));
+        log.info("================================");
+
+        // PASSO 4
+        log.info("Quantidade de contas: {}", comanda.getContas().size());
 
         // 3. Define a subconta pré-selecionada na UI (Regra: A primeira subconta aberta/não paga)
         UUID contaSelecionadaId = comanda.getContas().stream()
@@ -125,14 +152,103 @@ public class GarcomMesaSessaoService {
         log.info("==========================================");
 
         for (Conta conta : comanda.getContas()) {
+            // PASSO 5 - Início do laço da Conta
+            log.info("--------------------------------");
+            log.info("Conta Número: {}", conta.getNumeroConta());
+            log.info("Conta UUID: {}", conta.getId());
+            log.info("Conta Hash: {}", System.identityHashCode(conta));
+            log.info("Conta Gerenciada: {}", entityManager.contains(conta));
+            log.info("Pedidos Inicializados: {}", Hibernate.isInitialized(conta.getPedidos()));
+
             log.info("Conta {}", conta.getNumeroConta());
             log.info("Pedidos: {}", conta.getPedidos().size());
+            Hibernate.initialize(conta.getPedidos()); // Ensure pedidos are initialized
+            // PASSO 5 - Após initialize
+            log.info("Pedidos após initialize: {}", conta.getPedidos().size());
+            log.info("Pedidos Inicializados Agora: {}", Hibernate.isInitialized(conta.getPedidos()));
+
+            // CÓDIGO DE AUDITORIA COMPARATIVA (PASSO 2 DA NOVA MISSÃO)
+            List<Pedido> pedidosBanco =
+                    pedidoRepository.findByContaIdIn(List.of(conta.getId()));
+
+            log.info("========== AUDITORIA CONTA ==========");
+            log.info("Conta ID...............: {}", conta.getId());
+            log.info("Número Conta...........: {}", conta.getNumeroConta());
+            log.info("Pedidos via JPA........: {}", conta.getPedidos().size());
+            log.info("Pedidos via Repository.: {}", pedidosBanco.size());
+
+            for (Pedido pedido : pedidosBanco) {
+                Hibernate.initialize(pedido.getItens());
+                log.info("Pedido Banco -> id={}, itens={}",
+                        pedido.getId(),
+                        pedido.getItens().size());
+            }
+
             for (Pedido pedido : conta.getPedidos()) {
+                Hibernate.initialize(pedido.getItens());
+                log.info("Pedido JPA -> id={}, itens={}",
+                        pedido.getId(),
+                        pedido.getItens().size());
+            }
+            log.info("=======================================");
+
+
+            for (Pedido pedido : conta.getPedidos()) {
+                // PASSO 6 - Início do laço do Pedido
+                log.info("Pedido ID: {}", pedido.getId());
+                log.info("Pedido Hash: {}", System.identityHashCode(pedido));
+                log.info("Pedido Gerenciado: {}", entityManager.contains(pedido));
+                log.info("Itens Inicializados: {}", Hibernate.isInitialized(pedido.getItens()));
+
                 log.info("Pedido {}", pedido.getId());
                 log.info("Itens: {}", pedido.getItens().size());
+                Hibernate.initialize(pedido.getItens()); // Ensure items are initialized
+                // PASSO 6 - Após initialize
+                log.info("Itens após initialize: {}", pedido.getItens().size());
+                log.info("Itens Inicializados Agora: {}", Hibernate.isInitialized(pedido.getItens()));
             }
         }
         log.info("==========================================");
+
+        // ================================================
+        // AUDITORIA COMANDA.CONTAS - ANTES DO MAPPER
+        // ================================================
+        log.info("================================================");
+        log.info("AUDITORIA COMANDA.CONTAS - ANTES DO MAPPER");
+        log.info("================================================");
+        log.info("Comanda ID: {}", comanda.getId());
+        log.info("Hibernate.isInitialized(comanda.getContas()): {}", Hibernate.isInitialized(comanda.getContas()));
+        log.info("Quantidade de contas na comanda: {}", comanda.getContas().size());
+
+        for (Conta conta : comanda.getContas()) {
+            log.info("================================");
+            log.info("CONTA " + conta.getNumeroConta());
+            log.info("ID: " + conta.getId());
+            Hibernate.initialize(conta.getPedidos()); // Ensure pedidos are initialized
+            log.info("Pedidos: " + conta.getPedidos().size());
+
+            for (Pedido pedido : conta.getPedidos()) {
+                log.info("--------------------------------");
+                log.info("Pedido: " + pedido.getId());
+                log.info("Status: " + pedido.getStatus());
+                Hibernate.initialize(pedido.getItens()); // Ensure items are initialized
+                log.info("Itens: " + pedido.getItens().size());
+
+                for (ItemPedido item : pedido.getItens()) {
+                    log.info(
+                            "Item: "
+                                    + item.getId()
+                                    + " | Produto: "
+                                    + item.getProduto().getNome()
+                                    + " | Qtde: "
+                                    + item.getQuantidade()
+                    );
+                }
+            }
+            log.info("================================");
+        }
+        log.info("================================================");
+
 
         // 4. Mapeia a árvore de Contas -> Pedidos -> Itens -> Adicionais
         List<GarcomMesaSessaoResponseDTO.ContaSessaoDTO> contasDTO = comanda.getContas().stream()
@@ -216,6 +332,24 @@ public class GarcomMesaSessaoService {
                     );
                 }).toList();
 
+        // ================================================
+        // AUDITORIA COMANDA.CONTAS - DEPOIS DO MAPPER
+        // ================================================
+        log.info("================================================");
+        log.info("AUDITORIA COMANDA.CONTAS - DEPOIS DO MAPPER");
+        log.info("================================================");
+        log.info("Quantidade de contasDTO: {}", contasDTO.size());
+
+        for (GarcomMesaSessaoResponseDTO.ContaSessaoDTO contaDTO : contasDTO) {
+            log.info("  Conta DTO UUID: {}", contaDTO.id());
+            log.info("  Número: {}", contaDTO.numeroConta());
+            log.info("  Quantidade de itens: {}", contaDTO.itens().size());
+            log.info("  Cliente: {}", contaDTO.cliente() != null ? contaDTO.cliente().nome() : "N/A");
+            log.info("  isSelecionada: {}", contaDTO.isSelecionada());
+        }
+        log.info("================================================");
+
+
         // 5. Consolida e retorna o DTO Agregador pronto para o JSON
         GarcomMesaSessaoResponseDTO dto = new GarcomMesaSessaoResponseDTO(
                 mesa.getId(),
@@ -266,6 +400,32 @@ public class GarcomMesaSessaoService {
             log.error("Erro ao serializar DTO em obterSessao", e);
         }
         log.info("=============================");
+
+        // ================= AUDITORIA BACKEND =================
+        log.info("================= AUDITORIA BACKEND =================\n");
+        for (Conta conta : comanda.getContas()) {
+            log.info("Conta: {}", conta.getNumeroConta());
+            log.info("UUID: {}", conta.getId());
+
+            Hibernate.initialize(conta.getPedidos()); // Garante que os pedidos da conta estão carregados
+            List<ItemPedido> todosItensDaConta = conta.getPedidos().stream()
+                    .flatMap(pedido -> {
+                        Hibernate.initialize(pedido.getItens()); // Garante que os itens de cada pedido estão carregados
+                        return pedido.getItens().stream();
+                    })
+                    .collect(Collectors.toList());
+
+            log.info("Quantidade de itens: {}", todosItensDaConta.size());
+
+            if (!todosItensDaConta.isEmpty()) {
+                for (ItemPedido item : todosItensDaConta) {
+                    log.info("- {}", item.getProduto().getNome());
+                }
+            }
+            log.info("\n----------------------------------------\n");
+        }
+        log.info("=====================================================\n");
+        // ================= AUDITORIA BACKEND =================
 
         return dto;
     }
