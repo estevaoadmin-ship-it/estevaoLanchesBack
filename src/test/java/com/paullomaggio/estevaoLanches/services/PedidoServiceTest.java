@@ -37,7 +37,6 @@ class PedidoServiceTest {
     @Mock private ContaRepository contaRepository;
     @Mock private SimpMessagingTemplate messagingTemplate;
 
-    // Removido @InjectMocks
     private PedidoService pedidoService;
 
     private UUID comandaId, contaId, pedidoId, produtoId, clienteId;
@@ -50,7 +49,6 @@ class PedidoServiceTest {
 
     @BeforeEach
     void setUp() {
-        // Instanciação manual do serviço com os mocks
         pedidoService = new PedidoService(
                 pedidoRepository, carrinhoRepository, caixaRepository,
                 produtoRepository, adicionalRepository, filaImpressaoRepository,
@@ -82,9 +80,6 @@ class PedidoServiceTest {
         carrinhoMock.setItens(new ArrayList<>());
     }
 
-    /**
-     * 🎯 FIX: Instanciação real do PedidoMobileRequestDTO respeitando as aninhadas
-     */
     private PedidoMobileRequestDTO criarRequestMobile(Integer numConta) {
         PedidoMobileRequestDTO.ClientePayloadDTO clientePayload =
                 new PedidoMobileRequestDTO.ClientePayloadDTO("Carlos", "16999999999");
@@ -124,21 +119,18 @@ class PedidoServiceTest {
             when(caixaRepository.existsByStatus(StatusCaixa.ABERTO)).thenReturn(true);
             when(contaRepository.findByComandaIdAndNumeroConta(comandaId, 2)).thenReturn(Optional.empty());
             when(comandaRepository.findById(comandaId)).thenReturn(Optional.of(comandaMock));
-            when(contaRepository.saveAndFlush(any())).thenReturn(contaMock); // ALTERADO AQUI
+            when(contaRepository.saveAndFlush(any())).thenReturn(contaMock);
             when(produtoRepository.findById(produtoId)).thenReturn(Optional.of(produtoMock));
             when(pedidoRepository.saveAndFlush(any())).thenReturn(pedidoMock);
             assertNotNull(pedidoService.processarPedidoMobile(criarRequestMobile(2)));
         }
-        @Test @DisplayName("ct006_novaContaCriadaSemClienteHerdado") // Renomeado para refletir a nova regra
-        void ct006_novaContaCriadaSemClienteHerdado() {
+        @Test void ct006_novaContaCriadaSemClienteHerdado() {
             when(caixaRepository.existsByStatus(StatusCaixa.ABERTO)).thenReturn(true);
             when(contaRepository.findByComandaIdAndNumeroConta(comandaId, 2)).thenReturn(Optional.empty());
             when(comandaRepository.findById(comandaId)).thenReturn(Optional.of(comandaMock));
-            // REMOVIDO: when(contaRepository.findByComandaIdAndNumeroConta(comandaId, 1)).thenReturn(Optional.of(contaMock)); // Obsoleto
-            when(contaRepository.saveAndFlush(any(Conta.class))).thenAnswer(i -> { // ALTERADO AQUI
+            when(contaRepository.saveAndFlush(any(Conta.class))).thenAnswer(i -> {
                 Conta savedConta = i.getArgument(0);
-                // Assert that the newly created account does NOT have a client set by the service in this path
-                assertThat(savedConta.getCliente()).isNull(); // New assertion
+                assertThat(savedConta.getCliente()).isNull();
                 return savedConta;
             });
             when(produtoRepository.findById(produtoId)).thenReturn(Optional.of(produtoMock));
@@ -287,7 +279,6 @@ class PedidoServiceTest {
             when(carrinhoRepository.findByClienteId(clienteId)).thenReturn(Optional.of(carrinhoMock));
             when(pedidoRepository.save(any())).thenReturn(pedidoMock);
 
-            // 🎯 FIX: Construtor com todos os argumentos corretos do record CheckoutDeliveryRequestDTO
             CheckoutDeliveryRequestDTO dto = new CheckoutDeliveryRequestDTO(
                     clienteId, "Rua 1", FormaPagamento.PIX, "Sem cebola"
             );
@@ -297,7 +288,6 @@ class PedidoServiceTest {
             when(caixaRepository.existsByStatus(StatusCaixa.ABERTO)).thenReturn(true);
             when(carrinhoRepository.findByClienteId(clienteId)).thenReturn(Optional.empty());
 
-            // 🎯 FIX: Construtor com todos os argumentos corretos do record CheckoutDeliveryRequestDTO
             CheckoutDeliveryRequestDTO dto = new CheckoutDeliveryRequestDTO(
                     clienteId, "Rua 1", FormaPagamento.PIX, "Sem cebola"
             );
@@ -307,7 +297,6 @@ class PedidoServiceTest {
             when(caixaRepository.existsByStatus(StatusCaixa.ABERTO)).thenReturn(true);
             when(carrinhoRepository.findByClienteId(clienteId)).thenReturn(Optional.of(carrinhoMock));
 
-            // 🎯 FIX: Construtor com todos os argumentos corretos do record CheckoutDeliveryRequestDTO
             CheckoutDeliveryRequestDTO dto = new CheckoutDeliveryRequestDTO(
                     clienteId, "Rua 1", FormaPagamento.PIX, "Sem cebola"
             );
@@ -324,7 +313,6 @@ class PedidoServiceTest {
             when(produtoRepository.findById(produtoId)).thenReturn(Optional.of(produtoMock));
             when(pedidoRepository.save(any())).thenReturn(pedidoMock);
 
-            // 🎯 FIX: Construtor com todos os 5 argumentos corretos do record ItemPedidoRequestDTO
             ItemPedidoRequestDTO dto = new ItemPedidoRequestDTO(produtoId, 1, "Sem cebola", new ArrayList<>(), 1);
             assertNotNull(pedidoService.adicionarItemPedido(pedidoId, dto));
         }
@@ -332,7 +320,6 @@ class PedidoServiceTest {
             pedidoMock.setStatus(StatusPedido.FINALIZADO);
             when(pedidoRepository.findById(pedidoId)).thenReturn(Optional.of(pedidoMock));
 
-            // 🎯 FIX: Construtor com todos os 5 argumentos corretos do record ItemPedidoRequestDTO
             ItemPedidoRequestDTO dto = new ItemPedidoRequestDTO(produtoId, 1, "Sem cebola", new ArrayList<>(), 1);
             assertThrows(BusinessRuleException.class, () -> pedidoService.adicionarItemPedido(pedidoId, dto));
         }
@@ -340,7 +327,6 @@ class PedidoServiceTest {
             pedidoMock.setStatus(StatusPedido.CANCELADO);
             when(pedidoRepository.findById(pedidoId)).thenReturn(Optional.of(pedidoMock));
 
-            // 🎯 FIX: Construtor com todos os 5 argumentos corretos do record ItemPedidoRequestDTO
             ItemPedidoRequestDTO dto = new ItemPedidoRequestDTO(produtoId, 1, "Sem cebola", new ArrayList<>(), 1);
             assertThrows(BusinessRuleException.class, () -> pedidoService.adicionarItemPedido(pedidoId, dto));
         }
@@ -348,7 +334,6 @@ class PedidoServiceTest {
             pedidoMock.setStatusFinanceiro(StatusFinanceiro.PAGO);
             when(pedidoRepository.findById(pedidoId)).thenReturn(Optional.of(pedidoMock));
 
-            // 🎯 FIX: Construtor com todos os 5 argumentos corretos do record ItemPedidoRequestDTO
             ItemPedidoRequestDTO dto = new ItemPedidoRequestDTO(produtoId, 1, "Sem cebola", new ArrayList<>(), 1);
             assertThrows(BusinessRuleException.class, () -> pedidoService.adicionarItemPedido(pedidoId, dto));
         }
@@ -426,8 +411,52 @@ class PedidoServiceTest {
             pedidoService.cancelarPedido(pedidoId);
             assertEquals(StatusPedido.CANCELADO, pedidoMock.getStatus());
         }
-        @Test void ct081_enviarCaixa() { assertTrue(true); }
-        @Test void ct082_enviarCozinha() { assertTrue(true); }
+        @Test void ct081_statusFinanceiroCancelado() {
+            when(pedidoRepository.findById(pedidoId))
+                    .thenReturn(Optional.of(pedidoMock));
+            when(pedidoRepository.save(any()))
+                    .thenReturn(pedidoMock);
+
+            pedidoService.cancelarPedido(pedidoId);
+
+            assertEquals(
+                    StatusFinanceiro.CANCELADO,
+                    pedidoMock.getStatusFinanceiro()
+            );
+        }
+        @Test void ct082_persistirCancelamento() {
+            when(pedidoRepository.findById(pedidoId))
+                    .thenReturn(Optional.of(pedidoMock));
+            when(pedidoRepository.save(any()))
+                    .thenReturn(pedidoMock);
+
+            pedidoService.cancelarPedido(pedidoId);
+
+            verify(pedidoRepository)
+                    .save(any(Pedido.class));
+        }
+        @Test void ct083_notificarCaixa() {
+            when(pedidoRepository.findById(pedidoId))
+                    .thenReturn(Optional.of(pedidoMock));
+            when(pedidoRepository.save(any()))
+                    .thenReturn(pedidoMock);
+
+            pedidoService.cancelarPedido(pedidoId);
+
+            verify(messagingTemplate)
+                    .convertAndSend(eq("/topic/caixa"), any(PedidoResponseDTO.class));
+        }
+        @Test void ct084_notificarCozinha() {
+            when(pedidoRepository.findById(pedidoId))
+                    .thenReturn(Optional.of(pedidoMock));
+            when(pedidoRepository.save(any()))
+                    .thenReturn(pedidoMock);
+
+            pedidoService.cancelarPedido(pedidoId);
+
+            verify(messagingTemplate)
+                    .convertAndSend(eq("/topic/cozinha"), any(PedidoResponseDTO.class));
+        }
     }
 
     @Nested @DisplayName("16. Consultas Context") class Bloco16 {
@@ -505,4 +534,24 @@ class PedidoServiceTest {
         @Test void ct123_nenhumaSubcontaPerdeVinculo() { assertTrue(true); }
         @Test void ct124_nenhumWebSocketDuplicado() { assertTrue(true); }
     }
+
+    @Test
+    void ct085_cancelamentoNaoMantemStatusPago() {
+
+        pedidoMock.setStatusFinanceiro(StatusFinanceiro.PAGO);
+
+        when(pedidoRepository.findById(pedidoId))
+                .thenReturn(Optional.of(pedidoMock));
+
+        when(pedidoRepository.save(any()))
+                .thenReturn(pedidoMock);
+
+        pedidoService.cancelarPedido(pedidoId);
+
+        assertEquals(
+                StatusFinanceiro.CANCELADO,
+                pedidoMock.getStatusFinanceiro()
+        );
+    }
+
 }

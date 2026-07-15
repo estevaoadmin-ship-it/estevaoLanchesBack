@@ -3,6 +3,7 @@ package com.paullomaggio.estevaoLanches.services.core;
 import com.paullomaggio.estevaoLanches.dtos.*;
 import com.paullomaggio.estevaoLanches.entities.ContaDelivery;
 import com.paullomaggio.estevaoLanches.entities.Pedido;
+import com.paullomaggio.estevaoLanches.enums.StatusFinanceiro;
 import com.paullomaggio.estevaoLanches.enums.StatusPedido;
 import com.paullomaggio.estevaoLanches.enums.TipoPedido;
 import com.paullomaggio.estevaoLanches.exceptions.ResourceNotFoundException;
@@ -51,16 +52,25 @@ public class PedidoCoreService {
 
     @Transactional
     public PedidoResponseDTO cancelarPedidoDeliveryDoClienteAutenticado(UUID pedidoId) {
+
         UUID clienteId = getAuthenticatedClientId();
+
         Pedido pedido = pedidoRepository.findById(pedidoId)
                 .orElseThrow(() -> new ResourceNotFoundException("Pedido não encontrado."));
 
         if (!pedido.getCliente().getId().equals(clienteId)) {
-            throw new AccessDeniedException("Acesso negado: Este pedido não pertence ao cliente autenticado.");
+            throw new AccessDeniedException(
+                    "Acesso negado: Este pedido não pertence ao cliente autenticado."
+            );
         }
 
         pedido.setStatus(StatusPedido.CANCELADO);
-        return new PedidoResponseDTO(pedidoRepository.save(pedido));
+
+        pedido.setStatusFinanceiro(StatusFinanceiro.CANCELADO);
+
+        return new PedidoResponseDTO(
+                pedidoRepository.save(pedido)
+        );
     }
 
     @Transactional

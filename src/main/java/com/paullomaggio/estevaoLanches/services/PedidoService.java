@@ -750,15 +750,21 @@ public class PedidoService {
 
     @Transactional
     public PedidoResponseDTO cancelarPedido(UUID id) {
+
         Pedido pedido = pedidoRepository.findById(id)
                 .orElseThrow(() -> new ResourceNotFoundException("Pedido não localizado."));
 
         pedido.setStatus(StatusPedido.CANCELADO);
+
+        pedido.setStatusFinanceiro(StatusFinanceiro.CANCELADO);
+
         Pedido pedidoSalvo = pedidoRepository.save(pedido);
 
         PedidoResponseDTO response = new PedidoResponseDTO(pedidoSalvo);
+
         messagingTemplate.convertAndSend("/topic/caixa", response);
         messagingTemplate.convertAndSend("/topic/cozinha", response);
+
         return response;
     }
 
