@@ -2,11 +2,18 @@ package com.paullomaggio.estevaoLanches.services;
 
 import com.paullomaggio.estevaoLanches.dtos.ItemComboRequestDTO;
 import com.paullomaggio.estevaoLanches.dtos.ItemComboResponseDTO;
+import com.paullomaggio.estevaoLanches.dtos.PedidoResponseDTO;
+import com.paullomaggio.estevaoLanches.entities.Adicional;
 import com.paullomaggio.estevaoLanches.entities.ItemCombo;
 import com.paullomaggio.estevaoLanches.entities.ItemPedido;
+import com.paullomaggio.estevaoLanches.entities.Pedido;
+import com.paullomaggio.estevaoLanches.entities.Produto;
+import com.paullomaggio.estevaoLanches.exceptions.BusinessRuleException;
 import com.paullomaggio.estevaoLanches.exceptions.ResourceNotFoundException;
+import com.paullomaggio.estevaoLanches.repositories.AdicionalRepository;
 import com.paullomaggio.estevaoLanches.repositories.ItemComboRepository;
 import com.paullomaggio.estevaoLanches.repositories.ItemPedidoRepository;
+import com.paullomaggio.estevaoLanches.repositories.ProdutoRepository;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
@@ -32,33 +39,60 @@ class ItemComboServiceTest {
 
     @Mock private ItemComboRepository itemComboRepository;
     @Mock private ItemPedidoRepository itemPedidoRepository;
+    @Mock private AdicionalRepository adicionalRepository;
+    @Mock private ProdutoRepository produtoRepository;
+    @Mock private PedidoService pedidoService;
+    // @Mock private ComboProdutoRepository comboProdutoRepository; // NOVO MOCK: ComboProdutoRepository - REMOVIDO
 
-    // Removido @InjectMocks
     private ItemComboService itemComboService;
 
     private UUID itemPedidoId;
     private UUID produtoFilhoId;
+    private UUID itemComboId;
+    private UUID pedidoId;
+
     private ItemPedido itemPedidoMock;
     private ItemCombo itemComboMock;
+    private Produto produtoInternoMock;
+    private Pedido pedidoMock;
 
     @BeforeEach
     void setUp() {
-        // Instanciação manual do serviço com os mocks
-        itemComboService = new ItemComboService(itemComboRepository, itemPedidoRepository);
+        // Instanciação manual do serviço com os mocks atualizados
+        itemComboService = new ItemComboService(
+                itemComboRepository,
+                itemPedidoRepository,
+                adicionalRepository,
+                produtoRepository,
+                pedidoService
+                // comboProdutoRepository // Passar o novo mock - REMOVIDO
+        );
 
         itemPedidoId = UUID.randomUUID();
         produtoFilhoId = UUID.randomUUID();
+        itemComboId = UUID.randomUUID();
+        pedidoId = UUID.randomUUID();
+
+        pedidoMock = new Pedido();
+        pedidoMock.setId(pedidoId);
 
         itemPedidoMock = new ItemPedido();
         itemPedidoMock.setId(itemPedidoId);
+        itemPedidoMock.setPedido(pedidoMock); // Vincular ItemPedido ao Pedido
+
+        produtoInternoMock = new Produto();
+        produtoInternoMock.setId(produtoFilhoId);
+        produtoInternoMock.setNome("X-Bacon");
+        produtoInternoMock.setAdicionais(new ArrayList<>()); // Inicializar lista de adicionais permitidos
 
         itemComboMock = new ItemCombo();
-        itemComboMock.setId(UUID.randomUUID());
+        itemComboMock.setId(itemComboId);
         itemComboMock.setItemPedido(itemPedidoMock);
         itemComboMock.setProdutoId(produtoFilhoId);
         itemComboMock.setNomeProduto("BATATA FRITA M");
         itemComboMock.setQuantidade(1);
-        itemComboMock.setPrecoUnitario(BigDecimal.ZERO); // Preço embutido no valor mestre do combo
+        itemComboMock.setPrecoUnitario(BigDecimal.ZERO);
+        itemComboMock.setAdicionais(new ArrayList<>()); // Inicializar lista de adicionais do itemCombo
     }
 
     // =========================================================================
@@ -168,6 +202,146 @@ class ItemComboServiceTest {
             itemComboService.lancarItemNoCombo(dto);
 
             verify(itemComboRepository, times(2)).save(any(ItemCombo.class));
+        }
+    }
+
+    // =========================================================================
+    // NOVOS TESTES PARA ATUALIZAR ADICIONAIS DO ITEM COMBO
+    // =========================================================================
+    @Nested
+    @DisplayName("Novos Testes — Atualização de Adicionais em ItemCombo")
+    class AtualizarAdicionaisItemComboTests {
+
+        private Adicional adicional1;
+        private Adicional adicional2;
+        private PedidoResponseDTO pedidoResponseDTOMock;
+
+        @BeforeEach
+        void setupAdicionais() {
+            adicional1 = new Adicional(UUID.randomUUID(), "Bacon Extra", BigDecimal.valueOf(3.00));
+            adicional2 = new Adicional(UUID.randomUUID(), "Cheddar", BigDecimal.valueOf(2.50));
+
+            produtoInternoMock.getAdicionais().add(adicional1); // Adicional permitido para o produto
+            produtoInternoMock.getAdicionais().add(adicional2); // Adicional permitido para o produto
+
+            pedidoResponseDTOMock = new PedidoResponseDTO(pedidoMock);
+        }
+
+        @Test
+        @DisplayName("CT-NOVO-001: Deve adicionar adicionais a um ItemCombo com sucesso")
+        void deveAdicionarAdicionaisComSucesso() {
+            when(itemComboRepository.findById(itemComboId)).thenReturn(Optional.of(itemComboMock));
+            when(produtoRepository.findById(produtoFilhoId)).thenReturn(Optional.of(produtoInternoMock));
+            when(adicionalRepository.findAllById(List.of(adicional1.getId()))).thenReturn(List.of(adicional1));
+            when(itemComboRepository.save(any(ItemCombo.class))).thenReturn(itemComboMock);
+            when(pedidoService.recalcularTotalPedido(pedidoId)).thenReturn(pedidoResponseDTOMock);
+
+            PedidoResponseDTO resultado = itemComboService.atualizarAdicionaisDoItemCombo(itemComboId, List.of(adicional1.getId()));
+
+            assertNotNull(resultado);
+            verify(itemComboRepository, times(1)).findById(itemComboId);
+            verify(produtoRepository, times(1)).findById(produtoFilhoId);
+            verify(adicionalRepository, times(1)).findAllById(List.of(adicional1.getId()));
+            verify(itemComboRepository, times(1)).save(argThat(ic -> ic.getAdicionais().contains(adicional1)));
+            verify(pedidoService, times(1)).recalcularTotalPedido(pedidoId);
+        }
+
+        @Test
+        @DisplayName("CT-NOVO-002: Deve remover todos os adicionais de um ItemCombo com sucesso")
+        void deveRemoverTodosAdicionaisComSucesso() {
+            itemComboMock.getAdicionais().add(adicional1); // Adicionar um adicional para remover
+
+            when(itemComboRepository.findById(itemComboId)).thenReturn(Optional.of(itemComboMock));
+            when(produtoRepository.findById(produtoFilhoId)).thenReturn(Optional.of(produtoInternoMock));
+            when(adicionalRepository.findAllById(Collections.emptyList())).thenReturn(Collections.emptyList());
+            when(itemComboRepository.save(any(ItemCombo.class))).thenReturn(itemComboMock);
+            when(pedidoService.recalcularTotalPedido(pedidoId)).thenReturn(pedidoResponseDTOMock);
+
+            PedidoResponseDTO resultado = itemComboService.atualizarAdicionaisDoItemCombo(itemComboId, Collections.emptyList());
+
+            assertNotNull(resultado);
+            verify(itemComboRepository, times(1)).save(argThat(ic -> ic.getAdicionais().isEmpty()));
+            verify(pedidoService, times(1)).recalcularTotalPedido(pedidoId);
+        }
+
+        @Test
+        @DisplayName("CT-NOVO-003: Deve substituir a seleção de adicionais de um ItemCombo com sucesso")
+        void deveSubstituirAdicionaisComSucesso() {
+            itemComboMock.getAdicionais().add(adicional1); // Adicional inicial
+
+            when(itemComboRepository.findById(itemComboId)).thenReturn(Optional.of(itemComboMock));
+            when(produtoRepository.findById(produtoFilhoId)).thenReturn(Optional.of(produtoInternoMock));
+            when(adicionalRepository.findAllById(List.of(adicional2.getId()))).thenReturn(List.of(adicional2));
+            when(itemComboRepository.save(any(ItemCombo.class))).thenReturn(itemComboMock);
+            when(pedidoService.recalcularTotalPedido(pedidoId)).thenReturn(pedidoResponseDTOMock);
+
+            PedidoResponseDTO resultado = itemComboService.atualizarAdicionaisDoItemCombo(itemComboId, List.of(adicional2.getId()));
+
+            assertNotNull(resultado);
+            verify(itemComboRepository, times(1)).save(argThat(ic ->
+                    ic.getAdicionais().size() == 1 && ic.getAdicionais().contains(adicional2)
+            ));
+            verify(pedidoService, times(1)).recalcularTotalPedido(pedidoId);
+        }
+
+        @Test
+        @DisplayName("CT-NOVO-004: Deve rejeitar adicionais se ItemCombo não for encontrado")
+        void deveRejeitarSeItemComboNaoEncontrado() {
+            when(itemComboRepository.findById(itemComboId)).thenReturn(Optional.empty());
+
+            assertThrows(ResourceNotFoundException.class, () ->
+                    itemComboService.atualizarAdicionaisDoItemCombo(itemComboId, List.of(adicional1.getId())));
+            verify(produtoRepository, never()).findById(any());
+            verify(adicionalRepository, never()).findAllById(any());
+            verify(itemComboRepository, never()).save(any());
+            verify(pedidoService, never()).recalcularTotalPedido(any());
+        }
+
+        @Test
+        @DisplayName("CT-NOVO-005: Deve rejeitar adicionais se Produto interno não for encontrado")
+        void deveRejeitarSeProdutoInternoNaoEncontrado() {
+            when(itemComboRepository.findById(itemComboId)).thenReturn(Optional.of(itemComboMock));
+            when(produtoRepository.findById(produtoFilhoId)).thenReturn(Optional.empty());
+
+            assertThrows(ResourceNotFoundException.class, () ->
+                    itemComboService.atualizarAdicionaisDoItemCombo(itemComboId, List.of(adicional1.getId())));
+            verify(adicionalRepository, never()).findAllById(any());
+            verify(itemComboRepository, never()).save(any());
+            verify(pedidoService, never()).recalcularTotalPedido(any());
+        }
+
+        @Test
+        @DisplayName("CT-NOVO-006: Deve rejeitar adicional inexistente (ID inválido)")
+        void deveRejeitarAdicionalInexistente() {
+            UUID adicionalInexistenteId = UUID.randomUUID();
+
+            when(itemComboRepository.findById(itemComboId)).thenReturn(Optional.of(itemComboMock));
+            when(produtoRepository.findById(produtoFilhoId)).thenReturn(Optional.of(produtoInternoMock));
+            // Retorna apenas o adicional existente, indicando que um ID não foi encontrado
+            when(adicionalRepository.findAllById(List.of(adicional1.getId(), adicionalInexistenteId)))
+                    .thenReturn(List.of(adicional1));
+
+            assertThrows(BusinessRuleException.class, () ->
+                    itemComboService.atualizarAdicionaisDoItemCombo(itemComboId, List.of(adicional1.getId(), adicionalInexistenteId)));
+            verify(itemComboRepository, never()).save(any());
+            verify(pedidoService, never()).recalcularTotalPedido(any());
+        }
+
+        @Test
+        @DisplayName("CT-NOVO-007: Deve rejeitar adicional não permitido para o produto interno")
+        void deveRejeitarAdicionalNaoPermitido() {
+            Adicional adicionalNaoPermitido = new Adicional(UUID.randomUUID(), "Picles", BigDecimal.valueOf(1.00));
+            // produtoInternoMock não tem adicionalNaoPermitido em sua lista de permitidos
+
+            when(itemComboRepository.findById(itemComboId)).thenReturn(Optional.of(itemComboMock));
+            when(produtoRepository.findById(produtoFilhoId)).thenReturn(Optional.of(produtoInternoMock));
+            when(adicionalRepository.findAllById(List.of(adicionalNaoPermitido.getId())))
+                    .thenReturn(List.of(adicionalNaoPermitido));
+
+            assertThrows(BusinessRuleException.class, () ->
+                    itemComboService.atualizarAdicionaisDoItemCombo(itemComboId, List.of(adicionalNaoPermitido.getId())));
+            verify(itemComboRepository, never()).save(any());
+            verify(pedidoService, never()).recalcularTotalPedido(any());
         }
     }
 }

@@ -39,6 +39,8 @@ public class EcosystemApocalypseTest {
     @Mock private ClienteRepository clienteRepository;
     @Mock private ComandaRepository comandaRepository;
     @Mock private ContaRepository contaRepository;
+    @Mock private ItemComboRepository itemComboRepository; // Adicionado para a nova feature
+    @Mock private ComboProdutoRepository comboProdutoRepository; // NOVO MOCK: ComboProdutoRepository
 
     // Removido @InjectMocks
     private PedidoService pedidoService;
@@ -59,7 +61,9 @@ public class EcosystemApocalypseTest {
         pedidoService = new PedidoService(
                 pedidoRepository, carrinhoRepository, caixaRepository,
                 produtoRepository, adicionalRepository, filaImpressaoRepository,
-                comandaRepository, contaRepository, messagingTemplate
+                comandaRepository, contaRepository, messagingTemplate,
+                itemComboRepository,
+                comboProdutoRepository // Passar o novo mock
         );
 
         prodIdLanche = UUID.randomUUID();
@@ -109,6 +113,7 @@ public class EcosystemApocalypseTest {
         pedidoCompartilhado.setStatus(StatusPedido.RECEBIDO);
         pedidoCompartilhado.setStatusFinanceiro(StatusFinanceiro.AGUARDANDO_PAGAMENTO);
 
+        lenient().when(contaRepository.findByComandaIdAndNumeroConta(any(), anyInt())).thenReturn(Optional.of(contaMestre));
         lenient().when(contaRepository.save(any(Conta.class))).thenAnswer(i -> i.getArgument(0));
         lenient().when(filaImpressaoRepository.save(any(FilaImpressao.class))).thenAnswer(i -> i.getArgument(0));
     }

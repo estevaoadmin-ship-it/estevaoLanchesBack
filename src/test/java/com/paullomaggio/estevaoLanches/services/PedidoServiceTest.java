@@ -36,6 +36,8 @@ class PedidoServiceTest {
     @Mock private ComandaRepository comandaRepository;
     @Mock private ContaRepository contaRepository;
     @Mock private SimpMessagingTemplate messagingTemplate;
+    @Mock private ItemComboRepository itemComboRepository; // Adicionado para a nova feature
+    @Mock private ComboProdutoRepository comboProdutoRepository; // NOVO MOCK: ComboProdutoRepository
 
     private PedidoService pedidoService;
 
@@ -52,7 +54,9 @@ class PedidoServiceTest {
         pedidoService = new PedidoService(
                 pedidoRepository, carrinhoRepository, caixaRepository,
                 produtoRepository, adicionalRepository, filaImpressaoRepository,
-                comandaRepository, contaRepository, messagingTemplate
+                comandaRepository, contaRepository, messagingTemplate,
+                itemComboRepository,
+                comboProdutoRepository // Passar o novo mock
         );
 
         comandaId = UUID.randomUUID();

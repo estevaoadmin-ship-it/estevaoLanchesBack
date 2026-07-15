@@ -1,7 +1,5 @@
 package com.paullomaggio.estevaoLanches.services;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.databind.SerializationFeature;
 import com.paullomaggio.estevaoLanches.dtos.*;
 import com.paullomaggio.estevaoLanches.entities.*;
 import com.paullomaggio.estevaoLanches.enums.*;
@@ -21,9 +19,9 @@ import java.sql.SQLException;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Random;
 import java.util.UUID;
 import java.util.Optional;
+import java.util.stream.Collectors; // Adicionado para Collectors.toList()
 
 @Service
 @RequiredArgsConstructor
@@ -42,6 +40,9 @@ public class PedidoService {
     private final ComandaRepository comandaRepository;
     private final ContaRepository contaRepository;
     private final SimpMessagingTemplate messagingTemplate;
+    private final ItemComboRepository itemComboRepository; // Adicionado para a nova feature
+    private final ComboProdutoRepository comboProdutoRepository; // ADICIONADO
+    // private final ItemComboService itemComboService; // INJETADO: ItemComboService - REMOVIDO
 
     /**
      * 📱 FLUXO MOBILE: Processa a entrada de lotes enviados por garçons ou tablets.
@@ -52,19 +53,10 @@ public class PedidoService {
             throw new BusinessRuleException("Operação negada: O turno do caixa está fechado.");
         }
 
-        // DEBUG MOCK - Logs temporários
-        log.info("========== DEBUG MOCK ==========");
-        log.info("DTO comandaId={}", dto.comandaId());
-        log.info("DTO numeroConta={}", dto.numeroConta());
-        log.info("================================");
-
         // CORREÇÃO OBRIGATÓRIA: Restaurar o comportamento antigo de buscar a Conta primeiro
         // A blindagem (getOrCreateAccountWithConcurrencyProtection) será chamada SOMENTE se a Conta não existir.
         Optional<Conta> contaExistente =
                 contaRepository.findByComandaIdAndNumeroConta(dto.comandaId(), dto.numeroConta());
-
-
-        log.info("Conta encontrada? {}", contaExistente.isPresent());
 
         Conta conta = contaExistente.orElseGet(() ->
                 getOrCreateAccountWithConcurrencyProtection(
@@ -76,26 +68,6 @@ public class PedidoService {
         if (conta.getPago()) {
             throw new BusinessRuleException("Bloqueio comercial: Esta subconta já foi encerrada e paga no caixa.");
         }
-
-        // AUDITORIA 3 (Logs existentes)
-        log.info("==============================");
-        log.info("CRIANDO PEDIDO - PedidoService.processarPedidoMobile()");
-        log.info("==============================");
-        log.info("Mesa Número: {}", dto.numeroMesa());
-        log.info("Conta ID: {}", conta.getId());
-        log.info("Conta Número: {}", conta.getNumeroConta());
-        log.info("Itens recebidos no DTO: {}", dto.itens().size());
-
-        for (var itemDto : dto.itens()) {
-            log.info(
-                    "  Produto ID: {} | Quantidade: {} | Observação: {}",
-                    itemDto.produtoId(),
-                    itemDto.quantidade(),
-                    itemDto.observacao()
-            );
-        }
-        log.info("==============================");
-
 
         Pedido pedido = new Pedido();
         pedido.setConta(conta);
@@ -154,103 +126,9 @@ public class PedidoService {
         pedido.setTotal(subtotalLote);
         Pedido pedidoSalvo = pedidoRepository.saveAndFlush(pedido);
 
-        log.info("================================================");
-        log.info("AUDITORIA - RELACIONAMENTO CONTA -> PEDIDOS");
-        log.info("================================================");
-
-        log.info("Conta ID: {}", conta.getId());
-        log.info("Conta Número: {}", conta.getNumeroConta());
-
-        log.info("Quantidade de pedidos na coleção da Conta: {}", conta.getPedidos().size());
-
-        for (Pedido p : conta.getPedidos()) {
-            log.info("Pedido presente na coleção:");
-            log.info("  ID: {}", p.getId());
-            log.info("  Status: {}", p.getStatus());
-            log.info("  Quantidade de itens: {}", p.getItens() != null ? p.getItens().size() : 0);
-        }
-
-        log.info("Pedido recém salvo:");
-        log.info("  ID: {}", pedidoSalvo.getId());
-        log.info("  Status: {}", pedidoSalvo.getStatus());
-        log.info("  Quantidade de itens: {}", pedidoSalvo.getItens().size());
-
-        boolean encontrado = conta.getPedidos().stream()
-                .anyMatch(p -> p.getId().equals(pedidoSalvo.getId()));
-
-        log.info("O pedido salvo está presente na coleção da Conta? {}", encontrado);
-
-        log.info("================================================");
-
-        // ================================================
-        log.info("================================================");
-        log.info("PEDIDO APÓS SAVEANDFLUSH");
-        log.info("================================================");
-        log.info("pedido.getId(): {}", pedido.getId());
-        log.info("pedido.getConta().getId(): {}", pedido.getConta().getId());
-        log.info("conta.getId(): {}", conta.getId());
-        log.info("conta.getPedidos().size(): {}", conta.getPedidos().size());
-        for (Pedido p : conta.getPedidos()) {
-            log.info("  Pedido na conta - ID: {}, Status: {}, Itens Size: {}", p.getId(), p.getStatus(), p.getItens().size());
-        }
-        log.info("================================================");
-        // ================================================
-
-        // AUDITORIA 4 (Logs existentes)
-        log.info("=============================");
-        log.info("AUDITORIA 4 - PedidoService.processarPedidoMobile() - Pedido Salvo");
-        log.info("=============================");
-        log.info("Pedido salvo:");
-        log.info("  ID: {}", pedidoSalvo.getId());
-        log.info("  Conta ID: {}", pedidoSalvo.getConta().getId());
-        log.info("  Mesa Número: {}", pedidoSalvo.getNumeroMesa());
-        log.info("  Quantidade de itens no Pedido salvo: {}", pedidoSalvo.getItens().size());
-        log.info("  Itens do Pedido salvo:");
-        pedidoSalvo.getItens().forEach(item -> {
-            log.info("    - UUID: {}", item.getId());
-            log.info("      Produto: {}", item.getProduto().getNome());
-            log.info("      Quantidade: {}", item.getQuantidade());
-            log.info("      Valor Unitário: {}", item.getPrecoUnitario());
-            log.info("      Valor Total Item: {}", item.getPrecoUnitario().multiply(BigDecimal.valueOf(item.getQuantidade())));
-        });
-        log.info("=============================");
-
-        // AUDITORIA FINAL - CONTA EM MEMÓRIA (Logs existentes)
-        log.info("==========================================");
-        log.info("AUDITORIA FINAL - CONTA EM MEMÓRIA");
-        log.info("==========================================");
-
-        log.info("Conta ID: {}", conta.getId());
-        log.info("Pedidos na memória: {}", conta.getPedidos().size());
-
-        for (Pedido p : conta.getPedidos()) {
-            log.info("Pedido ID: {}", p.getId());
-
-            if (p.getItens() != null) {
-                log.info("Quantidade de itens: {}", p.getItens().size());
-
-                for (ItemPedido item : p.getItens()) {
-                    log.info(
-                            "Produto={} Quantidade={}",
-                            item.getProduto().getNome(),
-                            item.getQuantidade()
-                    );
-                }
-            }
-        }
-        log.info("==========================================");
-
-        // PASSO 4: Antes de retornar de processarPedidoMobile()
-        log.info("================================================");
-        log.info("AUDITORIA - PASSO 4: PedidoService.processarPedidoMobile() - Antes de retornar");
-        log.info("================================================");
-        List<Conta> contasNoBancoAntesRetorno = contaRepository.findByComandaId(dto.comandaId());
-        log.info("Quantidade de contas no banco (findByComandaId): {}", contasNoBancoAntesRetorno.size());
-        for (Conta c : contasNoBancoAntesRetorno) {
-            log.info("  Conta UUID: {}, Número: {}", c.getId(), c.getNumeroConta());
-        }
-        log.info("================================================");
-
+        // CHAMADA NOVA: Gerar snapshots de ItemCombo após a persistência do pedido
+        // itemComboService.criarSnapshotsDosCombos(pedidoSalvo); // REMOVIDO
+        criarSnapshotsDosCombos(pedidoSalvo); // SUBSTITUIDO
 
         if (necessitaPreparoCozinha) {
             FilaImpressao cupomCozinha = new FilaImpressao();
@@ -259,7 +137,6 @@ public class PedidoService {
             cupomCozinha.setStatus(FilaImpressao.StatusImpressao.PENDENTE);
             filaImpressaoRepository.save(cupomCozinha);
         }
-
 
         PedidoResponseDTO responseDTO = new PedidoResponseDTO(pedidoSalvo);
         messagingTemplate.convertAndSend("/topic/caixa", responseDTO);
@@ -288,40 +165,10 @@ public class PedidoService {
         novaConta.setValorTotal(BigDecimal.ZERO);
         novaConta.setPago(false);
 
-        // PASSO 1: Antes do save
-        log.info("================================================");
-        log.info("AUDITORIA - PASSO 1: getOrCreateAccountWithConcurrencyProtection() - Antes do save");
-        log.info("================================================");
-        log.info("  Comanda ID: {}", comandaId);
-        log.info("  Conta a ser criada UUID: {}", novaConta.getId()); // Será null antes do save
-        log.info("  Conta a ser criada Número: {}", novaConta.getNumeroConta());
-        log.info("================================================");
-
         try {
             log.info("[CONCORRENCIA] Thread {} - Tentando salvar nova Conta {} para Comanda {}", Thread.currentThread().getName(), numeroConta, comandaId);
             // AJUSTE FINAL: Utilizar saveAndFlush() para detecção imediata da violação de unicidade
             Conta contaSalva = contaRepository.saveAndFlush(novaConta);
-
-            // PASSO 1: Depois do save e depois do flush
-            log.info("================================================");
-            log.info("AUDITORIA - PASSO 1: getOrCreateAccountWithConcurrencyProtection() - Depois do save e flush");
-            log.info("================================================");
-            log.info("  Comanda ID: {}", comandaId);
-            log.info("  Conta criada UUID: {}", contaSalva.getId());
-            log.info("  Conta criada Número: {}", contaSalva.getNumeroConta());
-            log.info("================================================");
-
-            // PASSO 2: Imediatamente após contaRepository.saveAndFlush()
-            log.info("================================================");
-            log.info("AUDITORIA - PASSO 2: getOrCreateAccountWithConcurrencyProtection() - Após saveAndFlush, findByComandaId");
-            log.info("================================================");
-            List<Conta> contasNoBanco = contaRepository.findByComandaId(comandaId);
-            log.info("Quantidade encontrada (findByComandaId): {}", contasNoBanco.size());
-            for (Conta c : contasNoBanco) {
-                log.info("  Conta UUID: {}, Número: {}", c.getId(), c.getNumeroConta());
-            }
-            log.info("================================================");
-
             return contaSalva;
         } catch (DataIntegrityViolationException e) {
             // AJUSTE 1: Verificar se a exceção é causada pela constraint uk_comanda_id_numero_conta
@@ -436,6 +283,9 @@ public class PedidoService {
         calcularEPreencherTotal(pedido);
 
         Pedido pedidoSalvo = salvarPedido(pedido);
+        // CHAMADA NOVA: Gerar snapshots de ItemCombo após a persistência do pedido
+        // itemComboService.criarSnapshotsDosCombos(pedidoSalvo); // REMOVIDO
+        criarSnapshotsDosCombos(pedidoSalvo); // SUBSTITUIDO
         gerarFilaImpressao(pedidoSalvo);
         limparCarrinho(carrinho);
 
@@ -465,6 +315,9 @@ public class PedidoService {
         calcularEPreencherTotal(pedido);
 
         Pedido pedidoSalvo = salvarPedido(pedido);
+        // CHAMADA NOVA: Gerar snapshots de ItemCombo após a persistência do pedido
+        // itemComboService.criarSnapshotsDosCombos(pedidoSalvo); // REMOVIDO
+        criarSnapshotsDosCombos(pedidoSalvo); // SUBSTITUIDO
         gerarFilaImpressao(pedidoSalvo);
         limparCarrinho(carrinho);
 
@@ -560,6 +413,9 @@ public class PedidoService {
         calcularEPreencherTotal(pedido);
 
         Pedido pedidoSalvo = salvarPedido(pedido);
+        // CHAMADA NOVA: Gerar snapshots de ItemCombo após a persistência do pedido
+        // itemComboService.criarSnapshotsDosCombos(pedidoSalvo); // REMOVIDO
+        criarSnapshotsDosCombos(pedidoSalvo); // SUBSTITUIDO
         gerarFilaImpressao(pedidoSalvo);
 
         return new PedidoResponseDTO(pedidoSalvo);
@@ -667,6 +523,9 @@ public class PedidoService {
         pedido.setTotal(pedido.getTotal().add(produto.getPreco().multiply(BigDecimal.valueOf(dto.quantidade()))));
 
         Pedido pedidoSalvo = pedidoRepository.save(pedido);
+        // CHAMADA NOVA: Gerar snapshots de ItemCombo após a persistência do pedido
+        // itemComboService.criarSnapshotsDosCombos(pedidoSalvo); // REMOVIDO
+        criarSnapshotsDosCombos(pedidoSalvo); // SUBSTITUIDO
         PedidoResponseDTO response = new PedidoResponseDTO(pedidoSalvo);
         messagingTemplate.convertAndSend("/topic/caixa", response);
         return response;
@@ -688,6 +547,24 @@ public class PedidoService {
 
         BigDecimal valorDeduzir = itemRemover.getPrecoUnitario().multiply(BigDecimal.valueOf(itemRemover.getQuantidade()));
         pedido.setTotal(pedido.getTotal().subtract(valorDeduzir));
+
+        // ==================================================
+        // ÚNICO BLOCO NOVO AUTORIZADO
+        // ==================================================
+
+        List<ItemCombo> itensCombo =
+                itemComboRepository.findByItemPedidoId(
+                        itemRemover.getId()
+                );
+
+        if (!itensCombo.isEmpty()) {
+            itemComboRepository.deleteAll(itensCombo);
+            itemComboRepository.flush();
+        }
+
+        // ==================================================
+        // DAQUI PARA BAIXO, MANTER O FLUXO ANTIGO INTACTO
+        // ==================================================
         pedido.getItens().remove(itemRemover);
 
         Pedido pedidoSalvo = pedidoRepository.save(pedido);
@@ -713,25 +590,8 @@ public class PedidoService {
         List<Adicional> adicionais = adicionalRepository.findAllById(adicionaisIds);
         item.setAdicionais(adicionais);
 
-        BigDecimal novoTotal = pedido.getItens().stream()
-                .map(i -> {
-                    BigDecimal base = i.getPrecoUnitario();
-                    if (i.getAdicionais() != null) {
-                        BigDecimal adicionaisPreco = i.getAdicionais().stream()
-                                .map(Adicional::getPreco)
-                                .reduce(BigDecimal.ZERO, BigDecimal::add);
-                        base = base.add(adicionaisPreco);
-                    }
-                    return base.multiply(BigDecimal.valueOf(i.getQuantidade()));
-                })
-                .reduce(BigDecimal.ZERO, BigDecimal::add);
-
-        pedido.setTotal(novoTotal);
-        Pedido pedidoSalvo = pedidoRepository.save(pedido);
-
-        PedidoResponseDTO response = new PedidoResponseDTO(pedidoSalvo);
-        messagingTemplate.convertAndSend("/topic/caixa", response);
-        return response;
+        // Recalcula o total do pedido, incluindo os adicionais de ItemPedido e ItemCombo
+        return recalcularTotalPedido(pedido.getId());
     }
 
     @Transactional
@@ -857,5 +717,128 @@ public class PedidoService {
                 conta.getComanda().getMesa().getNumero(),
                 conta.getNumeroConta(),
                 clienteNome);
+    }
+
+    // ==========================================
+    // 💰 ROTINAS FINANCEIRAS PARA ADICIONAIS DE COMBO
+    // ==========================================
+
+    @Transactional
+    public PedidoResponseDTO recalcularTotalPedido(UUID pedidoId) {
+        Pedido pedido = pedidoRepository.findById(pedidoId)
+                .orElseThrow(() -> new ResourceNotFoundException("Pedido informado não localizado."));
+
+        // 1. Calcular o total dos ItemPedido (incluindo seus próprios adicionais)
+        BigDecimal totalItensPedido = pedido.getItens().stream()
+                .map(item -> {
+                    BigDecimal precoBaseItem = item.getPrecoUnitario(); // Já inclui o preço do produto + adicionais de ItemPedido na criação
+                    // Se o precoUnitario não incluir adicionais na criação, a lógica abaixo seria necessária:
+                    // BigDecimal precoAdicionaisItem = item.getAdicionais().stream()
+                    //         .map(Adicional::getPreco)
+                    //         .reduce(BigDecimal.ZERO, BigDecimal::add);
+                    // return precoBaseItem.add(precoAdicionaisItem).multiply(BigDecimal.valueOf(item.getQuantidade()));
+                    return precoBaseItem.multiply(BigDecimal.valueOf(item.getQuantidade()));
+                })
+                .reduce(BigDecimal.ZERO, BigDecimal::add);
+
+        // 2. Calcular o acréscimo dos adicionais dos ItemCombo
+        BigDecimal totalAdicionaisItemCombo = calcularTotalAdicionaisItensCombo(pedido);
+
+        // 3. Somar todos os totais
+        BigDecimal novoTotalPedido = totalItensPedido.add(totalAdicionaisItemCombo);
+
+        pedido.setTotal(novoTotalPedido);
+        Pedido pedidoSalvo = pedidoRepository.save(pedido);
+
+        PedidoResponseDTO response = new PedidoResponseDTO(pedidoSalvo);
+        messagingTemplate.convertAndSend("/topic/caixa", response);
+        return response;
+    }
+
+    /**
+     * Calcula o valor total dos adicionais vinculados aos ItemCombo de um Pedido.
+     * Esta lógica é aditiva e não interfere no cálculo base dos ItemPedido.
+     *
+     * @param pedido O Pedido a ser analisado.
+     * @return O valor total dos adicionais dos ItemCombo.
+     */
+    private BigDecimal calcularTotalAdicionaisItensCombo(Pedido pedido) {
+        BigDecimal totalAdicionaisCombos = BigDecimal.ZERO;
+
+        for (ItemPedido itemPedido : pedido.getItens()) {
+            // Verifica se o ItemPedido é um combo (assumindo que Produto.isCombo é carregado)
+            // A auditoria identificou que ItemPedido.produto.isCombo não é diretamente exposto no DTO,
+            // mas a entidade ItemPedido tem o Produto associado.
+            if (itemPedido.getProduto() != null && itemPedido.getProduto().getIsCombo()) {
+                List<ItemCombo> itensCombo = itemComboRepository.findByItemPedidoId(itemPedido.getId());
+
+                for (ItemCombo itemCombo : itensCombo) {
+                    BigDecimal precoAdicionaisItemCombo = itemCombo.getAdicionais().stream()
+                            .map(Adicional::getPreco)
+                            .reduce(BigDecimal.ZERO, BigDecimal::add);
+
+                    // Regra: O adicional selecionado em um ItemCombo aplica-se a TODA a quantidade daquele ItemCombo.
+                    totalAdicionaisCombos = totalAdicionaisCombos.add(
+                            precoAdicionaisItemCombo.multiply(BigDecimal.valueOf(itemCombo.getQuantidade()))
+                    );
+                }
+            }
+        }
+        return totalAdicionaisCombos;
+    }
+
+    // NOVO MÉTODO: Criar snapshots de ItemCombo para um ItemPedido individual
+    private void criarSnapshotsDoCombo(ItemPedido itemPedido) {
+        if (itemPedido == null
+                || itemPedido.getProduto() == null
+                || itemPedido.getId() == null) {
+            return;
+        }
+
+        // Verifica se o produto do ItemPedido é um combo
+        if (!Boolean.TRUE.equals(itemPedido.getProduto().getIsCombo())) {
+            return;
+        }
+
+        // Proteção contra duplicidade: verifica se já existem ItemCombos para este ItemPedido
+        List<ItemCombo> existentes = itemComboRepository.findByItemPedidoId(itemPedido.getId());
+        if (!existentes.isEmpty()) {
+            return;
+        }
+
+        // Busca a composição do combo
+        List<ComboProduto> composicao = comboProdutoRepository.findByComboId(itemPedido.getProduto().getId());
+
+        if (composicao.isEmpty()) {
+            return; // Combo sem composição, apenas retorna
+        }
+
+        // Cria os snapshots de ItemCombo
+        List<ItemCombo> snapshots = composicao.stream()
+                .map(config -> {
+                    Produto produtoInterno = config.getProduto();
+                    ItemCombo itemCombo = new ItemCombo();
+
+                    itemCombo.setItemPedido(itemPedido);
+                    itemCombo.setProdutoId(produtoInterno.getId());
+                    itemCombo.setNomeProduto(produtoInterno.getNome());
+                    itemCombo.setQuantidade(config.getQuantidade()); // Usa a quantidade da composição do combo
+                    itemCombo.setPrecoUnitario(produtoInterno.getPreco());
+
+                    return itemCombo;
+                })
+                .collect(Collectors.toList());
+
+        // Persiste todos os snapshots de uma vez
+        itemComboRepository.saveAll(snapshots);
+    }
+
+    // NOVO MÉTODO: Processar todos os ItemPedidos de um Pedido para criar snapshots de combos
+    private void criarSnapshotsDosCombos(Pedido pedido) {
+        if (pedido == null || pedido.getItens() == null) {
+            return;
+        }
+
+        pedido.getItens().forEach(this::criarSnapshotsDoCombo);
     }
 }

@@ -2,6 +2,7 @@ package com.paullomaggio.estevaoLanches.controllers;
 
 import com.paullomaggio.estevaoLanches.dtos.ItemComboRequestDTO;
 import com.paullomaggio.estevaoLanches.dtos.ItemComboResponseDTO;
+import com.paullomaggio.estevaoLanches.dtos.PedidoResponseDTO;
 import com.paullomaggio.estevaoLanches.services.ItemComboService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.responses.ApiResponse;
@@ -49,5 +50,21 @@ public class ItemComboController {
     @GetMapping("/item-pedido/{itemPedidoId}")
     public ResponseEntity<List<ItemComboResponseDTO>> listarPorItemPedido(@PathVariable UUID itemPedidoId) {
         return ResponseEntity.ok(itemComboService.listarItensDoComboPedido(itemPedidoId));
+    }
+
+    @Operation(summary = "Atualiza os adicionais de um item de combo",
+               description = "Permite modificar os adicionais de um produto interno de um combo.")
+    @ApiResponses(value = {
+            @ApiResponse(responseCode = "200", description = "Adicionais do item de combo atualizados com sucesso"),
+            @ApiResponse(responseCode = "400", description = "Dados de adicionais inválidos ou não permitidos"),
+            @ApiResponse(responseCode = "404", description = "Item de combo ou adicional não encontrado"),
+            @ApiResponse(responseCode = "401", description = "Não autenticado"),
+            @ApiResponse(responseCode = "403", description = "Sem permissão (apenas ADMIN ou GARCOM)")
+    })
+    @PutMapping("/{itemComboId}/adicionais")
+    public ResponseEntity<PedidoResponseDTO> atualizarAdicionaisDoItemCombo(
+            @PathVariable UUID itemComboId,
+            @RequestBody List<UUID> adicionaisIds) {
+        return ResponseEntity.ok(itemComboService.atualizarAdicionaisDoItemCombo(itemComboId, adicionaisIds));
     }
 }

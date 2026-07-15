@@ -4,6 +4,8 @@ import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import jakarta.persistence.*;
 import lombok.*;
 import java.math.BigDecimal;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.UUID;
 
 /**
@@ -41,4 +43,13 @@ public class ItemCombo {
 
     @Column(nullable = false, precision = 10, scale = 2)
     private BigDecimal precoUnitario;
+
+    @ManyToMany(fetch = FetchType.LAZY)
+    @JoinTable(
+            name = "item_combo_adicional",
+            joinColumns = @JoinColumn(name = "item_combo_id"),
+            inverseJoinColumns = @JoinColumn(name = "adicional_id")
+    )
+    @JsonIgnoreProperties({"hibernateLazyInitializer", "handler"})
+    private List<Adicional> adicionais = new ArrayList<>();
 }
