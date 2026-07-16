@@ -22,16 +22,14 @@ public class ComandaService {
 
     private final ComandaRepository comandaRepository;
     private final MesaRepository mesaRepository;
-    private final ClienteRepository clienteRepository;
     private final ContaRepository contaRepository;
 
     private static final UUID EMPRESA_PADRAO = UUID.fromString("11111111-1111-1111-1111-111111111111");
     private static final UUID FILIAL_PADRAO = UUID.fromString("22222222-2222-2222-2222-222222222222");
 
-    public ComandaService(ComandaRepository comandaRepository, MesaRepository mesaRepository, ClienteRepository clienteRepository, ContaRepository contaRepository) {
+    public ComandaService(ComandaRepository comandaRepository, MesaRepository mesaRepository, ContaRepository contaRepository) {
         this.comandaRepository = comandaRepository;
         this.mesaRepository = mesaRepository;
-        this.clienteRepository = clienteRepository;
         this.contaRepository = contaRepository;
     }
 
@@ -79,12 +77,6 @@ public class ComandaService {
         contaPai.setPago(false);
         contaPai.setValorTotal(BigDecimal.ZERO);
 
-        Cliente clienteMesa = new Cliente();
-        clienteMesa.setNome("MESA " + numeroMesa + " - CONTA 1");
-        clienteMesa.setNumero("");
-        Cliente clienteSalvo = clienteRepository.save(clienteMesa);
-
-        contaPai.setCliente(clienteSalvo);
         contaRepository.save(contaPai);
 
         return new ComandaResponseDTO(comandaSalva, false);

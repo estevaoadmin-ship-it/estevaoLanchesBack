@@ -19,13 +19,11 @@ public class ContaService {
 
     private final ContaRepository contaRepository;
     private final ComandaRepository comandaRepository;
-    private final ClienteRepository clienteRepository;
 
     // Injeção de dependência via construtor
-    public ContaService(ContaRepository contaRepository, ComandaRepository comandaRepository, ClienteRepository clienteRepository) {
+    public ContaService(ContaRepository contaRepository, ComandaRepository comandaRepository) {
         this.contaRepository = contaRepository;
         this.comandaRepository = comandaRepository;
-        this.clienteRepository = clienteRepository;
     }
 
     /**
@@ -46,12 +44,6 @@ public class ContaService {
         conta.setComanda(comanda);
         conta.setPago(false);
         conta.setValorTotal(BigDecimal.ZERO);
-
-        // Instancia o cliente proprietário da subconta
-        Cliente cliente = new Cliente();
-        cliente.setNome("MESA " + comanda.getMesa().getNumero() + " - CONTA " + dto.numeroConta());
-        cliente = clienteRepository.save(cliente);
-        conta.setCliente(cliente);
 
         return new ContaResponseDTO(contaRepository.save(conta));
     }

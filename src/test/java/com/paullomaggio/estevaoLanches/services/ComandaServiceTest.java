@@ -48,7 +48,7 @@ class ComandaServiceTest {
     @BeforeEach
     void setUp() {
         // Instanciação manual do serviço com os mocks
-        comandaService = new ComandaService(comandaRepository, mesaRepository, clienteRepository, contaRepository);
+        comandaService = new ComandaService(comandaRepository, mesaRepository, contaRepository);
 
         comandaId = UUID.randomUUID();
 
@@ -79,7 +79,7 @@ class ComandaServiceTest {
             when(mesaRepository.save(any(Mesa.class))).thenAnswer(i -> i.getArgument(0));
             when(comandaRepository.findByMesaNumeroAndStatus(NUMERO_MESA, StatusComanda.ABERTA)).thenReturn(Optional.empty());
             when(comandaRepository.save(any(Comanda.class))).thenReturn(comandaAberta);
-            when(clienteRepository.save(any(Cliente.class))).thenAnswer(i -> i.getArgument(0));
+            // when(clienteRepository.save(any(Cliente.class))).thenAnswer(i -> i.getArgument(0)); // Removido stub obsoleto
             when(contaRepository.save(any(Conta.class))).thenAnswer(i -> i.getArgument(0));
 
             ComandaResponseDTO dto = comandaService.abrirPorNumeroMesa(NUMERO_MESA);
@@ -88,8 +88,8 @@ class ComandaServiceTest {
             // Corrigido para esperar 2 chamadas a mesaRepository.save()
             verify(mesaRepository, times(2)).save(argThat(m -> m.getStatus() == StatusMesa.OCUPADA || m.getStatus() == StatusMesa.LIVRE));
             verify(comandaRepository, times(1)).save(any(Comanda.class));
-            verify(clienteRepository, times(1)).save(argThat(c -> c.getNome().equals("MESA " + NUMERO_MESA + " - CONTA 1")));
-            verify(contaRepository, times(1)).save(argThat(conta -> conta.getNumeroConta() == 1 && !conta.getPago()));
+            verify(clienteRepository, never()).save(any(Cliente.class)); // Nova verificação: Cliente não deve ser salvo
+            verify(contaRepository, times(1)).save(argThat(conta -> conta.getNumeroConta() == 1 && !conta.getPago() && conta.getCliente() == null)); // Cliente deve ser null
         }
 
         @Test
@@ -204,15 +204,16 @@ class ComandaServiceTest {
             when(mesaRepository.save(any(Mesa.class))).thenAnswer(i -> i.getArgument(0)); // Adicionado mock para mesaRepository.save
             when(comandaRepository.findByMesaNumeroAndStatus(NUMERO_MESA, StatusComanda.ABERTA)).thenReturn(Optional.empty());
             when(comandaRepository.save(any(Comanda.class))).thenReturn(comandaAberta);
-            when(clienteRepository.save(any(Cliente.class))).thenAnswer(i -> i.getArgument(0));
+            // when(clienteRepository.save(any(Cliente.class))).thenAnswer(i -> i.getArgument(0)); // Removido stub obsoleto
             when(contaRepository.save(any(Conta.class))).thenAnswer(i -> i.getArgument(0));
 
             comandaService.abrirPorNumeroMesa(NUMERO_MESA);
 
             verify(contaRepository, times(1)).save(argThat(conta ->
                     conta.getComanda().equals(comandaAberta) &&
-                            conta.getCliente() != null
+                            conta.getCliente() == null // Cliente deve ser null
             ));
+            verify(clienteRepository, never()).save(any(Cliente.class)); // Adicionado: Cliente não deve ser salvo
         }
     }
 
@@ -238,11 +239,12 @@ class ComandaServiceTest {
             when(mesaRepository.findByNumero(NUMERO_MESA)).thenReturn(Optional.of(mesaLivre));
             when(comandaRepository.findByMesaNumeroAndStatus(NUMERO_MESA, StatusComanda.ABERTA)).thenReturn(Optional.empty());
             when(comandaRepository.save(any(Comanda.class))).thenReturn(new Comanda());
-            when(clienteRepository.save(any(Cliente.class))).thenAnswer(i -> i.getArgument(0)); // Adicionado mock para clienteRepository.save
+            // when(clienteRepository.save(any(Cliente.class))).thenAnswer(i -> i.getArgument(0)); // Removido stub obsoleto
             when(contaRepository.save(any(Conta.class))).thenAnswer(i -> i.getArgument(0)); // Adicionado mock para contaRepository.save
 
             comandaService.abrirPorNumeroMesa(NUMERO_MESA);
             verify(comandaRepository, times(2)).save(any(Comanda.class)); // Agora é 2 vezes (uma no fechar, outra no abrir)
+            verify(clienteRepository, never()).save(any(Cliente.class)); // Adicionado: Cliente não deve ser salvo
         }
     }
 
@@ -263,7 +265,7 @@ class ComandaServiceTest {
                     .thenReturn(Optional.empty()) // Atendimento do Garçom 1 passa limpo
                     .thenReturn(Optional.of(comandaAberta)); // Atendimento do Garçom 2 intercepta a sessão já aberta
             when(comandaRepository.save(any(Comanda.class))).thenReturn(comandaAberta); // Adicionado mock para comandaRepository.save
-            when(clienteRepository.save(any(Cliente.class))).thenAnswer(i -> i.getArgument(0)); // Adicionado mock para clienteRepository.save
+            // when(clienteRepository.save(any(Cliente.class))).thenAnswer(i -> i.getArgument(0)); // Removido stub obsoleto
             when(contaRepository.save(any(Conta.class))).thenAnswer(i -> i.getArgument(0)); // Adicionado mock para contaRepository.save
 
             // Execução 1
@@ -272,6 +274,7 @@ class ComandaServiceTest {
             comandaService.abrirPorNumeroMesa(NUMERO_MESA);
 
             verify(comandaRepository, times(1)).save(any(Comanda.class)); // O comando save deve rodar APENAS uma vez
+            verify(clienteRepository, never()).save(any(Cliente.class)); // Adicionado: Cliente não deve ser salvo
         }
 
         @Test
@@ -303,17 +306,18 @@ class ComandaServiceTest {
             when(mesaRepository.save(any(Mesa.class))).thenAnswer(i -> i.getArgument(0)); // Adicionado mock para mesaRepository.save
             when(comandaRepository.findByMesaNumeroAndStatus(NUMERO_MESA, StatusComanda.ABERTA)).thenReturn(Optional.empty());
             when(comandaRepository.save(any(Comanda.class))).thenReturn(comandaAberta);
-            when(clienteRepository.save(any(Cliente.class))).thenAnswer(i -> i.getArgument(0));
+            // when(clienteRepository.save(any(Cliente.class))).thenAnswer(i -> i.getArgument(0)); // Removido stub obsoleto
             when(contaRepository.save(any(Conta.class))).thenAnswer(i -> i.getArgument(0));
 
             comandaService.abrirPorNumeroMesa(NUMERO_MESA);
 
             // Prova real de conformidade cronológica síncrona
-            InOrder ordemRigida = inOrder(mesaRepository, comandaRepository, clienteRepository, contaRepository);
+            InOrder ordemRigida = inOrder(mesaRepository, comandaRepository, contaRepository); // ClienteRepository removido
             ordemRigida.verify(mesaRepository).save(any(Mesa.class)); // Apenas uma chamada ao save para mesaRepository
             ordemRigida.verify(comandaRepository).save(any(Comanda.class));
-            ordemRigida.verify(clienteRepository).save(any(Cliente.class));
+            // ordemRigida.verify(clienteRepository).save(any(Cliente.class)); // Removido verify obsoleto
             ordemRigida.verify(contaRepository).save(any(Conta.class));
+            verify(clienteRepository, never()).save(any(Cliente.class)); // Adicionado: Cliente não deve ser salvo
         }
     }
 }

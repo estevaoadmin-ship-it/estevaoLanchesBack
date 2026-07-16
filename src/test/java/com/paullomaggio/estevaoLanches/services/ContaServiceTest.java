@@ -34,7 +34,7 @@ class ContaServiceTest {
 
     @Mock private ContaRepository contaRepository;
     @Mock private ComandaRepository comandaRepository;
-    @Mock private ClienteRepository clienteRepository;
+    @Mock private ClienteRepository clienteRepository; // Mantido, pois é usado em 'verify(..., never())'
 
     // Removido @InjectMocks
     private ContaService contaService;
@@ -49,7 +49,7 @@ class ContaServiceTest {
     @BeforeEach
     void setUp() {
         // Instanciação manual do serviço com os mocks
-        contaService = new ContaService(contaRepository, comandaRepository, clienteRepository);
+        contaService = new ContaService(contaRepository, comandaRepository);
 
         comandaId = UUID.randomUUID();
         contaId = UUID.randomUUID();
@@ -73,7 +73,7 @@ class ContaServiceTest {
         contaMock.setPago(false);
         contaMock.setValorTotal(BigDecimal.ZERO);
         contaMock.setComanda(comandaMock);
-        contaMock.setCliente(clienteMock);
+        contaMock.setCliente(clienteMock); // Este clienteMock não será mais setado no código de produção
     }
 
     // =========================================================================
@@ -90,15 +90,16 @@ class ContaServiceTest {
 
             when(comandaRepository.findById(comandaId)).thenReturn(Optional.of(comandaMock));
             when(contaRepository.findByComandaIdAndNumeroConta(comandaId, 2)).thenReturn(Optional.empty());
-            when(clienteRepository.save(any(Cliente.class))).thenAnswer(i -> i.getArgument(0));
-            when(contaRepository.save(any(Conta.class))).thenReturn(contaMock);
+            // when(clienteRepository.save(any(Cliente.class))).thenAnswer(i -> i.getArgument(0)); // Removido stub obsoleto
+            when(contaRepository.save(any(Conta.class))).thenAnswer(i -> i.getArgument(0));
 
             ContaResponseDTO resultado = contaService.criar(dto);
 
             assertNotNull(resultado);
-            InOrder ordemTransacional = inOrder(clienteRepository, contaRepository);
-            ordemTransacional.verify(clienteRepository).save(argThat(c -> c.getNome().equals("MESA 5 - CONTA 2")));
-            ordemTransacional.verify(contaRepository).save(argThat(c -> c.getNumeroConta() == 2 && !c.getPago()));
+            InOrder ordemTransacional = inOrder(contaRepository); // ClienteRepository removido
+            // ordemTransacional.verify(clienteRepository).save(argThat(c -> c.getNome().equals("MESA 5 - CONTA 2"))); // Removido verify obsoleto
+            ordemTransacional.verify(contaRepository).save(argThat(c -> c.getNumeroConta() == 2 && !c.getPago() && c.getCliente() == null)); // Cliente deve ser null
+            verify(clienteRepository, never()).save(any(Cliente.class)); // Adicionado: Cliente não deve ser salvo
         }
     }
 
@@ -242,8 +243,9 @@ class ContaServiceTest {
         @DisplayName("CT-060 ao CT-068, CT-082: Isolamento Financeiro — Multi-contas na mesma mesa devem operar de forma independente: pagar a Conta 1 não quita a Conta 2")
         void deveGarantirIsolamentoEntreSubcontasDaMesa() {
             // 🎯 FIX: Construtor da Conta atualizado com os novos campos nomeResponsavel e telefoneResponsavel
-            Conta conta1 = new Conta(UUID.randomUUID(), 1, false, BigDecimal.ZERO, null, null, comandaMock, new Cliente(), new ArrayList<>(), new ArrayList<>());
-            Conta conta2 = new Conta(UUID.randomUUID(), 2, false, BigDecimal.ZERO, null, null, comandaMock, new Cliente(), new ArrayList<>(), new ArrayList<>());
+            // Cliente artificial não é mais criado, então o construtor da Conta não deve mais recebê-lo
+            Conta conta1 = new Conta(UUID.randomUUID(), 1, false, BigDecimal.ZERO, null, null, comandaMock, null, new ArrayList<>(), new ArrayList<>());
+            Conta conta2 = new Conta(UUID.randomUUID(), 2, false, BigDecimal.ZERO, null, null, comandaMock, null, new ArrayList<>(), new ArrayList<>());
 
             when(contaRepository.findById(conta1.getId())).thenReturn(Optional.of(conta1));
             when(contaRepository.save(any(Conta.class))).thenAnswer(i -> i.getArgument(0));
@@ -274,7 +276,7 @@ class ContaServiceTest {
                     .thenReturn(Optional.empty())
                     .thenReturn(Optional.of(contaMock));
 
-            when(clienteRepository.save(any(Cliente.class))).thenAnswer(i -> i.getArgument(0));
+            // when(clienteRepository.save(any(Cliente.class))).thenAnswer(i -> i.getArgument(0)); // Removido stub obsoleto
             when(contaRepository.save(any(Conta.class))).thenReturn(contaMock);
 
             // Execução 1 processa com sucesso
@@ -283,6 +285,7 @@ class ContaServiceTest {
             // Execução 2 esbarra no bloqueio de duplicidade concorrente síncrona
             assertThrows(BusinessRuleException.class, () -> contaService.criar(dto));
             verify(contaRepository, times(1)).save(any(Conta.class)); // Garante escrita ÚNICA
+            verify(clienteRepository, never()).save(any(Cliente.class)); // Adicionado: Cliente não deve ser salvo
         }
 
         @Test
