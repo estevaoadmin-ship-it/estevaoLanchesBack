@@ -447,7 +447,20 @@ public class PedidoService {
             ItemPedido item = new ItemPedido();
             item.setProduto(itemCarrinho.getProduto());
             item.setQuantidade(itemCarrinho.getQuantidade());
-            item.setPrecoUnitario(itemCarrinho.getProduto().getPreco());
+
+            // Calcular preço dos adicionais
+            BigDecimal precoAdicionais = BigDecimal.ZERO;
+            if (itemCarrinho.getAdicionais() != null && !itemCarrinho.getAdicionais().isEmpty()) {
+                precoAdicionais = itemCarrinho.getAdicionais().stream()
+                        .map(Adicional::getPreco)
+                        .reduce(BigDecimal.ZERO, BigDecimal::add);
+                item.setAdicionais(new ArrayList<>(itemCarrinho.getAdicionais())); // Associar adicionais ao ItemPedido
+            }
+
+            // Definir preço unitário do ItemPedido (produto + adicionais)
+            item.setPrecoUnitario(itemCarrinho.getProduto().getPreco().add(precoAdicionais));
+            item.setObservacaoItem(itemCarrinho.getObservacao()); // Copiar observação
+
             item.setPedido(pedido);
             item.setStatusPagamento(StatusPagamento.PAGO);
             pedido.getItens().add(item);
@@ -833,7 +846,6 @@ public class PedidoService {
         itemComboRepository.saveAll(snapshots);
     }
 
-    // NOVO MÉTODO: Processar todos os ItemPedidos de um Pedido para criar snapshots de combos
     private void criarSnapshotsDosCombos(Pedido pedido) {
         if (pedido == null || pedido.getItens() == null) {
             return;

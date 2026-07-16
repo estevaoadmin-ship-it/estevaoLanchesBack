@@ -259,7 +259,7 @@ class MesaE2ETest {
             assertThat(currentTotal005).isEqualByComparingTo(expectedTotal);
 
 
-            // 006: Adicionar o mesmo item novamente (deve atualizar a quantidade)
+            // 006: Adicionar o mesmo item novamente (deve criar um novo item no carrinho devido à observação diferente)
             String item1AgainJson = String.format("{\"produtoId\":\"%s\",\"quantidade\":2}", produto1.getId());
             result = mockMvc.perform(post("/api/carrinhos/" + clienteId + "/itens")
                             .contentType(MediaType.APPLICATION_JSON)
@@ -268,33 +268,77 @@ class MesaE2ETest {
                     .andReturn();
 
             CarrinhoResponseDTO carrinho006 = objectMapper.readValue(result.getResponse().getContentAsString(), CarrinhoResponseDTO.class);
-            assertThat(carrinho006.itens()).hasSize(2);
-            assertThat(carrinho006.itens().stream().filter(item -> item.produtoNome().equals(produto1.getNome())).findFirst().get().quantidade()).isEqualTo(3); // 1 + 2 = 3
-            assertThat(carrinho006.itens().stream().filter(item -> item.produtoNome().equals(produto2.getNome())).findFirst().get().quantidade()).isEqualTo(2);
+            assertThat(carrinho006.itens()).hasSize(3); // Agora são 3 itens distintos
+            assertThat(carrinho006.itens())
+                    .anySatisfy(item -> {
+                        assertThat(item.produtoNome()).isEqualTo(produto1.getNome());
+                        assertThat(item.quantidade()).isEqualTo(1);
+                        assertThat(item.observacao()).isEqualTo("Sem cebola");
+                    });
 
-            expectedTotal = produto1.getPreco().multiply(BigDecimal.valueOf(3)).add(produto2.getPreco().multiply(BigDecimal.valueOf(2)));
+            assertThat(carrinho006.itens())
+                    .anySatisfy(item -> {
+                        assertThat(item.produtoNome()).isEqualTo(produto1.getNome());
+                        assertThat(item.quantidade()).isEqualTo(2);
+                        assertThat(item.observacao()).isNull();
+                    });
+
+            assertThat(carrinho006.itens())
+                    .anySatisfy(item -> {
+                        assertThat(item.produtoNome()).isEqualTo(produto2.getNome());
+                        assertThat(item.quantidade()).isEqualTo(2);
+                    });
+
+            expectedTotal = produto1.getPreco().multiply(BigDecimal.valueOf(1)) // Produto A com cebola
+                    .add(produto2.getPreco().multiply(BigDecimal.valueOf(2))) // Produto B
+                    .add(produto1.getPreco().multiply(BigDecimal.valueOf(2))); // Produto A sem cebola
             BigDecimal currentTotal006 = calcularTotalCarrinho(result.getResponse().getContentAsString());
             assertThat(currentTotal006).isEqualByComparingTo(expectedTotal);
 
 
-            // 007: Atualizar quantidade de um item existente
-            result = mockMvc.perform(put("/api/carrinhos/" + clienteId + "/itens/" + item1Id + "/quantidade")
+            // 007: Atualizar quantidade de um item existente (Produto A com observação "Sem cebola")
+            // Primeiro, precisamos encontrar o ID do item "Produto A" com "Sem cebola"
+            String itemProdutoAComCebolaId = carrinho006.itens().stream()
+                    .filter(item -> item.produtoNome().equals(produto1.getNome()) && "Sem cebola".equals(item.observacao()))
+                    .findFirst()
+                    .orElseThrow(() -> new AssertionError("Item 'Produto A' com observação 'Sem cebola' não encontrado."))
+                    .id()
+                    .toString();
+
+            result = mockMvc.perform(put("/api/carrinhos/" + clienteId + "/itens/" + itemProdutoAComCebolaId + "/quantidade")
                             .param("quantidade", "5")
                             .contentType(MediaType.APPLICATION_JSON))
                     .andExpect(status().isOk())
                     .andReturn();
 
             CarrinhoResponseDTO carrinho007 = objectMapper.readValue(result.getResponse().getContentAsString(), CarrinhoResponseDTO.class);
-            assertThat(carrinho007.itens()).hasSize(2);
-            assertThat(carrinho007.itens().stream().filter(item -> item.produtoNome().equals(produto1.getNome())).findFirst().get().quantidade()).isEqualTo(5);
-            assertThat(carrinho007.itens().stream().filter(item -> item.produtoNome().equals(produto2.getNome())).findFirst().get().quantidade()).isEqualTo(2);
+            assertThat(carrinho007.itens()).hasSize(3); // Ainda 3 itens
+            assertThat(carrinho007.itens())
+                    .anySatisfy(item -> {
+                        assertThat(item.produtoNome()).isEqualTo(produto1.getNome());
+                        assertThat(item.quantidade()).isEqualTo(5); // Quantidade atualizada
+                        assertThat(item.observacao()).isEqualTo("Sem cebola");
+                    });
+            assertThat(carrinho007.itens())
+                    .anySatisfy(item -> {
+                        assertThat(item.produtoNome()).isEqualTo(produto1.getNome());
+                        assertThat(item.quantidade()).isEqualTo(2); // Permanece 2
+                        assertThat(item.observacao()).isNull();
+                    });
+            assertThat(carrinho007.itens())
+                    .anySatisfy(item -> {
+                        assertThat(item.produtoNome()).isEqualTo(produto2.getNome());
+                        assertThat(item.quantidade()).isEqualTo(2); // Permanece 2
+                    });
 
-            expectedTotal = produto1.getPreco().multiply(BigDecimal.valueOf(5)).add(produto2.getPreco().multiply(BigDecimal.valueOf(2)));
+            expectedTotal = produto1.getPreco().multiply(BigDecimal.valueOf(5)) // Produto A com cebola (atualizado)
+                    .add(produto2.getPreco().multiply(BigDecimal.valueOf(2))) // Produto B
+                    .add(produto1.getPreco().multiply(BigDecimal.valueOf(2))); // Produto A sem cebola
             BigDecimal currentTotal007 = calcularTotalCarrinho(result.getResponse().getContentAsString());
             assertThat(currentTotal007).isEqualByComparingTo(expectedTotal);
 
 
-            // 008: Remover um item
+            // 008: Remover um item (Produto B)
             MvcResult cartBeforeDeleteResult = mockMvc.perform(get("/api/carrinhos/" + clienteId)
                             .contentType(MediaType.APPLICATION_JSON))
                     .andReturn();
@@ -307,25 +351,41 @@ class MesaE2ETest {
                     .andReturn();
 
             CarrinhoResponseDTO carrinho008 = objectMapper.readValue(result.getResponse().getContentAsString(), CarrinhoResponseDTO.class);
-            assertThat(carrinho008.itens()).hasSize(1);
-            assertThat(carrinho008.itens().get(0).produtoNome()).isEqualTo(produto1.getNome());
+            assertThat(carrinho008.itens()).hasSize(2); // Agora 2 itens
+            assertThat(carrinho008.itens())
+                    .anySatisfy(item -> {
+                        assertThat(item.produtoNome()).isEqualTo(produto1.getNome());
+                        assertThat(item.quantidade()).isEqualTo(5);
+                        assertThat(item.observacao()).isEqualTo("Sem cebola");
+                    });
+            assertThat(carrinho008.itens())
+                    .anySatisfy(item -> {
+                        assertThat(item.produtoNome()).isEqualTo(produto1.getNome());
+                        assertThat(item.quantidade()).isEqualTo(2);
+                        assertThat(item.observacao()).isNull();
+                    });
 
-            expectedTotal = produto1.getPreco().multiply(BigDecimal.valueOf(5));
+            expectedTotal = produto1.getPreco().multiply(BigDecimal.valueOf(5)) // Produto A com cebola
+                    .add(produto1.getPreco().multiply(BigDecimal.valueOf(2))); // Produto A sem cebola
             BigDecimal currentTotal008 = calcularTotalCarrinho(result.getResponse().getContentAsString());
             assertThat(currentTotal008).isEqualByComparingTo(expectedTotal);
 
 
-            // 009: Tentar atualizar quantidade para 0 (deve remover o item)
-            result = mockMvc.perform(put("/api/carrinhos/" + clienteId + "/itens/" + item1Id + "/quantidade")
+            // 009: Tentar atualizar quantidade para 0 (deve remover o item - Produto A com observação "Sem cebola")
+            // Usar o ID do item "Produto A" com "Sem cebola" que já temos
+            result = mockMvc.perform(put("/api/carrinhos/" + clienteId + "/itens/" + itemProdutoAComCebolaId + "/quantidade")
                             .param("quantidade", "0")
                             .contentType(MediaType.APPLICATION_JSON))
                     .andExpect(status().isOk())
                     .andReturn();
 
             CarrinhoResponseDTO carrinho009 = objectMapper.readValue(result.getResponse().getContentAsString(), CarrinhoResponseDTO.class);
-            assertThat(carrinho009.itens()).hasSize(0);
+            assertThat(carrinho009.itens()).hasSize(1); // Agora 1 item
+            assertThat(carrinho009.itens().get(0).produtoNome()).isEqualTo(produto1.getNome());
+            assertThat(carrinho009.itens().get(0).quantidade()).isEqualTo(2);
+            assertThat(carrinho009.itens().get(0).observacao()).isNull();
 
-            expectedTotal = BigDecimal.ZERO;
+            expectedTotal = produto1.getPreco().multiply(BigDecimal.valueOf(2)); // Apenas Produto A sem cebola
             BigDecimal currentTotal009 = calcularTotalCarrinho(result.getResponse().getContentAsString());
             assertThat(currentTotal009).isEqualByComparingTo(expectedTotal);
 
@@ -336,8 +396,15 @@ class MesaE2ETest {
                     .andExpect(status().isNotFound()); // ResourceNotFoundException é esperado
 
 
-            // 011: Verificar carrinho vazio
-            result = mockMvc.perform(get("/api/carrinhos/" + clienteId)
+            // 011: Verificar carrinho vazio (após remover o último item)
+            // Primeiro, precisamos encontrar o ID do último item restante (Produto A sem observação)
+            MvcResult cartBeforeDeleteLastItemResult = mockMvc.perform(get("/api/carrinhos/" + clienteId)
+                            .contentType(MediaType.APPLICATION_JSON))
+                    .andReturn();
+            CarrinhoResponseDTO cartBeforeDeleteLastItem = objectMapper.readValue(cartBeforeDeleteLastItemResult.getResponse().getContentAsString(), CarrinhoResponseDTO.class);
+            String lastItemId = cartBeforeDeleteLastItem.itens().get(0).id().toString();
+
+            result = mockMvc.perform(delete("/api/carrinhos/" + clienteId + "/itens/" + lastItemId)
                             .contentType(MediaType.APPLICATION_JSON))
                     .andExpect(status().isOk())
                     .andReturn();
@@ -504,7 +571,6 @@ class MesaE2ETest {
             // Isso garante que o ComandaService.abrirPorNumeroMesa() realmente crie/altere o status da mesa.
             comandaRepository.findByMesaNumeroAndStatus(5, StatusComanda.ABERTA).ifPresent(comanda -> {
                 try {
-                    // Fechar a comanda existente para garantir um estado consistente
                     comandaService.fecharComanda(comanda.getId());
                     entityManager.flush(); // Garante que o fechamento seja persistido
                     entityManager.clear(); // Limpa o cache para a próxima leitura
@@ -644,7 +710,6 @@ class MesaE2ETest {
                     throw new RuntimeException("Falha ao fechar comanda existente para mesa " + numeroMesa + ": " + e.getMessage());
                 }
             });
-
 
             // 🎯 FIX: Garante que a mesa esteja LIVRE antes de tentar abrir
             mesaRepository.findByNumero(numeroMesa).ifPresent(m -> {

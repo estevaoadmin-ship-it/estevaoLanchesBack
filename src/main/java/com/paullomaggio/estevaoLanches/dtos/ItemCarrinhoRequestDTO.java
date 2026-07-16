@@ -1,6 +1,7 @@
 package com.paullomaggio.estevaoLanches.dtos;
 
 import io.swagger.v3.oas.annotations.media.Schema;
+import java.util.Set;
 import java.util.UUID;
 
 @Schema(description = "DTO para adicionar ou atualizar um item no carrinho")
@@ -22,5 +23,10 @@ public record ItemCarrinhoRequestDTO(
             description = "Observações adicionais para este item no carrinho",
             example = "Sem cebola"
         )
-        String observacao
+        String observacao,
+        @Schema(
+            description = "Lista de IDs dos adicionais selecionados para este item do carrinho",
+            example = "[\"1a2b3c4d-5e6f-7890-1234-567890abcdef\", \"f1e2d3c4-b5a6-9876-5432-10fedcba9876\"]"
+        )
+        Set<UUID> adicionaisIds
 ) {}
