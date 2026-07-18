@@ -616,7 +616,7 @@ public class PedidoService {
 
     @Transactional(readOnly = true)
     public List<PedidoResponseDTO> listarTodos() {
-        return pedidoRepository.findAll().stream().map(PedidoResponseDTO::new).toList();
+        return pedidoRepository.findAllWithMesaDetails().stream().map(PedidoResponseDTO::new).toList();
     }
 
     @Transactional(readOnly = true)

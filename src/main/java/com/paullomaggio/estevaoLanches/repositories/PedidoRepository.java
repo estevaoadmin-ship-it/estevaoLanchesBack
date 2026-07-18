@@ -98,4 +98,11 @@ public interface PedidoRepository extends JpaRepository<Pedido, UUID> {
      */
     @Query("SELECT p FROM Pedido p WHERE p.dataHora BETWEEN :inicio AND :fim")
     List<Pedido> buscarPedidosParaRelatorio(@Param("inicio") LocalDateTime inicio, @Param("fim") LocalDateTime fim);
+
+    /**
+     * Busca todos os pedidos, fazendo join fetch com Conta, Comanda e Mesa para evitar N+1 queries
+     * e LazyInitializationException ao acessar dados da mesa para pedidos do tipo MESA.
+     */
+    @Query("SELECT p FROM Pedido p LEFT JOIN FETCH p.conta c LEFT JOIN FETCH c.comanda cm LEFT JOIN FETCH cm.mesa")
+    List<Pedido> findAllWithMesaDetails();
 }

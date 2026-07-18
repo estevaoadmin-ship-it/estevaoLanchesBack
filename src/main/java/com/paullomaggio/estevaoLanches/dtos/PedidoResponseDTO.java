@@ -90,6 +90,12 @@ public record PedidoResponseDTO(
         )
         Integer numeroMesa,
         @Schema(
+            description = "UUID da mesa (se for um pedido de mesa)",
+            format = "uuid",
+            example = "a1b2c3d4-e5f6-7890-1234-567890abcdef"
+        )
+        UUID mesaId, // NOVO CAMPO
+        @Schema(
             description = "Observação geral do pedido",
             example = "Entregar com guardanapos extras."
         )
@@ -110,6 +116,10 @@ public record PedidoResponseDTO(
                 pedido.getTotal(),
                 pedido.getEnderecoEntrega(),
                 pedido.getNumeroMesa(),
+                // Lógica para preencher mesaId
+                (pedido.getTipo() == TipoPedido.MESA && pedido.getConta() != null && pedido.getConta().getComanda() != null && pedido.getConta().getComanda().getMesa() != null)
+                        ? pedido.getConta().getComanda().getMesa().getId()
+                        : null,
                 pedido.getObservacaoGeral(),
                 pedido.getItens() != null ? pedido.getItens().stream().map(ItemPedidoResponseDTO::new).collect(Collectors.toList()) : List.of()
         );

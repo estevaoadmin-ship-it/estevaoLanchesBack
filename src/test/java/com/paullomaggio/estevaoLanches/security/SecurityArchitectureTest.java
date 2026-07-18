@@ -354,6 +354,7 @@ class SecurityArchitectureTest {
                             BigDecimal.TEN, // total (BigDecimal)
                             "Rua Teste, 123", // enderecoEntrega (String)
                             null, // numeroMesa (Integer)
+                            null, // mesaId (UUID) - Adicionado
                             "Obs Teste", // observacaoGeral (String)
                             List.of() // itens (List<ItemPedidoResponseDTO>)
                     ));
@@ -376,6 +377,7 @@ class SecurityArchitectureTest {
                             BigDecimal.TEN, // total (BigDecimal)
                             "Rua Teste, 123", // enderecoEntrega (String)
                             null, // numeroMesa (Integer)
+                            null, // mesaId (UUID) - Adicionado
                             "Obs Teste", // observacaoGeral (String)
                             List.of() // itens (List<ItemPedidoResponseDTO>)
                     )));
