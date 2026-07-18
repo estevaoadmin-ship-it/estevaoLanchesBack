@@ -42,6 +42,7 @@ public class PedidoIntegridadeComercialTest {
     @Mock private SimpMessagingTemplate messagingTemplate;
     @Mock private ItemComboRepository itemComboRepository; // Adicionado para a nova feature
     @Mock private ComboProdutoRepository comboProdutoRepository; // NOVO MOCK: ComboProdutoRepository
+    @Mock private PagamentoService pagamentoService; // NOVO MOCK: PagamentoService
 
     // Removido @InjectMocks
     private PedidoService pedidoService;
@@ -61,7 +62,8 @@ public class PedidoIntegridadeComercialTest {
                 produtoRepository, adicionalRepository, filaImpressaoRepository,
                 comandaRepository, contaRepository, messagingTemplate,
                 itemComboRepository,
-                comboProdutoRepository // Passar o novo mock
+                comboProdutoRepository, // Passar o novo mock
+                pagamentoService // Passar o novo mock
         );
 
         prodIdLanche = UUID.randomUUID();

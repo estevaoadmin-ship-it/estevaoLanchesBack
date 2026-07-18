@@ -30,6 +30,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.*;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
 import static org.springframework.test.web.servlet.result.MockMvcResultHandlers.print;
+import static org.hamcrest.Matchers.nullValue;
 
 @SpringBootTest
 @AutoConfigureMockMvc
@@ -318,7 +319,9 @@ class DeliveryUserJourneyTest {
                             ))))
                     .andExpect(status().isOk())
                     .andExpect(jsonPath("$.tipo").value("DELIVERY"))
-                    .andExpect(jsonPath("$.statusFinanceiro").value("PAGO"))
+                    .andExpect(jsonPath("$.statusFinanceiro").value(StatusFinanceiro.AGUARDANDO_PAGAMENTO.name()))
+                    .andExpect(jsonPath("$.formaPagamento").value(nullValue()))
+                    .andExpect(jsonPath("$.valorRecebido").doesNotExist())
                     .andExpect(jsonPath("$.total").value(63.00));
 
             assertThat(carrinhoRepository.findByClienteId(clienteValidoId))

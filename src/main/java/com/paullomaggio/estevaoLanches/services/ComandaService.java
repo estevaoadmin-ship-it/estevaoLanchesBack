@@ -99,6 +99,25 @@ public class ComandaService {
             throw new BusinessRuleException("Esta comanda já foi encerrada anteriormente.");
         }
 
+        List<Conta> contas = contaRepository.findByComandaId(id);
+
+        if (contas == null || contas.isEmpty()) {
+            throw new BusinessRuleException(
+                    "Não é possível fechar a comanda sem contas vinculadas."
+            );
+        }
+
+        boolean possuiContaPendente = contas.stream()
+                .anyMatch(conta ->
+                        !Boolean.TRUE.equals(conta.getPago())
+                );
+
+        if (possuiContaPendente) {
+            throw new BusinessRuleException(
+                    "Não é possível fechar a comanda enquanto existirem contas com saldo pendente."
+            );
+        }
+
         comanda.setStatus(StatusComanda.FECHADA);
         comanda.setFechadaEm(LocalDateTime.now());
 

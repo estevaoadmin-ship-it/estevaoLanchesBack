@@ -9,6 +9,7 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.orm.jpa.DataJpaTest;
 import org.springframework.boot.test.autoconfigure.orm.jpa.TestEntityManager;
+import org.springframework.dao.InvalidDataAccessApiUsageException;
 import org.springframework.test.context.ActiveProfiles;
 
 import java.math.BigDecimal;
@@ -18,6 +19,7 @@ import java.util.Optional;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
 @DataJpaTest
@@ -35,6 +37,8 @@ class PagamentoRepositoryTest {
     private Comanda comandaMestre;
     private Cliente clienteMestre;
     private Conta contaMestre;
+    private Caixa caixa; // Declaração da fixture Caixa
+    private Usuario usuarioAberturaCaixa; // Declaração da fixture Usuario para Caixa
 
     @BeforeEach
     void setUpGrafoRelacional() {
@@ -68,12 +72,31 @@ class PagamentoRepositoryTest {
         contaMestre.setCliente(clienteMestre);
         contaMestre = entityManager.persist(contaMestre);
 
+        // Criação e persistência da fixture Usuario para Caixa
+        usuarioAberturaCaixa = new Usuario();
+        usuarioAberturaCaixa.setNome("Usuario Teste Caixa");
+        usuarioAberturaCaixa.setEmail("usuario.caixa@test.com");
+        usuarioAberturaCaixa.setSenha("senha123");
+        usuarioAberturaCaixa.setRole("CAIXA");
+        usuarioAberturaCaixa.setAtivo(true);
+        usuarioAberturaCaixa = entityManager.persist(usuarioAberturaCaixa);
+
+        // Criação e persistência da fixture Caixa
+        caixa = new Caixa();
+        caixa.setValorAbertura(new BigDecimal("1000.00"));
+        caixa.setDataHoraAbertura(LocalDateTime.now());
+        caixa.setStatus(StatusCaixa.ABERTO);
+        caixa.setUsuarioAbertura(usuarioAberturaCaixa); // Usa o objeto Usuario persistido
+        // Removidos setEmpresaId e setFilialId, pois não existem na entidade Caixa
+        caixa = entityManager.persist(caixa);
+
         entityManager.flush();
     }
 
     private Pagamento instanciarPagamento(Conta conta, FormaPagamento forma, BigDecimal valor) {
         Pagamento p = new Pagamento();
         p.setConta(conta);
+        p.setCaixa(caixa); // Adiciona o caixa ao pagamento
         p.setFormaPagamento(forma);
         p.setValorPago(valor);
         p.setDataHora(LocalDateTime.now());
@@ -115,10 +138,18 @@ class PagamentoRepositoryTest {
     @DisplayName("🛑 BLOCO 2 — Validação de Restrições (NOT NULL)")
     class Bloco2Integridade {
 
-        @Test @DisplayName("PAGREP-007 - Conta é campo obrigatório")
+        @Test @DisplayName("PAGREP-007 - Deve falhar ao persistir Pagamento sem Conta e sem Pedido (violação XOR)")
         void pagrep007() {
-            Pagamento p = instanciarPagamento(null, FormaPagamento.PIX, BigDecimal.TEN);
-            assertThrows(Exception.class, () -> entityManager.persistAndFlush(p));
+            // Use o helper existente para criar um pagamento base
+            Pagamento pagamento = instanciarPagamento(contaMestre, FormaPagamento.PIX, new BigDecimal("50.00"));
+            pagamento.setConta(null); // Explicitamente setar a conta como nula
+            // Pedido também é null por padrão, violando a invariável XOR
+
+            // Persistir e verificar que uma exceção é lançada
+            assertThatThrownBy(() -> pagamentoRepository.saveAndFlush(pagamento))
+                    .isInstanceOf(InvalidDataAccessApiUsageException.class)
+                    .hasRootCauseInstanceOf(IllegalStateException.class)
+                    .hasMessageContaining("Pagamento deve estar vinculado exclusivamente a uma Conta ou a um Pedido.");
         }
 
         @Test @DisplayName("PAGREP-008 ao 012 - Validar preenchimento de metadados fiscais")
@@ -352,24 +383,33 @@ class PagamentoRepositoryTest {
             // Mesa
             Mesa mesa2 = new Mesa();
             mesa2.setNumero(99);
+            mesa2.setStatus(StatusMesa.OCUPADA); // Added status for consistency
+            mesa2.setEmpresaId(UUID.randomUUID()); // New IDs for isolation
+            mesa2.setFilialId(UUID.randomUUID());
             entityManager.persist(mesa2);
 
             // Comanda
             Comanda c2 = new Comanda();
             c2.setMesa(mesa2);
+            c2.setStatus(StatusComanda.ABERTA); // Added status for consistency
+            c2.setEmpresaId(mesa2.getEmpresaId()); // Link to mesa's IDs
+            c2.setFilialId(mesa2.getFilialId());
             entityManager.persist(c2);
 
             // Cliente da Conta
             Cliente cliente2 = new Cliente();
             cliente2.setNome("Cliente Mesa 99");
             cliente2.setNumero("16999999999");
+            cliente2.setStatus(StatusCliente.ATIVO); // Added status for consistency
             entityManager.persist(cliente2);
 
             // Conta
-            Conta conta2 = new Conta();
+            Conta conta2 = new Conta(); // Declaração da variável conta2
             conta2.setComanda(c2);
             conta2.setCliente(cliente2);
             conta2.setNumeroConta(1);
+            conta2.setPago(false); // Added for consistency
+            conta2.setValorTotal(BigDecimal.TEN); // Added for consistency
             entityManager.persist(conta2);
 
             entityManager.flush();

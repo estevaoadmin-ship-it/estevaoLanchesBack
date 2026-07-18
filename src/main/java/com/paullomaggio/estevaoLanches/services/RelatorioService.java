@@ -6,7 +6,10 @@ import com.lowagie.text.pdf.PdfPTable;
 import com.lowagie.text.pdf.PdfWriter;
 import com.paullomaggio.estevaoLanches.dtos.*;
 import com.paullomaggio.estevaoLanches.entities.Pedido;
+import com.paullomaggio.estevaoLanches.enums.FormaPagamento;
 import com.paullomaggio.estevaoLanches.enums.StatusPedido;
+import com.paullomaggio.estevaoLanches.repositories.EstornoPagamentoRepository;
+import com.paullomaggio.estevaoLanches.repositories.PagamentoRepository;
 import com.paullomaggio.estevaoLanches.repositories.PedidoRepository;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.data.domain.PageRequest;
@@ -18,7 +21,11 @@ import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
+import java.util.ArrayList;
+import java.util.LinkedHashMap; // Import LinkedHashMap
 import java.util.List;
+import java.util.Map;
+import java.util.stream.Collectors;
 
 @Service
 public class RelatorioService {
@@ -26,29 +33,87 @@ public class RelatorioService {
     @Autowired
     private PedidoRepository pedidoRepository;
 
-    public DashboardDataDTO gerarDashboard(LocalDateTime inicio, LocalDateTime fim, String usuarioId) {
-        // Nota: O parâmetro usuarioId permanece na assinatura para compatibilidade com a API,
-        // mas não é enviado ao repositório porque Pedido não possui essa coluna no banco.
-        List<Pedido> pedidos = pedidoRepository.buscarPedidosParaRelatorio(inicio, fim);
-        DashboardStatsDTO kpis = calcularKPIs(pedidos);
+    @Autowired
+    private PagamentoRepository pagamentoRepository;
 
-        List<MeioPagamentoItemDTO> pagamentos = pedidoRepository.somarFaturamentoPorMeioPagamento(inicio, fim, StatusPedido.FINALIZADO);
+    @Autowired
+    private EstornoPagamentoRepository estornoPagamentoRepository;
+
+    public DashboardDataDTO gerarDashboard(LocalDateTime inicio, LocalDateTime fim, String usuarioId) {
+        List<Pedido> pedidos = pedidoRepository.buscarPedidosParaRelatorio(inicio, fim);
+        DashboardStatsDTO kpisComerciais = calcularKPIsComerciais(pedidos);
+
+        BigDecimal faturamentoBrutoRecebido = pagamentoRepository.somarFaturamentoBrutoPorPeriodo(inicio, fim);
+        BigDecimal totalEstornosNoPeriodo = estornoPagamentoRepository.somarTotalEstornosPorPeriodo(inicio, fim);
+        BigDecimal faturamentoLiquido = faturamentoBrutoRecebido.subtract(totalEstornosNoPeriodo);
+
+        List<MeioPagamentoItemDTO> pagamentosPorFormaBruto = pagamentoRepository.somarFaturamentoPorMeioPagamentoPorPeriodo(inicio, fim);
+        List<MeioPagamentoItemDTO> estornosPorForma = estornoPagamentoRepository.somarEstornosPorMeioPagamentoPorPeriodo(inicio, fim);
+
+        // Consolidar pagamentos brutos por forma, preservando a ordem da primeira ocorrência
+        Map<String, BigDecimal> pagamentosConsolidados =
+                pagamentosPorFormaBruto.stream()
+                        .collect(Collectors.toMap(
+                                MeioPagamentoItemDTO::getFormaPagamento,
+                                MeioPagamentoItemDTO::getTotalFaturado,
+                                BigDecimal::add,
+                                LinkedHashMap::new
+                        ));
+
+        // Consolidar estornos por forma, preservando a ordem da primeira ocorrência
+        Map<String, BigDecimal> estornosConsolidados =
+                estornosPorForma.stream()
+                        .collect(Collectors.toMap(
+                                MeioPagamentoItemDTO::getFormaPagamento,
+                                MeioPagamentoItemDTO::getTotalFaturado,
+                                BigDecimal::add,
+                                LinkedHashMap::new
+                        ));
+
+        // Calcular o faturamento líquido por forma de pagamento
+        List<MeioPagamentoItemDTO> pagamentosPorFormaLiquido =
+                pagamentosConsolidados.entrySet()
+                        .stream()
+                        .map(entry -> {
+                            BigDecimal totalEstornado =
+                                    estornosConsolidados.getOrDefault(
+                                            entry.getKey(),
+                                            BigDecimal.ZERO
+                                    );
+
+                            BigDecimal valorLiquido =
+                                    entry.getValue().subtract(totalEstornado);
+
+                            return new MeioPagamentoItemDTO(
+                                    FormaPagamento.valueOf(entry.getKey()),
+                                    valorLiquido
+                            );
+                        })
+                        .collect(Collectors.toList());
 
         Pageable limit5 = PageRequest.of(0, 5);
         List<ProdutoRankingDTO> topProdutos = pedidoRepository.buscarTopProdutosJPQL(inicio, fim, StatusPedido.FINALIZADO, limit5);
 
-        return new DashboardDataDTO(kpis, pagamentos, topProdutos);
+        DashboardStatsDTO kpisFinais = new DashboardStatsDTO(
+                faturamentoLiquido,
+                kpisComerciais.getTotalPedidos(),
+                kpisComerciais.getTicketMedio(),
+                kpisComerciais.getTotalCancelamentos(),
+                kpisComerciais.getPerdaCancelamentos()
+        );
+
+        return new DashboardDataDTO(kpisFinais, pagamentosPorFormaLiquido, topProdutos);
     }
 
-    private DashboardStatsDTO calcularKPIs(List<Pedido> pedidos) {
-        BigDecimal faturamentoTotal = BigDecimal.ZERO;
+    private DashboardStatsDTO calcularKPIsComerciais(List<Pedido> pedidos) {
+        BigDecimal faturamentoComercialPedidosFinalizados = BigDecimal.ZERO;
         long totalPedidos = 0;
         long totalCancelamentos = 0;
         BigDecimal perdaCancelamentos = BigDecimal.ZERO;
 
         for (Pedido p : pedidos) {
             if (p.getStatus() == StatusPedido.FINALIZADO) {
-                faturamentoTotal = faturamentoTotal.add(p.getTotal());
+                faturamentoComercialPedidosFinalizados = faturamentoComercialPedidosFinalizados.add(p.getTotal());
                 totalPedidos++;
             } else if (p.getStatus() == StatusPedido.CANCELADO) {
                 perdaCancelamentos = perdaCancelamentos.add(p.getTotal());
@@ -58,10 +123,10 @@ public class RelatorioService {
 
         BigDecimal ticketMedio = BigDecimal.ZERO;
         if (totalPedidos > 0) {
-            ticketMedio = faturamentoTotal.divide(BigDecimal.valueOf(totalPedidos), 2, RoundingMode.HALF_UP);
+            ticketMedio = faturamentoComercialPedidosFinalizados.divide(BigDecimal.valueOf(totalPedidos), 2, RoundingMode.HALF_UP);
         }
 
-        return new DashboardStatsDTO(faturamentoTotal, totalPedidos, ticketMedio, totalCancelamentos, perdaCancelamentos);
+        return new DashboardStatsDTO(faturamentoComercialPedidosFinalizados, totalPedidos, ticketMedio, totalCancelamentos, perdaCancelamentos);
     }
 
     public byte[] exportarRelatorioPdf(LocalDateTime inicio, LocalDateTime fim, String usuarioId) {
@@ -86,7 +151,7 @@ public class RelatorioService {
 
             PdfPTable kpiTable = new PdfPTable(4);
             kpiTable.setWidthPercentage(100);
-            kpiTable.addCell(createCell("Faturamento Bruto", true));
+            kpiTable.addCell(createCell("Faturamento Líquido", true));
             kpiTable.addCell(createCell("Total Pedidos", true));
             kpiTable.addCell(createCell("Ticket Médio", true));
             kpiTable.addCell(createCell("Perdas (Cancelados)", true));
@@ -98,6 +163,23 @@ public class RelatorioService {
 
             document.add(kpiTable);
             document.add(new Paragraph("\n"));
+
+            Paragraph subtituloPagamentosPorForma = new Paragraph("Faturamento Líquido por Forma de Pagamento", FontFactory.getFont(FontFactory.HELVETICA_BOLD, 14));
+            subtituloPagamentosPorForma.setSpacingAfter(10);
+            document.add(subtituloPagamentosPorForma);
+
+            PdfPTable pagamentosPorFormaTable = new PdfPTable(2);
+            pagamentosPorFormaTable.setWidthPercentage(100);
+            pagamentosPorFormaTable.addCell(createCell("Forma de Pagamento", true));
+            pagamentosPorFormaTable.addCell(createCell("Valor Líquido", true));
+
+            for (MeioPagamentoItemDTO item : dados.getMeiosPagamento()) {
+                pagamentosPorFormaTable.addCell(createCell(item.getFormaPagamento(), false));
+                pagamentosPorFormaTable.addCell(createCell("R$ " + item.getTotalFaturado().setScale(2, RoundingMode.HALF_UP), false));
+            }
+            document.add(pagamentosPorFormaTable);
+            document.add(new Paragraph("\n"));
+
 
             Paragraph subtituloLanches = new Paragraph("Top 5 Produtos Mais Vendidos", FontFactory.getFont(FontFactory.HELVETICA_BOLD, 14));
             subtituloLanches.setSpacingAfter(10);

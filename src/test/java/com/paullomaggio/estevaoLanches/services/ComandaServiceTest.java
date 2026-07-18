@@ -82,9 +82,8 @@ class ComandaServiceTest {
             // when(clienteRepository.save(any(Cliente.class))).thenAnswer(i -> i.getArgument(0)); // Removido stub obsoleto
             when(contaRepository.save(any(Conta.class))).thenAnswer(i -> i.getArgument(0));
 
-            ComandaResponseDTO dto = comandaService.abrirPorNumeroMesa(NUMERO_MESA);
+            comandaService.abrirPorNumeroMesa(NUMERO_MESA);
 
-            assertNotNull(dto);
             // Corrigido para esperar 2 chamadas a mesaRepository.save()
             verify(mesaRepository, times(2)).save(argThat(m -> m.getStatus() == StatusMesa.OCUPADA || m.getStatus() == StatusMesa.LIVRE));
             verify(comandaRepository, times(1)).save(any(Comanda.class));
@@ -99,9 +98,8 @@ class ComandaServiceTest {
             when(mesaRepository.findByNumero(NUMERO_MESA)).thenReturn(Optional.of(mesaLivre));
             when(comandaRepository.findByMesaNumeroAndStatus(NUMERO_MESA, StatusComanda.ABERTA)).thenReturn(Optional.of(comandaAberta));
 
-            ComandaResponseDTO dto = comandaService.abrirPorNumeroMesa(NUMERO_MESA);
+            comandaService.abrirPorNumeroMesa(NUMERO_MESA);
 
-            assertNotNull(dto);
             verify(comandaRepository, never()).save(any(Comanda.class));
             verify(clienteRepository, never()).save(any(Cliente.class));
             verify(contaRepository, never()).save(any(Conta.class));
@@ -121,7 +119,7 @@ class ComandaServiceTest {
             when(comandaRepository.findById(comandaId)).thenReturn(Optional.of(comandaAberta));
             when(comandaRepository.save(any(Comanda.class))).thenAnswer(i -> i.getArgument(0));
 
-            ComandaResponseDTO result = comandaService.alterarStatus(comandaId, StatusComanda.AGUARDANDO_PAGAMENTO);
+            comandaService.alterarStatus(comandaId, StatusComanda.AGUARDANDO_PAGAMENTO);
 
             verify(comandaRepository, times(1)).save(argThat(c -> c.getStatus() == StatusComanda.AGUARDANDO_PAGAMENTO));
         }
@@ -144,7 +142,15 @@ class ComandaServiceTest {
         @Test
         @DisplayName("CT-030 ao CT-035, CT-038: Fechar comanda deve liberar a mesa fisicamente e setar timestamp de saída")
         void deveFecharComandaELiberarMesa() {
+            Conta contaPaga = new Conta();
+            contaPaga.setId(UUID.randomUUID());
+            contaPaga.setComanda(comandaAberta);
+            contaPaga.setNumeroConta(1);
+            contaPaga.setPago(true);
+            contaPaga.setValorTotal(new BigDecimal("100.00"));
+
             when(comandaRepository.findById(comandaId)).thenReturn(Optional.of(comandaAberta));
+            when(contaRepository.findByComandaId(comandaId)).thenReturn(List.of(contaPaga));
             when(comandaRepository.save(any(Comanda.class))).thenAnswer(i -> i.getArgument(0));
             when(mesaRepository.save(any(Mesa.class))).thenAnswer(i -> i.getArgument(0));
 
@@ -155,6 +161,150 @@ class ComandaServiceTest {
             assertNotNull(comandaAberta.getFechadaEm());
             verify(mesaRepository, times(1)).save(mesaLivre);
             verify(comandaRepository, times(1)).save(comandaAberta);
+            verify(contaRepository, times(1)).findByComandaId(comandaId);
+        }
+
+        @Test
+        @DisplayName("Não deve fechar comanda nem liberar mesa quando existir conta pendente")
+        void naoDeveFecharComandaComContaPendente() {
+            mesaLivre.setStatus(StatusMesa.OCUPADA);
+
+            Conta contaPendente = new Conta();
+            contaPendente.setId(UUID.randomUUID());
+            contaPendente.setComanda(comandaAberta);
+            contaPendente.setNumeroConta(1);
+            contaPendente.setPago(false);
+            contaPendente.setValorTotal(
+                    new BigDecimal("100.00")
+            );
+
+            when(comandaRepository.findById(comandaId))
+                    .thenReturn(Optional.of(comandaAberta));
+
+            when(contaRepository.findByComandaId(comandaId))
+                    .thenReturn(List.of(contaPendente));
+
+            assertThrows(
+                    BusinessRuleException.class,
+                    () -> comandaService.fecharComanda(comandaId)
+            );
+
+            assertEquals(
+                    StatusComanda.ABERTA,
+                    comandaAberta.getStatus()
+            );
+
+            assertEquals(
+                    StatusMesa.OCUPADA,
+                    mesaLivre.getStatus()
+            );
+
+            assertNull(
+                    comandaAberta.getFechadaEm()
+            );
+
+            verify(mesaRepository, never())
+                    .save(any(Mesa.class));
+
+            verify(comandaRepository, never())
+                    .save(any(Comanda.class));
+
+            verify(contaRepository, times(1))
+                    .findByComandaId(comandaId);
+        }
+
+        @Test
+        @DisplayName("Não deve fechar comanda com múltiplas contas, sendo uma pendente")
+        void naoDeveFecharComandaComMultiplasContasUmaPendente() {
+            mesaLivre.setStatus(StatusMesa.OCUPADA);
+
+            Conta conta1 = new Conta();
+            conta1.setId(UUID.randomUUID());
+            conta1.setComanda(comandaAberta);
+            conta1.setNumeroConta(1);
+            conta1.setPago(true);
+            conta1.setValorTotal(new BigDecimal("50.00"));
+
+            Conta conta2 = new Conta();
+            conta2.setId(UUID.randomUUID());
+            conta2.setComanda(comandaAberta);
+            conta2.setNumeroConta(2);
+            conta2.setPago(false);
+            conta2.setValorTotal(new BigDecimal("75.00"));
+
+            when(comandaRepository.findById(comandaId))
+                    .thenReturn(Optional.of(comandaAberta));
+
+            when(contaRepository.findByComandaId(comandaId))
+                    .thenReturn(List.of(conta1, conta2));
+
+            assertThrows(
+                    BusinessRuleException.class,
+                    () -> comandaService.fecharComanda(comandaId)
+            );
+
+            assertEquals(
+                    StatusComanda.ABERTA,
+                    comandaAberta.getStatus()
+            );
+
+            assertEquals(
+                    StatusMesa.OCUPADA,
+                    mesaLivre.getStatus()
+            );
+
+            assertNull(
+                    comandaAberta.getFechadaEm()
+            );
+
+            verify(mesaRepository, never())
+                    .save(any(Mesa.class));
+
+            verify(comandaRepository, never())
+                    .save(any(Comanda.class));
+
+            verify(contaRepository, times(1))
+                    .findByComandaId(comandaId);
+        }
+
+        @Test
+        @DisplayName("Não deve fechar comanda sem contas vinculadas")
+        void naoDeveFecharComandaSemContasVinculadas() {
+            mesaLivre.setStatus(StatusMesa.OCUPADA);
+
+            when(comandaRepository.findById(comandaId))
+                    .thenReturn(Optional.of(comandaAberta));
+
+            when(contaRepository.findByComandaId(comandaId))
+                    .thenReturn(Collections.emptyList());
+
+            assertThrows(
+                    BusinessRuleException.class,
+                    () -> comandaService.fecharComanda(comandaId)
+            );
+
+            assertEquals(
+                    StatusComanda.ABERTA,
+                    comandaAberta.getStatus()
+            );
+
+            assertEquals(
+                    StatusMesa.OCUPADA,
+                    mesaLivre.getStatus()
+            );
+
+            assertNull(
+                    comandaAberta.getFechadaEm()
+            );
+
+            verify(mesaRepository, never())
+                    .save(any(Mesa.class));
+
+            verify(comandaRepository, never())
+                    .save(any(Comanda.class));
+
+            verify(contaRepository, times(1))
+                    .findByComandaId(comandaId);
         }
 
         @Test
@@ -165,6 +315,7 @@ class ComandaServiceTest {
 
             assertThrows(BusinessRuleException.class, () -> comandaService.fecharComanda(comandaId));
             verify(comandaRepository, never()).save(any());
+            verify(contaRepository, never()).findByComandaId(any()); // Ensure no call to contaRepository
         }
     }
 
@@ -227,8 +378,16 @@ class ComandaServiceTest {
         @Test
         @DisplayName("CT-064: Linha do Tempo — Abrir ➔ Fechar ➔ Abrir novamente deve gerar uma nova sessão de comanda limpa")
         void cicloVidaCompletoReabertura() {
+            Conta contaPaga = new Conta();
+            contaPaga.setId(UUID.randomUUID());
+            contaPaga.setComanda(comandaAberta);
+            contaPaga.setNumeroConta(1);
+            contaPaga.setPago(true);
+            contaPaga.setValorTotal(new BigDecimal("100.00"));
+
             // Ciclo 1: Abertura e Fechamento com sucesso
             when(comandaRepository.findById(comandaId)).thenReturn(Optional.of(comandaAberta));
+            when(contaRepository.findByComandaId(comandaId)).thenReturn(List.of(contaPaga));
             when(comandaRepository.save(any(Comanda.class))).thenAnswer(i -> i.getArgument(0)); // Adicionado mock para comandaRepository.save
             when(mesaRepository.save(any(Mesa.class))).thenAnswer(i -> i.getArgument(0)); // Adicionado mock para mesaRepository.save
 
@@ -245,6 +404,7 @@ class ComandaServiceTest {
             comandaService.abrirPorNumeroMesa(NUMERO_MESA);
             verify(comandaRepository, times(2)).save(any(Comanda.class)); // Agora é 2 vezes (uma no fechar, outra no abrir)
             verify(clienteRepository, never()).save(any(Cliente.class)); // Adicionado: Cliente não deve ser salvo
+            verify(contaRepository, times(1)).findByComandaId(comandaId); // Verify findByComandaId for the first close operation
         }
     }
 
@@ -280,15 +440,30 @@ class ComandaServiceTest {
         @Test
         @DisplayName("CT-074: Dois caixas enviando 'Fechar Comanda' ao mesmo tempo — A segunda transação deve ser interceptada na barreira")
         void corridaFechamentoDuplo() {
+            Conta contaPaga = new Conta();
+            contaPaga.setId(UUID.randomUUID());
+            contaPaga.setComanda(comandaAberta);
+            contaPaga.setNumeroConta(1);
+            contaPaga.setPago(true);
+            contaPaga.setValorTotal(new BigDecimal("100.00"));
+
             when(comandaRepository.findById(comandaId)).thenReturn(Optional.of(comandaAberta));
+            when(contaRepository.findByComandaId(comandaId)).thenReturn(List.of(contaPaga)); // For the first successful close
             when(comandaRepository.save(any(Comanda.class))).thenAnswer(i -> i.getArgument(0)); // Adicionado mock para comandaRepository.save
             when(mesaRepository.save(any(Mesa.class))).thenAnswer(i -> i.getArgument(0)); // Adicionado mock para mesaRepository.save
 
             // Caixa 1 fecha com sucesso
             comandaService.fecharComanda(comandaId);
 
+            // Reset mock for comandaRepository.findById to return the now FECHADA comanda
+            when(comandaRepository.findById(comandaId)).thenReturn(Optional.of(comandaAberta)); // comandaAberta status is now FECHADA
+
             // Caixa 2 bate na barreira de estado mutado imediatamente
             assertThrows(BusinessRuleException.class, () -> comandaService.fecharComanda(comandaId));
+
+            verify(contaRepository, times(1)).findByComandaId(comandaId); // Only called once for the first successful close
+            verify(comandaRepository, times(1)).save(any(Comanda.class)); // Only called once for the first successful close
+            verify(mesaRepository, times(1)).save(any(Mesa.class)); // Only called once for the first successful close
         }
     }
 

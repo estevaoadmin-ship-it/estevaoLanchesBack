@@ -21,15 +21,15 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
 import java.util.Optional;
-import java.util.stream.Collectors; // Adicionado para Collectors.toList()
+import java.util.stream.Collectors;
 
 @Service
 @RequiredArgsConstructor
 public class PedidoService {
 
     private static final Logger log = LoggerFactory.getLogger(PedidoService.class);
-    private static final String UNIQUE_CONSTRAINT_CONTA_NUMERO = "uk_comanda_id_numero_conta"; // Nome da constraint
-    private static final String SQLSTATE_UNIQUE_VIOLATION = "23505"; // SQLState padrão para violação de unicidade (PostgreSQL)
+    private static final String UNIQUE_CONSTRAINT_CONTA_NUMERO = "uk_comanda_id_numero_conta";
+    private static final String SQLSTATE_UNIQUE_VIOLATION = "23505";
 
     private final PedidoRepository pedidoRepository;
     private final CarrinhoRepository carrinhoRepository;
@@ -40,21 +40,16 @@ public class PedidoService {
     private final ComandaRepository comandaRepository;
     private final ContaRepository contaRepository;
     private final SimpMessagingTemplate messagingTemplate;
-    private final ItemComboRepository itemComboRepository; // Adicionado para a nova feature
-    private final ComboProdutoRepository comboProdutoRepository; // ADICIONADO
-    // private final ItemComboService itemComboService; // INJETADO: ItemComboService - REMOVIDO
+    private final ItemComboRepository itemComboRepository;
+    private final ComboProdutoRepository comboProdutoRepository;
+    private final PagamentoService pagamentoService;
 
-    /**
-     * 📱 FLUXO MOBILE: Processa a entrada de lotes enviados por garçons ou tablets.
-     */
     @Transactional
     public PedidoResponseDTO processarPedidoMobile(PedidoMobileRequestDTO dto) {
         if (!caixaRepository.existsByStatus(StatusCaixa.ABERTO)) {
             throw new BusinessRuleException("Operação negada: O turno do caixa está fechado.");
         }
 
-        // CORREÇÃO OBRIGATÓRIA: Restaurar o comportamento antigo de buscar a Conta primeiro
-        // A blindagem (getOrCreateAccountWithConcurrencyProtection) será chamada SOMENTE se a Conta não existir.
         Optional<Conta> contaExistente =
                 contaRepository.findByComandaIdAndNumeroConta(dto.comandaId(), dto.numeroConta());
 
@@ -126,9 +121,7 @@ public class PedidoService {
         pedido.setTotal(subtotalLote);
         Pedido pedidoSalvo = pedidoRepository.saveAndFlush(pedido);
 
-        // CHAMADA NOVA: Gerar snapshots de ItemCombo após a persistência do pedido
-        // itemComboService.criarSnapshotsDosCombos(pedidoSalvo); // REMOVIDO
-        criarSnapshotsDosCombos(pedidoSalvo); // SUBSTITUIDO
+        criarSnapshotsDosCombos(pedidoSalvo);
 
         if (necessitaPreparoCozinha) {
             FilaImpressao cupomCozinha = new FilaImpressao();
@@ -145,16 +138,6 @@ public class PedidoService {
         return responseDTO;
     }
 
-    /**
-     * Método privado que encapsula toda a lógica de localizar, criar, tratar concorrência,
-     * recuperar após conflito e validar uma Conta.
-     *
-     * @param comandaId O ID da Comanda à qual a Conta pertence.
-     * @param numeroConta O número da Conta a ser localizada ou criada.
-     * @return A Conta localizada ou criada, garantindo unicidade.
-     * @throws BusinessRuleException Se houver inconsistência na recuperação da Conta após conflito.
-     * @throws ResourceNotFoundException Se a Comanda mestre não for encontrada.
-     */
     private Conta getOrCreateAccountWithConcurrencyProtection(UUID comandaId, Integer numeroConta) {
         Comanda comandaMestre = comandaRepository.findById(comandaId)
                 .orElseThrow(() -> new ResourceNotFoundException("Sessão de comanda mestre não localizada."));
@@ -167,23 +150,19 @@ public class PedidoService {
 
         try {
             log.info("[CONCORRENCIA] Thread {} - Tentando salvar nova Conta {} para Comanda {}", Thread.currentThread().getName(), numeroConta, comandaId);
-            // AJUSTE FINAL: Utilizar saveAndFlush() para detecção imediata da violação de unicidade
             Conta contaSalva = contaRepository.saveAndFlush(novaConta);
             return contaSalva;
         } catch (DataIntegrityViolationException e) {
-            // AJUSTE 1: Verificar se a exceção é causada pela constraint uk_comanda_id_numero_conta
             if (isUniqueConstraintViolation(e, UNIQUE_CONSTRAINT_CONTA_NUMERO)) {
                 log.warn("[CONCORRENCIA] Thread {} - Conflito detectado ({}). Re-buscando Conta existente. Comanda ID: {}, Numero Conta: {}. Erro: {}",
                         Thread.currentThread().getName(), UNIQUE_CONSTRAINT_CONTA_NUMERO, comandaId, numeroConta, e.getMessage());
 
-                // AJUSTE 2: Validar a conta recuperada
                 Conta contaRecuperada = contaRepository.findByComandaIdAndNumeroConta(comandaId, numeroConta)
                         .orElseThrow(() -> {
                             log.error("[CONCORRENCIA] Thread {} - Erro grave: Conta não encontrada após conflito de concorrência esperado. Comanda ID: {}, Numero Conta: {}", Thread.currentThread().getName(), comandaId, numeroConta);
                             return new BusinessRuleException("Erro de concorrência: Conta deveria existir, mas não foi encontrada após conflito. Comanda ID: " + comandaId + ", Numero Conta: " + numeroConta);
                         });
 
-                // Further validation for AJUSTE 2
                 if (!contaRecuperada.getNumeroConta().equals(numeroConta) || !contaRecuperada.getComanda().getId().equals(comandaId)) {
                     log.error("[CONCORRENCIA] Thread {} - Erro grave: Conta recuperada após conflito não corresponde aos dados esperados. Esperado Comanda ID: {}, Numero Conta: {}. Encontrado Comanda ID: {}, Numero Conta: {}",
                             Thread.currentThread().getName(), comandaId, numeroConta, contaRecuperada.getComanda().getId(), contaRecuperada.getNumeroConta());
@@ -192,7 +171,6 @@ public class PedidoService {
                 log.info("[CONCORRENCIA] Thread {} - Conta {} para Comanda {} recuperada com sucesso após conflito.", Thread.currentThread().getName(), contaRecuperada.getNumeroConta(), contaRecuperada.getComanda().getId());
                 return contaRecuperada;
             } else {
-                // Se não for a constraint esperada, relançar a exceção original
                 log.error("[CONCORRENCIA] Thread {} - DataIntegrityViolationException inesperada ao criar Conta {} para Comanda {}. Relançando. Causa: {}",
                         Thread.currentThread().getName(), numeroConta, comandaId, e.getMostSpecificCause() != null ? e.getMostSpecificCause().getMessage() : e.getMessage());
                 throw e;
@@ -200,29 +178,12 @@ public class PedidoService {
         }
     }
 
-    /**
-     * Documentação da Limitação:
-     * Este método verifica se uma DataIntegrityViolationException é causada por uma violação de unicidade
-     * específica (uk_comanda_id_numero_conta). Ele depende do SQLState padrão '23505' para violações de unicidade
-     * (comum em PostgreSQL) e da presença do nome da constraint na mensagem de erro da SQLException.
-     *
-     * Limitação: A análise da mensagem de erro (sqlException.getMessage().contains(constraintName)) é frágil
-     * e pode ser afetada por mudanças na versão do banco de dados, driver JDBC ou configurações de idioma.
-     *
-     * Justificativa: Dentro das restrições do projeto (não adicionar bibliotecas, não alterar arquitetura
-     * para mecanismos de tradução de exceções mais sofisticadas, não usar @Lock, @Version, etc.), esta é a
-     * abordagem mais robusta e específica para identificar a violação da *nossa* constraint de unicidade.
-     * O SQLState '23505' já garante que é uma violação de unicidade, e a verificação da mensagem refina para
-     * a constraint específica, evitando mascarar outras possíveis violações de integridade.
-     */
     private boolean isUniqueConstraintViolation(DataIntegrityViolationException e, String constraintName) {
         Throwable mostSpecificCause = e.getMostSpecificCause();
 
         if (mostSpecificCause instanceof SQLException) {
             SQLException sqlException = (SQLException) mostSpecificCause;
             if (SQLSTATE_UNIQUE_VIOLATION.equals(sqlException.getSQLState())) {
-                // A string do nome da constraint deve aparecer na mensagem de erro para identificação específica.
-                // Esta é a parte mais frágil, mas necessária para diferenciar entre múltiplas UNIQUE constraints.
                 return sqlException.getMessage() != null && sqlException.getMessage().contains(constraintName);
             }
         }
@@ -235,18 +196,15 @@ public class PedidoService {
                 .orElseThrow(() -> new ResourceNotFoundException("Lote de pedidos não localizado para baixa."));
 
         synchronized (pedido.getId().toString().intern()) {
-            if (pedido.getStatusFinanceiro() == StatusFinanceiro.PAGO || pedido.getStatus() == StatusPedido.FINALIZADO) {
+            if (pedido.getStatusFinanceiro() == StatusFinanceiro.PAGO) {
                 throw new BusinessRuleException("Operação negada: Este lote de pedidos já foi liquidado no caixa.");
             }
+
+            pagamentoService.registrarPagamentoPedido(id, dto); // Passa o ID do pedido
 
             pedido.setStatusFinanceiro(StatusFinanceiro.PAGO);
             pedido.setFormaPagamento(dto.formaPagamento());
             pedido.setValorRecebido(dto.valorRecebido());
-            pedido.setStatus(StatusPedido.FINALIZADO);
-
-            if (pedido.getConta() != null) {
-                pedido.getConta().setPago(true);
-            }
 
             Pedido pedidoSalvo = pedidoRepository.save(pedido);
             PedidoResponseDTO response = new PedidoResponseDTO(pedidoSalvo);
@@ -255,13 +213,6 @@ public class PedidoService {
         }
     }
 
-    // ==========================================
-    // 🛠️ FLUXOS DE ATENDIMENTO E CHECKOUTS
-    // ==========================================
-
-    /**
-     * 🛵 FLUXO DELIVERY
-     */
     @Transactional
     public PedidoResponseDTO finalizarDelivery(CheckoutDeliveryRequestDTO dto) {
         validarCaixaAberto();
@@ -274,8 +225,9 @@ public class PedidoService {
         pedido.setTipo(TipoPedido.DELIVERY);
         pedido.setEnderecoEntrega(dto.enderecoEntrega());
         pedido.setStatus(StatusPedido.RECEBIDO);
-        pedido.setStatusFinanceiro(StatusFinanceiro.PAGO);
-        pedido.setFormaPagamento(dto.formaPagamento());
+        pedido.setStatusFinanceiro(StatusFinanceiro.AGUARDANDO_PAGAMENTO);
+        pedido.setFormaPagamento(null);
+        pedido.setValorRecebido(null);
         pedido.setObservacaoGeral(dto.observacao());
         pedido.setItens(new ArrayList<>());
 
@@ -283,18 +235,13 @@ public class PedidoService {
         calcularEPreencherTotal(pedido);
 
         Pedido pedidoSalvo = salvarPedido(pedido);
-        // CHAMADA NOVA: Gerar snapshots de ItemCombo após a persistência do pedido
-        // itemComboService.criarSnapshotsDosCombos(pedidoSalvo); // REMOVIDO
-        criarSnapshotsDosCombos(pedidoSalvo); // SUBSTITUIDO
+        criarSnapshotsDosCombos(pedidoSalvo);
         gerarFilaImpressao(pedidoSalvo);
         limparCarrinho(carrinho);
 
         return new PedidoResponseDTO(pedidoSalvo);
     }
 
-    /**
-     * 📋 FLUXO RETIRADA
-     */
     @Transactional
     public PedidoResponseDTO finalizarRetirada(CheckoutRetiradaRequestDTO dto) {
         validarCaixaAberto();
@@ -306,8 +253,9 @@ public class PedidoService {
         pedido.setCliente(carrinho.getCliente());
         pedido.setTipo(TipoPedido.RETIRADA);
         pedido.setStatus(StatusPedido.RECEBIDO);
-        pedido.setStatusFinanceiro(StatusFinanceiro.PAGO);
-        pedido.setFormaPagamento(dto.formaPagamento());
+        pedido.setStatusFinanceiro(StatusFinanceiro.AGUARDANDO_PAGAMENTO);
+        pedido.setFormaPagamento(null);
+        pedido.setValorRecebido(null);
         pedido.setObservacaoGeral(dto.observacao());
         pedido.setItens(new ArrayList<>());
 
@@ -315,18 +263,13 @@ public class PedidoService {
         calcularEPreencherTotal(pedido);
 
         Pedido pedidoSalvo = salvarPedido(pedido);
-        // CHAMADA NOVA: Gerar snapshots de ItemCombo após a persistência do pedido
-        // itemComboService.criarSnapshotsDosCombos(pedidoSalvo); // REMOVIDO
-        criarSnapshotsDosCombos(pedidoSalvo); // SUBSTITUIDO
+        criarSnapshotsDosCombos(pedidoSalvo);
         gerarFilaImpressao(pedidoSalvo);
         limparCarrinho(carrinho);
 
         return new PedidoResponseDTO(pedidoSalvo);
     }
 
-    /**
-     * 🪑 FLUXO MESA: Orquestra o fechamento da Conta e Comanda nativa.
-     */
     @Transactional
     public PedidoResponseDTO finalizarMesa(CheckoutMesaRequestDTO dto) {
         validarCaixaAberto();
@@ -335,67 +278,62 @@ public class PedidoService {
             throw new BusinessRuleException("Operação negada: O nome do responsável é obrigatório para o fechamento da MESA.");
         }
 
-        Conta conta = contaRepository.findByComandaIdAndNumeroConta(dto.comandaId(), dto.numeroConta())
+        Conta conta = contaRepository.findByComandaIdAndNumeroContaForUpdate(dto.comandaId(), dto.numeroConta())
                 .orElseThrow(() -> new ResourceNotFoundException("Erro de domínio: Conta de atendimento da mesa não localizada."));
 
         Comanda comanda = conta.getComanda();
 
-        // 🎯 CORREÇÃO 1: Validação imediata do estado da Conta. Lança exceção se não houver pedidos reais.
-        Pedido pedidoReferencia = (conta.getPedidos() != null && !conta.getPedidos().isEmpty())
-                ? conta.getPedidos().get(0)
-                : null;
+        Pedido pedidoReferencia = conta.getPedidos().stream()
+                .filter(p -> p.getStatus() != StatusPedido.CANCELADO)
+                .findFirst()
+                .orElseThrow(() -> new BusinessRuleException("A conta não possui pedidos válidos para serem finalizados."));
 
-        if (pedidoReferencia == null) {
-            throw new BusinessRuleException("A conta não possui pedidos para serem finalizados.");
-        }
-
-        // Atualiza dados do responsável diretamente na Conta
         conta.setNomeResponsavel(dto.nomeResponsavel().toUpperCase().trim());
         if (dto.telefoneResponsavel() != null && !dto.telefoneResponsavel().isBlank()) {
             conta.setTelefoneResponsavel(dto.telefoneResponsavel().trim());
         }
 
-        // Calcular os totais finais da conta baseado nos pedidos já criados pelo fluxo mobile
         BigDecimal totalConta = conta.getPedidos().stream()
                 .filter(p -> p.getStatus() != StatusPedido.CANCELADO)
                 .map(Pedido::getTotal)
                 .reduce(BigDecimal.ZERO, BigDecimal::add);
-
         conta.setValorTotal(totalConta);
-        conta.setPago(true);
-        contaRepository.save(conta);
+        contaRepository.saveAndFlush(conta);
 
-        // Registrar o pagamento e liquidar os lotes de pedidos existentes da conta
-        for (Pedido p : conta.getPedidos()) {
-            if (p.getStatus() != StatusPedido.CANCELADO) {
-                p.setStatusFinanceiro(StatusFinanceiro.PAGO);
-                p.setFormaPagamento(dto.formaPagamento());
-                p.setValorRecebido(p.getTotal());
-                p.setStatus(StatusPedido.FINALIZADO);
-                pedidoRepository.save(p);
+        PagamentoRequestDTO pagamentoRequestDTO = new PagamentoRequestDTO(
+                dto.formaPagamento(),
+                dto.valorRecebido()
+        );
+        pagamentoService.registrarPagamento(conta.getId(), pagamentoRequestDTO);
+
+        conta = contaRepository.findById(conta.getId())
+                .orElseThrow(() -> new ResourceNotFoundException("Conta não encontrada após registro de pagamento."));
+
+        if (Boolean.TRUE.equals(conta.getPago())) {
+            for (Pedido p : conta.getPedidos()) {
+                if (p.getStatus() != StatusPedido.CANCELADO) {
+                    p.setStatus(StatusPedido.FINALIZADO);
+                    pedidoRepository.save(p);
+                }
             }
-        }
 
-        // Finalizar a comanda mãe se todas as subcontas ativas estiverem encerradas
-        if (comanda != null) {
-            List<Conta> todasContas = contaRepository.findByComandaId(comanda.getId());
-            boolean todasPagas = todasContas.stream()
-                    .allMatch(c -> c.getId().equals(conta.getId()) || c.getPago());
-            if (todasPagas) {
-                // 🎯 CORREÇÃO 2: Chamada do método de encapsulamento rico da entidade Comanda.
-                comanda.setStatus(StatusComanda.FECHADA);
-                comanda.setFechadaEm(LocalDateTime.now());
-                comandaRepository.save(comanda);
-
+            if (comanda != null) {
+                List<Conta> todasContas = contaRepository.findByComandaId(comanda.getId());
+                boolean todasPagas = todasContas.stream()
+                        .allMatch(c -> Boolean.TRUE.equals(c.getPago()));
+                if (todasPagas) {
+                    comanda.setStatus(StatusComanda.FECHADA);
+                    comanda.setFechadaEm(LocalDateTime.now());
+                    comandaRepository.save(comanda);
+                }
             }
+        } else {
+            log.info("Pagamento parcial para Conta {}. Pedidos e Comanda permanecem abertos operacionalmente.", conta.getId());
         }
 
         return new PedidoResponseDTO(pedidoReferencia);
     }
 
-    /**
-     * 🛒 FLUXO BALCÃO
-     */
     @Transactional
     public PedidoResponseDTO finalizarBalcao(CheckoutBalcaoRequestDTO dto) {
         validarCaixaAberto();
@@ -403,8 +341,7 @@ public class PedidoService {
         Pedido pedido = new Pedido();
         pedido.setTipo(TipoPedido.BALCAO);
         pedido.setStatus(StatusPedido.RECEBIDO);
-        pedido.setStatusFinanceiro(StatusFinanceiro.PAGO);
-        pedido.setFormaPagamento(dto.formaPagamento());
+        pedido.setStatusFinanceiro(StatusFinanceiro.AGUARDANDO_PAGAMENTO);
         pedido.setObservacaoGeral(dto.observacao());
         pedido.setNomeClienteBalcao(dto.nomeConsumidor() != null ? dto.nomeConsumidor().toUpperCase().trim() : "CONSUMIDOR PADRÃO");
         pedido.setItens(new ArrayList<>());
@@ -413,17 +350,26 @@ public class PedidoService {
         calcularEPreencherTotal(pedido);
 
         Pedido pedidoSalvo = salvarPedido(pedido);
-        // CHAMADA NOVA: Gerar snapshots de ItemCombo após a persistência do pedido
-        // itemComboService.criarSnapshotsDosCombos(pedidoSalvo); // REMOVIDO
-        criarSnapshotsDosCombos(pedidoSalvo); // SUBSTITUIDO
+
+        PagamentoRequestDTO pagamentoDto = new PagamentoRequestDTO(
+                dto.formaPagamento(),
+                dto.valorRecebido()
+        );
+        pagamentoService.registrarPagamentoPedido(
+                pedidoSalvo.getId(), // Passa o ID do pedido
+                pagamentoDto
+        );
+
+        pedidoSalvo.setStatusFinanceiro(StatusFinanceiro.PAGO);
+        pedidoSalvo.setFormaPagamento(dto.formaPagamento());
+        pedidoSalvo.setValorRecebido(dto.valorRecebido());
+        pedidoRepository.save(pedidoSalvo);
+
+        criarSnapshotsDosCombos(pedidoSalvo);
         gerarFilaImpressao(pedidoSalvo);
 
         return new PedidoResponseDTO(pedidoSalvo);
     }
-
-    // ==========================================
-    // ⚙️ ROTINAS UTILITÁRIAS COMPARTILHADAS (GENÉRICAS)
-    // ==========================================
 
     private void validarCaixaAberto() {
         if (!caixaRepository.existsByStatus(StatusCaixa.ABERTO)) {
@@ -448,21 +394,19 @@ public class PedidoService {
             item.setProduto(itemCarrinho.getProduto());
             item.setQuantidade(itemCarrinho.getQuantidade());
 
-            // Calcular preço dos adicionais
             BigDecimal precoAdicionais = BigDecimal.ZERO;
             if (itemCarrinho.getAdicionais() != null && !itemCarrinho.getAdicionais().isEmpty()) {
                 precoAdicionais = itemCarrinho.getAdicionais().stream()
                         .map(Adicional::getPreco)
                         .reduce(BigDecimal.ZERO, BigDecimal::add);
-                item.setAdicionais(new ArrayList<>(itemCarrinho.getAdicionais())); // Associar adicionais ao ItemPedido
+                item.setAdicionais(new ArrayList<>(itemCarrinho.getAdicionais()));
             }
 
-            // Definir preço unitário do ItemPedido (produto + adicionais)
             item.setPrecoUnitario(itemCarrinho.getProduto().getPreco().add(precoAdicionais));
-            item.setObservacaoItem(itemCarrinho.getObservacao()); // Copiar observação
+            item.setObservacaoItem(itemCarrinho.getObservacao());
 
             item.setPedido(pedido);
-            item.setStatusPagamento(StatusPagamento.PAGO);
+            item.setStatusPagamento(StatusPagamento.ABERTO);
             pedido.getItens().add(item);
         }
     }
@@ -473,12 +417,25 @@ public class PedidoService {
                 Produto produto = produtoRepository.findById(itemDto.produtoId())
                         .orElseThrow(() -> new ResourceNotFoundException("Produto do cardápio não localizado."));
 
+                List<Adicional> adicionaisVinculados = itemDto.adicionaisIds() != null ?
+                        adicionalRepository.findAllById(itemDto.adicionaisIds()) : new ArrayList<>();
+
+                BigDecimal precoAdicionais = adicionaisVinculados.stream()
+                        .map(Adicional::getPreco)
+                        .reduce(BigDecimal.ZERO, BigDecimal::add);
+
+                BigDecimal precoFinalItemUnitario = produto.getPreco().add(precoAdicionais);
+                if (precoFinalItemUnitario.compareTo(BigDecimal.ZERO) <= 0) {
+                    throw new BusinessRuleException("Preço final do item não pode ser zero ou negativo.");
+                }
+
                 ItemPedido item = new ItemPedido();
                 item.setProduto(produto);
                 item.setQuantidade(itemDto.quantidade());
-                item.setPrecoUnitario(produto.getPreco());
+                item.setPrecoUnitario(precoFinalItemUnitario);
+                item.setAdicionais(adicionaisVinculados);
                 item.setPedido(pedido);
-                item.setStatusPagamento(StatusPagamento.PAGO);
+                item.setStatusPagamento(StatusPagamento.ABERTO);
                 pedido.getItens().add(item);
             }
         }
@@ -490,7 +447,6 @@ public class PedidoService {
             somaTotal = somaTotal.add(item.getPrecoUnitario().multiply(BigDecimal.valueOf(item.getQuantidade())));
         }
         pedido.setTotal(somaTotal);
-        pedido.setValorRecebido(somaTotal);
     }
 
     private Pedido salvarPedido(Pedido pedido) {
@@ -509,8 +465,6 @@ public class PedidoService {
         carrinho.getItens().clear();
         carrinhoRepository.save(carrinho);
     }
-
-    // ==========================================
 
     @Transactional
     public PedidoResponseDTO adicionarItemPedido(UUID pedidoId, ItemPedidoRequestDTO dto) {
@@ -536,9 +490,7 @@ public class PedidoService {
         pedido.setTotal(pedido.getTotal().add(produto.getPreco().multiply(BigDecimal.valueOf(dto.quantidade()))));
 
         Pedido pedidoSalvo = pedidoRepository.save(pedido);
-        // CHAMADA NOVA: Gerar snapshots de ItemCombo após a persistência do pedido
-        // itemComboService.criarSnapshotsDosCombos(pedidoSalvo); // REMOVIDO
-        criarSnapshotsDosCombos(pedidoSalvo); // SUBSTITUIDO
+        criarSnapshotsDosCombos(pedidoSalvo);
         PedidoResponseDTO response = new PedidoResponseDTO(pedidoSalvo);
         messagingTemplate.convertAndSend("/topic/caixa", response);
         return response;
@@ -561,10 +513,6 @@ public class PedidoService {
         BigDecimal valorDeduzir = itemRemover.getPrecoUnitario().multiply(BigDecimal.valueOf(itemRemover.getQuantidade()));
         pedido.setTotal(pedido.getTotal().subtract(valorDeduzir));
 
-        // ==================================================
-        // ÚNICO BLOCO NOVO AUTORIZADO
-        // ==================================================
-
         List<ItemCombo> itensCombo =
                 itemComboRepository.findByItemPedidoId(
                         itemRemover.getId()
@@ -575,9 +523,6 @@ public class PedidoService {
             itemComboRepository.flush();
         }
 
-        // ==================================================
-        // DAQUI PARA BAIXO, MANTER O FLUXO ANTIGO INTACTO
-        // ==================================================
         pedido.getItens().remove(itemRemover);
 
         Pedido pedidoSalvo = pedidoRepository.save(pedido);
@@ -603,7 +548,6 @@ public class PedidoService {
         List<Adicional> adicionais = adicionalRepository.findAllById(adicionaisIds);
         item.setAdicionais(adicionais);
 
-        // Recalcula o total do pedido, incluindo os adicionais de ItemPedido e ItemCombo
         return recalcularTotalPedido(pedido.getId());
     }
 
@@ -623,13 +567,27 @@ public class PedidoService {
 
     @Transactional
     public PedidoResponseDTO cancelarPedido(UUID id) {
-
         Pedido pedido = pedidoRepository.findById(id)
                 .orElseThrow(() -> new ResourceNotFoundException("Pedido não localizado."));
 
+        BigDecimal saldoLiquido = pagamentoService.getSaldoLiquidoPagoPorPedido(id);
+
+        if (saldoLiquido.compareTo(BigDecimal.ZERO) > 0) {
+            throw new BusinessRuleException(
+                    "Operação negada: O pedido possui pagamento ativo. Realize o estorno financeiro antes do cancelamento."
+            );
+        }
+
         pedido.setStatus(StatusPedido.CANCELADO);
 
-        pedido.setStatusFinanceiro(StatusFinanceiro.CANCELADO);
+        if (pedido.getStatusFinanceiro() == StatusFinanceiro.AGUARDANDO_PAGAMENTO) {
+            pedido.setStatusFinanceiro(StatusFinanceiro.CANCELADO);
+        } else if (pedido.getStatusFinanceiro() == StatusFinanceiro.PAGO) {
+            pedido.setStatusFinanceiro(StatusFinanceiro.ESTORNADO);
+        } else if (pedido.getStatusFinanceiro() == StatusFinanceiro.ESTORNADO) { // Explicitly keep ESTORNADO
+            pedido.setStatusFinanceiro(StatusFinanceiro.ESTORNADO);
+        }
+        // If it was already ESTORNADO, it remains ESTORNADO. No explicit action needed.
 
         Pedido pedidoSalvo = pedidoRepository.save(pedido);
 
@@ -649,6 +607,12 @@ public class PedidoService {
                 .toList();
     }
 
+    @Transactional(readOnly = true)
+    public List<PedidoResponseDTO> listarHistoricoCliente(UUID clienteId) {
+        return pedidoRepository.findByClienteIdOrderByDataHoraDesc(clienteId).stream()
+                .map(PedidoResponseDTO::new)
+                .collect(Collectors.toList());
+    }
 
     @Transactional(readOnly = true)
     public List<PedidoResponseDTO> listarTodos() {
@@ -660,15 +624,6 @@ public class PedidoService {
         return new PedidoResponseDTO(pedidoRepository.findById(id)
                 .orElseThrow(() -> new ResourceNotFoundException("Pedido não localizado.")));
     }
-
-    @Transactional(readOnly = true)
-    public List<PedidoResponseDTO> listarHistoricoCliente(UUID clienteId) {
-        return pedidoRepository.findAll().stream()
-                .filter(p -> p.getCliente() != null && p.getCliente().getId().equals(clienteId))
-                .map(PedidoResponseDTO::new)
-                .toList();
-    }
-
 
     @Transactional(readOnly = true)
     public List<ItemComandaMobileResponseDTO> buscarItensPorComandaMestre(UUID comandaId) {
@@ -732,32 +687,20 @@ public class PedidoService {
                 clienteNome);
     }
 
-    // ==========================================
-    // 💰 ROTINAS FINANCEIRAS PARA ADICIONAIS DE COMBO
-    // ==========================================
-
     @Transactional
     public PedidoResponseDTO recalcularTotalPedido(UUID pedidoId) {
         Pedido pedido = pedidoRepository.findById(pedidoId)
                 .orElseThrow(() -> new ResourceNotFoundException("Pedido informado não localizado."));
 
-        // 1. Calcular o total dos ItemPedido (incluindo seus próprios adicionais)
         BigDecimal totalItensPedido = pedido.getItens().stream()
                 .map(item -> {
-                    BigDecimal precoBaseItem = item.getPrecoUnitario(); // Já inclui o preço do produto + adicionais de ItemPedido na criação
-                    // Se o precoUnitario não incluir adicionais na criação, a lógica abaixo seria necessária:
-                    // BigDecimal precoAdicionaisItem = item.getAdicionais().stream()
-                    //         .map(Adicional::getPreco)
-                    //         .reduce(BigDecimal.ZERO, BigDecimal::add);
-                    // return precoBaseItem.add(precoAdicionaisItem).multiply(BigDecimal.valueOf(item.getQuantidade()));
+                    BigDecimal precoBaseItem = item.getPrecoUnitario();
                     return precoBaseItem.multiply(BigDecimal.valueOf(item.getQuantidade()));
                 })
                 .reduce(BigDecimal.ZERO, BigDecimal::add);
 
-        // 2. Calcular o acréscimo dos adicionais dos ItemCombo
         BigDecimal totalAdicionaisItemCombo = calcularTotalAdicionaisItensCombo(pedido);
 
-        // 3. Somar todos os totais
         BigDecimal novoTotalPedido = totalItensPedido.add(totalAdicionaisItemCombo);
 
         pedido.setTotal(novoTotalPedido);
@@ -768,20 +711,10 @@ public class PedidoService {
         return response;
     }
 
-    /**
-     * Calcula o valor total dos adicionais vinculados aos ItemCombo de um Pedido.
-     * Esta lógica é aditiva e não interfere no cálculo base dos ItemPedido.
-     *
-     * @param pedido O Pedido a ser analisado.
-     * @return O valor total dos adicionais dos ItemCombo.
-     */
     private BigDecimal calcularTotalAdicionaisItensCombo(Pedido pedido) {
         BigDecimal totalAdicionaisCombos = BigDecimal.ZERO;
 
         for (ItemPedido itemPedido : pedido.getItens()) {
-            // Verifica se o ItemPedido é um combo (assumindo que Produto.isCombo é carregado)
-            // A auditoria identificou que ItemPedido.produto.isCombo não é diretamente exposto no DTO,
-            // mas a entidade ItemPedido tem o Produto associado.
             if (itemPedido.getProduto() != null && itemPedido.getProduto().getIsCombo()) {
                 List<ItemCombo> itensCombo = itemComboRepository.findByItemPedidoId(itemPedido.getId());
 
@@ -790,7 +723,6 @@ public class PedidoService {
                             .map(Adicional::getPreco)
                             .reduce(BigDecimal.ZERO, BigDecimal::add);
 
-                    // Regra: O adicional selecionado em um ItemCombo aplica-se a TODA a quantidade daquele ItemCombo.
                     totalAdicionaisCombos = totalAdicionaisCombos.add(
                             precoAdicionaisItemCombo.multiply(BigDecimal.valueOf(itemCombo.getQuantidade()))
                     );
@@ -800,7 +732,6 @@ public class PedidoService {
         return totalAdicionaisCombos;
     }
 
-    // NOVO MÉTODO: Criar snapshots de ItemCombo para um ItemPedido individual
     private void criarSnapshotsDoCombo(ItemPedido itemPedido) {
         if (itemPedido == null
                 || itemPedido.getProduto() == null
@@ -808,25 +739,21 @@ public class PedidoService {
             return;
         }
 
-        // Verifica se o produto do ItemPedido é um combo
         if (!Boolean.TRUE.equals(itemPedido.getProduto().getIsCombo())) {
             return;
         }
 
-        // Proteção contra duplicidade: verifica se já existem ItemCombos para este ItemPedido
         List<ItemCombo> existentes = itemComboRepository.findByItemPedidoId(itemPedido.getId());
         if (!existentes.isEmpty()) {
             return;
         }
 
-        // Busca a composição do combo
         List<ComboProduto> composicao = comboProdutoRepository.findByComboId(itemPedido.getProduto().getId());
 
         if (composicao.isEmpty()) {
-            return; // Combo sem composição, apenas retorna
+            return;
         }
 
-        // Cria os snapshots de ItemCombo
         List<ItemCombo> snapshots = composicao.stream()
                 .map(config -> {
                     Produto produtoInterno = config.getProduto();
@@ -835,14 +762,13 @@ public class PedidoService {
                     itemCombo.setItemPedido(itemPedido);
                     itemCombo.setProdutoId(produtoInterno.getId());
                     itemCombo.setNomeProduto(produtoInterno.getNome());
-                    itemCombo.setQuantidade(config.getQuantidade()); // Usa a quantidade da composição do combo
+                    itemCombo.setQuantidade(config.getQuantidade());
                     itemCombo.setPrecoUnitario(produtoInterno.getPreco());
 
                     return itemCombo;
                 })
                 .collect(Collectors.toList());
 
-        // Persiste todos os snapshots de uma vez
         itemComboRepository.saveAll(snapshots);
     }
 

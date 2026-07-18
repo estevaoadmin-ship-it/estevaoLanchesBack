@@ -18,10 +18,14 @@ import org.springframework.test.web.servlet.MvcResult;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.util.UUID;
+import java.util.List;
 
 import static org.hamcrest.Matchers.hasSize;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.*;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
+
+import com.paullomaggio.estevaoLanches.repositories.ContaRepository;
+import com.paullomaggio.estevaoLanches.entities.Conta;
 
 @SpringBootTest
 @AutoConfigureMockMvc
@@ -36,6 +40,9 @@ class ComandaControllerIntegrationTest {
 
     @Autowired
     private com.paullomaggio.estevaoLanches.repositories.ComandaRepository comandaRepository;
+
+    @Autowired
+    private ContaRepository contaRepository;
 
     // =========================================================================
     // BLOCO 1 — Abertura de Comanda (CT-INT-001 a CT-INT-006)
@@ -208,6 +215,13 @@ class ComandaControllerIntegrationTest {
             MvcResult mvcResult = mockMvc.perform(post("/api/comandas/abrir/40")).andReturn();
             String id = JsonPath.read(mvcResult.getResponse().getContentAsString(), "$.id");
 
+            // Set all accounts to paid before closing the comanda
+            List<Conta> contas = contaRepository.findByComandaId(UUID.fromString(id));
+            contas.forEach(conta -> {
+                conta.setPago(true);
+                contaRepository.save(conta);
+            });
+
             mockMvc.perform(put("/api/comandas/" + id + "/fechar"))
                     .andExpect(status().isOk())
                     .andExpect(jsonPath("$.status").value("FECHADA"))
@@ -283,7 +297,7 @@ class ComandaControllerIntegrationTest {
 
         @Test
         @DisplayName("CT-INT-024 ao 026 - Certificar Content-Type, UTF-8 e mapeamento completo das chaves JSON")
-        void ctInt024To026() throws Exception {
+        void ctInt016To018() throws Exception {
             mockMvc.perform(post("/api/comandas/abrir/5")
                             .contentType(MediaType.APPLICATION_JSON))
                     .andExpect(status().isOk())
@@ -326,6 +340,13 @@ class ComandaControllerIntegrationTest {
                     .andReturn();
 
             String id = JsonPath.read(mvcResult.getResponse().getContentAsString(), "$.id");
+
+            // Set all accounts to paid before closing the comanda
+            List<Conta> contas = contaRepository.findByComandaId(UUID.fromString(id));
+            contas.forEach(conta -> {
+                conta.setPago(true);
+                contaRepository.save(conta);
+            });
 
             // 2. Buscar
             mockMvc.perform(get("/api/comandas/" + id))

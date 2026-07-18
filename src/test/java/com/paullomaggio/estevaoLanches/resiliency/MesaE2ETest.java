@@ -466,7 +466,6 @@ class MesaE2ETest {
             CheckoutDeliveryRequestDTO checkoutDto = new CheckoutDeliveryRequestDTO(
                     clienteId,
                     "Rua Teste, 123 - Bairro - Cidade - Estado - 12345-678",
-                    FormaPagamento.PIX,
                     "Observacao do pedido"
             );
 
@@ -483,7 +482,7 @@ class MesaE2ETest {
             assertThat(pedidoResponse.tipo()).isEqualTo(TipoPedido.DELIVERY);
             assertThat(pedidoResponse.clienteNome()).isEqualTo("CLIENTE TESTE"); // Assumindo que o nome do cliente é "CLIENTE TESTE" da configuração inicial
             assertThat(pedidoResponse.enderecoEntrega()).isEqualTo(checkoutDto.enderecoEntrega());
-            assertThat(pedidoResponse.formaPagamento()).isEqualTo(checkoutDto.formaPagamento());
+            assertThat(pedidoResponse.formaPagamento()).isNull(); // Delivery não é pago no checkout
             assertThat(pedidoResponse.total()).isEqualByComparingTo(expectedTotalFromCart);
             assertThat(pedidoResponse.itens()).hasSize(2);
             assertThat(pedidoResponse.itens().stream().filter(item -> item.produtoId().equals(produto1.getId())).findFirst().get().quantidade()).isEqualTo(2);
@@ -501,7 +500,6 @@ class MesaE2ETest {
         @Test
         @DisplayName("DELIVERY-E2E-015 ao 017: Regras de Roteamento de Impressão (Cozinha vs Caixa)")
         void deliveryE2E015To017() throws Exception {
-            // Valida de forma lógica se itens quentes vão para cozinha e refrigerantes vão direto para o caixa
             assertThat(true).isTrue();
         }
 
@@ -570,13 +568,10 @@ class MesaE2ETest {
             // 🎯 FIX: Garante que não exista Comanda ABERTA para a mesa 5 antes de tentar abrir.
             // Isso garante que o ComandaService.abrirPorNumeroMesa() realmente crie/altere o status da mesa.
             comandaRepository.findByMesaNumeroAndStatus(5, StatusComanda.ABERTA).ifPresent(comanda -> {
-                try {
-                    comandaService.fecharComanda(comanda.getId());
-                    entityManager.flush(); // Garante que o fechamento seja persistido
-                    entityManager.clear(); // Limpa o cache para a próxima leitura
-                } catch (Exception e) {
-                    throw new RuntimeException("Falha ao fechar comanda existente para mesa 5: " + e.getMessage());
-                }
+                comanda.setStatus(StatusComanda.FECHADA);
+                comandaRepository.save(comanda);
+                entityManager.flush(); // Garante que o fechamento seja persistido
+                entityManager.clear(); // Limpa o cache para a próxima leitura
             });
 
             // 🎯 FIX: Garante que a mesa esteja LIVRE antes de tentar abrir.
@@ -643,13 +638,10 @@ class MesaE2ETest {
             // Para este teste, vamos garantir que a mesa 5 esteja OCUPADA com uma comanda aberta
             // para simular o cenário de fechamento.
             comandaRepository.findByMesaNumeroAndStatus(5, StatusComanda.ABERTA).ifPresent(comanda -> {
-                try {
-                    comandaService.fecharComanda(comanda.getId()); // Fecha qualquer comanda aberta
-                    entityManager.flush(); // Garante que o fechamento seja persistido
-                    entityManager.clear(); // Limpa o cache para a próxima leitura
-                } catch (Exception e) {
-                    throw new RuntimeException("Falha ao fechar comanda existente para mesa 5: " + e.getMessage());
-                }
+                comanda.setStatus(StatusComanda.FECHADA);
+                comandaRepository.save(comanda);
+                entityManager.flush(); // Garante que o fechamento seja persistido
+                entityManager.clear(); // Limpa o cache para a próxima leitura
             });
             // Abre uma nova comanda para garantir que a mesa esteja OCUPADA
             mockMvc.perform(post("/api/comandas/abrir/5"))
@@ -702,13 +694,10 @@ class MesaE2ETest {
 
             // 🎯 FIX: Garante que não exista Comanda ABERTA para esta mesa antes de tentar abrir.
             comandaRepository.findByMesaNumeroAndStatus(numeroMesa, StatusComanda.ABERTA).ifPresent(comanda -> {
-                try {
-                    comandaService.fecharComanda(comanda.getId());
-                    entityManager.flush(); // Garante que o fechamento seja persistido
-                    entityManager.clear(); // Limpa o cache para a próxima leitura
-                } catch (Exception e) {
-                    throw new RuntimeException("Falha ao fechar comanda existente para mesa " + numeroMesa + ": " + e.getMessage());
-                }
+                comanda.setStatus(StatusComanda.FECHADA);
+                comandaRepository.save(comanda);
+                entityManager.flush(); // Garante que o fechamento seja persistido
+                entityManager.clear(); // Limpa o cache para a próxima leitura
             });
 
             // 🎯 FIX: Garante que a mesa esteja LIVRE antes de tentar abrir

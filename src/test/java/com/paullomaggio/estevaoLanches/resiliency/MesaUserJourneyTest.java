@@ -140,13 +140,10 @@ class MesaUserJourneyTest {
         void mesaUser007To014() throws Exception {
             // 🎯 FIX: Garante que não exista Comanda ABERTA para a mesa 10 antes de tentar abrir.
             comandaRepository.findByMesaNumeroAndStatus(10, StatusComanda.ABERTA).ifPresent(comanda -> {
-                try {
-                    comandaService.fecharComanda(comanda.getId());
-                    entityManager.flush(); // Garante que o fechamento seja persistido
-                    entityManager.clear(); // Limpa o cache para a próxima leitura
-                } catch (Exception e) {
-                    throw new RuntimeException("Falha ao fechar comanda existente para mesa 10: " + e.getMessage());
-                }
+                comanda.setStatus(StatusComanda.FECHADA);
+                comandaRepository.save(comanda);
+                entityManager.flush(); // Garante que o fechamento seja persistido
+                entityManager.clear(); // Limpa o cache para a próxima leitura
             });
 
             // 🎯 FIX: Garante que a mesa 10 esteja LIVRE antes de tentar abrir.
@@ -195,7 +192,10 @@ class MesaUserJourneyTest {
             int numeroMesa = 30; // Número fixo, mas garantimos a limpeza
             mesaRepository.findByNumero(numeroMesa).ifPresent(m -> {
                 comandaRepository.findByMesaNumeroAndStatus(numeroMesa, StatusComanda.ABERTA).ifPresent(comanda -> {
-                    try { comandaService.fecharComanda(comanda.getId()); } catch (Exception e) { throw new RuntimeException(e); }
+                    comanda.setStatus(StatusComanda.FECHADA);
+                    comandaRepository.save(comanda);
+                    entityManager.flush(); // Garante que o fechamento seja persistido
+                    entityManager.clear(); // Limpa o cache para a próxima leitura
                 });
                 if (m.getStatus() != StatusMesa.LIVRE) { m.setStatus(StatusMesa.LIVRE); mesaRepository.saveAndFlush(m); }
             });
@@ -279,7 +279,10 @@ class MesaUserJourneyTest {
             int numeroMesa = 40; // Número fixo, mas garantimos a limpeza
             mesaRepository.findByNumero(numeroMesa).ifPresent(m -> {
                 comandaRepository.findByMesaNumeroAndStatus(numeroMesa, StatusComanda.ABERTA).ifPresent(comanda -> {
-                    try { comandaService.fecharComanda(comanda.getId()); } catch (Exception e) { throw new RuntimeException(e); }
+                    comanda.setStatus(StatusComanda.FECHADA);
+                    comandaRepository.save(comanda);
+                    entityManager.flush(); // Garante que o fechamento seja persistido
+                    entityManager.clear(); // Limpa o cache para a próxima leitura
                 });
                 if (m.getStatus() != StatusMesa.LIVRE) { m.setStatus(StatusMesa.LIVRE); mesaRepository.saveAndFlush(m); }
             });
@@ -350,7 +353,10 @@ class MesaUserJourneyTest {
             int numeroMesa = 50; // Número fixo, mas garantimos a limpeza
             mesaRepository.findByNumero(numeroMesa).ifPresent(m -> {
                 comandaRepository.findByMesaNumeroAndStatus(numeroMesa, StatusComanda.ABERTA).ifPresent(comanda -> {
-                    try { comandaService.fecharComanda(comanda.getId()); } catch (Exception e) { throw new RuntimeException(e); }
+                    comanda.setStatus(StatusComanda.FECHADA);
+                    comandaRepository.save(comanda);
+                    entityManager.flush(); // Garante que o fechamento seja persistido
+                    entityManager.clear(); // Limpa o cache para a próxima leitura
                 });
                 if (m.getStatus() != StatusMesa.LIVRE) { m.setStatus(StatusMesa.LIVRE); mesaRepository.saveAndFlush(m); }
             });

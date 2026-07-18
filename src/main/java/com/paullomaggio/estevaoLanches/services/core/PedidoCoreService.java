@@ -6,9 +6,11 @@ import com.paullomaggio.estevaoLanches.entities.Pedido;
 import com.paullomaggio.estevaoLanches.enums.StatusFinanceiro;
 import com.paullomaggio.estevaoLanches.enums.StatusPedido;
 import com.paullomaggio.estevaoLanches.enums.TipoPedido;
+import com.paullomaggio.estevaoLanches.exceptions.BusinessRuleException; // Import BusinessRuleException
 import com.paullomaggio.estevaoLanches.exceptions.ResourceNotFoundException;
 import com.paullomaggio.estevaoLanches.repositories.ContaDeliveryRepository;
 import com.paullomaggio.estevaoLanches.repositories.PedidoRepository;
+import com.paullomaggio.estevaoLanches.services.PagamentoService; // Import PagamentoService
 import com.paullomaggio.estevaoLanches.services.PedidoService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.security.access.AccessDeniedException;
@@ -18,6 +20,7 @@ import org.springframework.security.core.userdetails.UserDetails;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.math.BigDecimal; // Import BigDecimal
 import java.util.List;
 import java.util.UUID;
 
@@ -28,6 +31,7 @@ public class PedidoCoreService {
     private final PedidoRepository pedidoRepository;
     private final PedidoService pedidoService;
     private final ContaDeliveryRepository contaDeliveryRepository;
+    private final PagamentoService pagamentoService; // Inject PagamentoService
 
     @Transactional(readOnly = true)
     public List<PedidoResponseDTO> listarHistoricoDeliveryDoClienteAutenticado() {
@@ -64,9 +68,27 @@ public class PedidoCoreService {
             );
         }
 
+        BigDecimal saldoLiquido = pagamentoService.getSaldoLiquidoPagoPorPedido(pedidoId);
+
+        if (saldoLiquido.compareTo(BigDecimal.ZERO) > 0) {
+            throw new BusinessRuleException(
+                    "Operação negada: O pedido possui pagamento ativo. Realize o estorno financeiro antes do cancelamento."
+            );
+        }
+
         pedido.setStatus(StatusPedido.CANCELADO);
 
-        pedido.setStatusFinanceiro(StatusFinanceiro.CANCELADO);
+        StatusFinanceiro statusFinanceiroAnterior = pedido.getStatusFinanceiro();
+
+        if (statusFinanceiroAnterior == StatusFinanceiro.AGUARDANDO_PAGAMENTO) {
+            pedido.setStatusFinanceiro(StatusFinanceiro.CANCELADO);
+        } else if (statusFinanceiroAnterior == StatusFinanceiro.ESTORNADO) {
+            pedido.setStatusFinanceiro(StatusFinanceiro.ESTORNADO);
+        } else if (statusFinanceiroAnterior == StatusFinanceiro.PAGO) {
+            // A validação de saldoLiquido já garante que, se chegou aqui com PAGO,
+            // o saldo líquido é zero, indicando estorno integral.
+            pedido.setStatusFinanceiro(StatusFinanceiro.ESTORNADO);
+        }
 
         return new PedidoResponseDTO(
                 pedidoRepository.save(pedido)

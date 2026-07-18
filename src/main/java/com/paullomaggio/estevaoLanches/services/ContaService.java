@@ -66,19 +66,6 @@ public class ContaService {
     }
 
     @Transactional
-    public ContaResponseDTO liquidarConta(UUID id) {
-        Conta conta = contaRepository.findById(id)
-                .orElseThrow(() -> new ResourceNotFoundException("Conta não encontrada para liquidação."));
-
-        if (Boolean.TRUE.equals(conta.getPago())) {
-            throw new BusinessRuleException("Operação negada! Esta conta já consta como paga.");
-        }
-
-        conta.setPago(true);
-        return new ContaResponseDTO(contaRepository.save(conta));
-    }
-
-    @Transactional
     public void deletar(UUID id) {
         Conta conta = contaRepository.findById(id)
                 .orElseThrow(() -> new ResourceNotFoundException("Conta não encontrada para exclusão."));

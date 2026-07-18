@@ -3,6 +3,7 @@ package com.paullomaggio.estevaoLanches.dtos;
 import com.paullomaggio.estevaoLanches.enums.FormaPagamento;
 import io.swagger.v3.oas.annotations.media.Schema;
 import jakarta.validation.constraints.NotNull;
+import java.math.BigDecimal;
 import java.util.UUID;
 
 @Schema(description = "DTO exclusivo para o fechamento financeiro de uma Mesa")
@@ -24,5 +25,9 @@ public record CheckoutMesaRequestDTO(
 
         @Schema(description = "Forma de pagamento escolhida para liquidação", requiredMode = Schema.RequiredMode.REQUIRED)
         @NotNull(message = "A forma de pagamento é obrigatória")
-        FormaPagamento formaPagamento
+        FormaPagamento formaPagamento,
+
+        @Schema(description = "Valor efetivamente recebido do cliente para quitar a conta", example = "50.00", requiredMode = Schema.RequiredMode.REQUIRED)
+        @NotNull(message = "O valor recebido é obrigatório")
+        BigDecimal valorRecebido
 ) {}

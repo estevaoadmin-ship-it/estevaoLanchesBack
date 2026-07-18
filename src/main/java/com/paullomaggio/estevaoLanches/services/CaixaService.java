@@ -6,7 +6,6 @@ import com.paullomaggio.estevaoLanches.enums.*;
 import com.paullomaggio.estevaoLanches.exceptions.BusinessRuleException;
 import com.paullomaggio.estevaoLanches.exceptions.ResourceNotFoundException;
 import com.paullomaggio.estevaoLanches.repositories.*;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -20,12 +19,33 @@ import java.util.UUID;
 @Service
 public class CaixaService {
 
-    @Autowired private CaixaRepository caixaRepository;
-    @Autowired private PagamentoRepository pagamentoRepository;
-    @Autowired private PedidoRepository pedidoRepository;
-    @Autowired private ContaRepository contaRepository;
-    @Autowired private MovimentacaoCaixaRepository movimentacaoCaixaRepository;
-    @Autowired private UsuarioRepository usuarioRepository;
+    private final CaixaRepository caixaRepository;
+    private final PagamentoRepository pagamentoRepository;
+    private final PedidoRepository pedidoRepository;
+    private final ContaRepository contaRepository;
+    private final MovimentacaoCaixaRepository movimentacaoCaixaRepository;
+    private final UsuarioRepository usuarioRepository;
+    private final EstornoPagamentoRepository estornoPagamentoRepository;
+    private final PagamentoService pagamentoService;
+
+    // Injeção de dependências via Construtor Único Seguro
+    public CaixaService(CaixaRepository caixaRepository,
+                        PagamentoRepository pagamentoRepository,
+                        PedidoRepository pedidoRepository,
+                        ContaRepository contaRepository,
+                        MovimentacaoCaixaRepository movimentacaoCaixaRepository,
+                        UsuarioRepository usuarioRepository,
+                        EstornoPagamentoRepository estornoPagamentoRepository,
+                        PagamentoService pagamentoService) {
+        this.caixaRepository = caixaRepository;
+        this.pagamentoRepository = pagamentoRepository;
+        this.pedidoRepository = pedidoRepository;
+        this.contaRepository = contaRepository;
+        this.movimentacaoCaixaRepository = movimentacaoCaixaRepository;
+        this.usuarioRepository = usuarioRepository;
+        this.estornoPagamentoRepository = estornoPagamentoRepository;
+        this.pagamentoService = pagamentoService;
+    }
 
     @Transactional(readOnly = true)
     public Optional<CaixaStatusResponseDTO> obterStatusAtual() {
@@ -134,18 +154,22 @@ public class CaixaService {
         Conta conta = contaRepository.findByComandaIdAndNumeroConta(comandaMestre.getId(), numeroConta)
                 .orElseThrow(() -> new ResourceNotFoundException("Subconta número " + numeroConta + " não existe na mesa correspondente."));
 
-        BigDecimal totalJaPago = pagamentoRepository.sumPagamentosPorConta(conta.getId());
-        BigDecimal saldo = conta.getValorTotal().subtract(totalJaPago);
+        // --- START RESÍDUO 5 FIX ---
+        BigDecimal totalBrutoPago = pagamentoRepository.sumPagamentosPorConta(conta.getId());
+        if (totalBrutoPago == null) totalBrutoPago = BigDecimal.ZERO;
 
-        return saldo.compareTo(BigDecimal.ZERO) < 0 ? BigDecimal.ZERO : saldo;
+        BigDecimal totalEstornado = estornoPagamentoRepository.somarValorEstornadoPorContaId(conta.getId());
+        if (totalEstornado == null) totalEstornado = BigDecimal.ZERO;
+
+        BigDecimal totalLiquido = totalBrutoPago.subtract(totalEstornado);
+        BigDecimal saldo = conta.getValorTotal().subtract(totalLiquido);
+
+        return saldo.max(BigDecimal.ZERO); // Saldo nunca deve ser negativo
+        // --- END RESÍDUO 5 FIX ---
     }
 
     @Transactional
     public void registrarPagamentoFracionado(UUID pedidoId, ContaPagamentoRequestDTO dto) {
-        if (!caixaRepository.existsByStatus(StatusCaixa.ABERTO)) {
-            throw new BusinessRuleException("O estabelecimento está fechado. Abra o caixa para processar pagamentos!");
-        }
-
         Pedido pedido = pedidoRepository.findById(pedidoId)
                 .orElseThrow(() -> new ResourceNotFoundException("Pedido de faturamento não localizado."));
 
@@ -153,24 +177,8 @@ public class CaixaService {
         Conta conta = contaRepository.findByComandaIdAndNumeroConta(comandaMestre.getId(), dto.numeroConta())
                 .orElseThrow(() -> new ResourceNotFoundException("Subconta informada não ativa na mesa de atendimento."));
 
-        if (Boolean.TRUE.equals(conta.getPago())) {
-            throw new BusinessRuleException("Operação negada! Esta subconta já está totalmente quitada.");
-        }
-
-        Pagamento pag = new Pagamento();
-        pag.setConta(conta);
-        pag.setValorPago(dto.valorRecebido());
-        pag.setFormaPagamento(dto.formaPagamento());
-        pag.setDataHora(LocalDateTime.now());
-        pag.setUsuarioResponsavel("OPERADOR_PDV");
-
-        pagamentoRepository.save(pag);
-
-        BigDecimal totalAmortizado = pagamentoRepository.sumPagamentosPorConta(conta.getId());
-        if (totalAmortizado.compareTo(conta.getValorTotal()) >= 0) {
-            conta.setPago(true);
-            contaRepository.save(conta);
-        }
+        // Delegação limpa para o motor unificado e centralizado de regras financeiras
+        pagamentoService.registrarPagamento(conta.getId(), new PagamentoRequestDTO(dto.formaPagamento(), dto.valorRecebido()));
     }
 
     @Transactional(readOnly = true)
@@ -178,8 +186,8 @@ public class CaixaService {
         Caixa caixaAtivo = caixaRepository.findByStatus(StatusCaixa.ABERTO)
                 .orElseThrow(() -> new BusinessRuleException("Não há nenhum turno de caixa ativo aberto no momento."));
 
-        List<Pagamento> todosPagamentos = pagamentoRepository.findAll();
-        List<MovimentacaoCaixa> todasMovimentacoes = movimentacaoCaixaRepository.findByCaixaIdAndEstornadaFalse(caixaAtivo.getId());
+        List<Pagamento> pagamentosDoCaixa = pagamentoRepository.findByCaixaId(caixaAtivo.getId());
+        List<EstornoPagamento> estornosDoCaixa = estornoPagamentoRepository.findByCaixaId(caixaAtivo.getId());
 
         BigDecimal faturamentoTotal = BigDecimal.ZERO;
         BigDecimal faturamentoDinheiro = BigDecimal.ZERO;
@@ -187,22 +195,32 @@ public class CaixaService {
         BigDecimal faturamentoCredito = BigDecimal.ZERO;
         BigDecimal faturamentoDebito = BigDecimal.ZERO;
 
-        for (Pagamento p : todosPagamentos) {
-            if (p.getDataHora().isAfter(caixaAtivo.getDataHoraAbertura())) {
-                faturamentoTotal = faturamentoTotal.add(p.getValorPago());
-                if (p.getFormaPagamento() == FormaPagamento.DINHEIRO) faturamentoDinheiro = faturamentoDinheiro.add(p.getValorPago());
-                if (p.getFormaPagamento() == FormaPagamento.PIX) faturamentoPix = faturamentoPix.add(p.getValorPago());
-                if (p.getFormaPagamento() == FormaPagamento.CREDITO) faturamentoCredito = faturamentoCredito.add(p.getValorPago());
-                if (p.getFormaPagamento() == FormaPagamento.DEBITO) faturamentoDebito = faturamentoDebito.add(p.getValorPago());
+        for (Pagamento p : pagamentosDoCaixa) {
+            faturamentoTotal = faturamentoTotal.add(p.getValorPago());
+            if (p.getFormaPagamento() == FormaPagamento.DINHEIRO) faturamentoDinheiro = faturamentoDinheiro.add(p.getValorPago());
+            if (p.getFormaPagamento() == FormaPagamento.PIX) faturamentoPix = faturamentoPix.add(p.getValorPago());
+            if (p.getFormaPagamento() == FormaPagamento.CREDITO) faturamentoCredito = faturamentoCredito.add(p.getValorPago());
+            if (p.getFormaPagamento() == FormaPagamento.DEBITO) faturamentoDebito = faturamentoDebito.add(p.getValorPago());
+        }
+
+        for (EstornoPagamento e : estornosDoCaixa) {
+            faturamentoTotal = faturamentoTotal.subtract(e.getValorEstornado());
+
+            Pagamento pagamentoOriginal = e.getPagamento();
+            if (pagamentoOriginal != null) {
+                if (pagamentoOriginal.getFormaPagamento() == FormaPagamento.DINHEIRO) faturamentoDinheiro = faturamentoDinheiro.subtract(e.getValorEstornado());
+                if (pagamentoOriginal.getFormaPagamento() == FormaPagamento.PIX) faturamentoPix = faturamentoPix.subtract(e.getValorEstornado());
+                if (pagamentoOriginal.getFormaPagamento() == FormaPagamento.CREDITO) faturamentoCredito = faturamentoCredito.subtract(e.getValorEstornado());
+                if (pagamentoOriginal.getFormaPagamento() == FormaPagamento.DEBITO) faturamentoDebito = faturamentoDebito.subtract(e.getValorEstornado());
             }
         }
 
+        List<MovimentacaoCaixa> todasMovimentacoes = movimentacaoCaixaRepository.findByCaixaIdAndEstornadaFalse(caixaAtivo.getId());
         BigDecimal suprimentos = todasMovimentacoes.stream().filter(m -> m.getTipo() == TipoMovimentacao.SUPRIMENTO).map(MovimentacaoCaixa::getValor).reduce(BigDecimal.ZERO, BigDecimal::add);
         BigDecimal sangrias = todasMovimentacoes.stream().filter(m -> m.getTipo() == TipoMovimentacao.SANGRIA).map(MovimentacaoCaixa::getValor).reduce(BigDecimal.ZERO, BigDecimal::add);
 
         BigDecimal totalEsperadoGaveta = caixaAtivo.getValorAbertura().add(faturamentoDinheiro).add(suprimentos).subtract(sangrias);
 
-        List<StatusPedido> esteira = Arrays.asList(StatusPedido.RECEBIDO, StatusPedido.EM_PREPARO, StatusPedido.PRONTO);
         long pedidosEmEsteira = pedidoRepository.countPedidosAtivos(StatusPedido.FINALIZADO, StatusPedido.CANCELADO);
 
         return new CaixaResumoResponseDTO(faturamentoTotal, faturamentoDinheiro, faturamentoPix, faturamentoCredito, faturamentoDebito, totalEsperadoGaveta, pedidosEmEsteira);

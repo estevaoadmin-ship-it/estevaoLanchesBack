@@ -2,21 +2,32 @@ package com.paullomaggio.estevaoLanches.services;
 
 import com.paullomaggio.estevaoLanches.dtos.PagamentoRequestDTO;
 import com.paullomaggio.estevaoLanches.dtos.PagamentoResponseDTO;
+import com.paullomaggio.estevaoLanches.entities.Caixa;
 import com.paullomaggio.estevaoLanches.entities.Conta;
 import com.paullomaggio.estevaoLanches.entities.Pagamento;
+import com.paullomaggio.estevaoLanches.entities.Pedido;
 import com.paullomaggio.estevaoLanches.enums.FormaPagamento;
+import com.paullomaggio.estevaoLanches.enums.StatusCaixa;
 import com.paullomaggio.estevaoLanches.exceptions.BusinessRuleException;
 import com.paullomaggio.estevaoLanches.exceptions.ResourceNotFoundException;
+import com.paullomaggio.estevaoLanches.repositories.CaixaRepository;
 import com.paullomaggio.estevaoLanches.repositories.ContaRepository;
+import com.paullomaggio.estevaoLanches.repositories.EstornoPagamentoRepository;
 import com.paullomaggio.estevaoLanches.repositories.PagamentoRepository;
+import com.paullomaggio.estevaoLanches.repositories.PedidoRepository;
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.ArgumentCaptor;
 import org.mockito.InOrder;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.security.core.Authentication;
+import org.springframework.security.core.context.SecurityContext;
+import org.springframework.security.core.context.SecurityContextHolder;
 
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
@@ -26,6 +37,7 @@ import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.*;
@@ -36,6 +48,9 @@ class PagamentoServiceTest {
 
     @Mock private PagamentoRepository pagamentoRepository;
     @Mock private ContaRepository contaRepository;
+    @Mock private CaixaRepository caixaRepository;
+    @Mock private EstornoPagamentoRepository estornoPagamentoRepository;
+    @Mock private PedidoRepository pedidoRepository;
 
     private PagamentoService pagamentoService;
 
@@ -43,11 +58,17 @@ class PagamentoServiceTest {
     private UUID pagamentoId;
     private Conta contaMock;
     private Pagamento pagamentoMock;
+    private Caixa caixaAberto;
+    private Pedido pedidoMock;
+
+    private final String USUARIO_TESTE = "usuario@teste.com";
+    private final String SISTEMA_FALLBACK = "SISTEMA";
 
     @BeforeEach
     void setUp() {
-        // Instanciação manual do serviço com os mocks
-        pagamentoService = new PagamentoService(pagamentoRepository, contaRepository);
+        SecurityContextHolder.clearContext();
+
+        pagamentoService = new PagamentoService(pagamentoRepository, contaRepository, caixaRepository, estornoPagamentoRepository, pedidoRepository);
 
         contaId = UUID.randomUUID();
         pagamentoId = UUID.randomUUID();
@@ -66,10 +87,57 @@ class PagamentoServiceTest {
         pagamentoMock.setValorPago(new BigDecimal("100.00"));
         pagamentoMock.setFormaPagamento(FormaPagamento.PIX);
         pagamentoMock.setDataHora(LocalDateTime.now());
-        pagamentoMock.setUsuarioResponsavel("SISTEMA_MOBILE");
+        pagamentoMock.setUsuarioResponsavel(USUARIO_TESTE);
 
-        // As configurações de mock foram movidas para os métodos de teste ou para @BeforeEach em classes @Nested,
-        // conforme a necessidade de cada teste, para evitar UnnecessaryStubbingException.
+        caixaAberto = new Caixa();
+        caixaAberto.setId(UUID.randomUUID());
+        caixaAberto.setStatus(StatusCaixa.ABERTO);
+
+        pedidoMock = new Pedido();
+        pedidoMock.setId(UUID.randomUUID());
+        pedidoMock.setTotal(new BigDecimal("50.00"));
+        pedidoMock.setValorRecebido(BigDecimal.ZERO);
+        pedidoMock.setConta(null); // Pedido direto
+    }
+
+    @AfterEach
+    void tearDown() {
+        SecurityContextHolder.clearContext();
+    }
+
+    private void mockCaixaAberto() {
+        when(caixaRepository.findByStatus(StatusCaixa.ABERTO))
+                .thenReturn(Optional.of(caixaAberto));
+    }
+
+    private void mockAuthenticatedUser(String username) {
+        Authentication authentication = mock(Authentication.class);
+        when(authentication.isAuthenticated()).thenReturn(true);
+        when(authentication.getName()).thenReturn(username);
+
+        SecurityContext securityContext = mock(SecurityContext.class);
+        when(securityContext.getAuthentication()).thenReturn(authentication);
+        SecurityContextHolder.setContext(securityContext);
+    }
+
+    private void mockAnonymousUser() {
+        Authentication authentication = mock(Authentication.class);
+        when(authentication.isAuthenticated()).thenReturn(true);
+        when(authentication.getName()).thenReturn("anonymousUser");
+
+        SecurityContext securityContext = mock(SecurityContext.class);
+        when(securityContext.getAuthentication()).thenReturn(authentication);
+        SecurityContextHolder.setContext(securityContext);
+    }
+
+    // Helper para configurar mocks para um pedido direto com saldo líquido zero
+    private void mockPedidoDiretoComSaldoLiquidoZero() {
+        UUID pedidoId = pedidoMock.getId();
+        when(pedidoRepository.findById(pedidoId)).thenReturn(Optional.of(pedidoMock));
+        when(pagamentoRepository.sumPagamentosPorPedido(pedidoId)).thenReturn(BigDecimal.ZERO);
+        when(pagamentoRepository.findByPedidoId(pedidoId)).thenReturn(Collections.emptyList());
+        // Não é necessário mockar estornoPagamentoRepository.somarValorEstornadoPorPagamentoId
+        // se findByPedidoId retorna uma lista vazia, pois o loop não será executado.
     }
 
     // =========================================================================
@@ -82,11 +150,19 @@ class PagamentoServiceTest {
         @Test
         @DisplayName("CT-001 ao CT-010, CT-015, CT-048 ao CT-053: Fluxo Feliz — Deve registrar o pagamento completo, auditando data, usuário e gerando o DTO corretamente")
         void ct001_deveRegistrarPagamentoComSucesso() {
+            mockCaixaAberto();
+            mockAuthenticatedUser(USUARIO_TESTE);
+
             PagamentoRequestDTO dto = new PagamentoRequestDTO(FormaPagamento.PIX, new BigDecimal("100.00"));
 
-            when(contaRepository.findById(contaId)).thenReturn(Optional.of(contaMock));
+            when(contaRepository.findByIdForUpdate(contaId)).thenReturn(Optional.of(contaMock));
             when(pagamentoRepository.sumPagamentosPorConta(contaId)).thenReturn(BigDecimal.ZERO);
-            when(pagamentoRepository.save(any(Pagamento.class))).thenReturn(pagamentoMock);
+            when(estornoPagamentoRepository.somarValorEstornadoPorContaId(contaId)).thenReturn(BigDecimal.ZERO);
+            when(pagamentoRepository.save(any(Pagamento.class))).thenAnswer(invocation -> {
+                Pagamento p = invocation.getArgument(0);
+                p.setId(UUID.randomUUID());
+                return p;
+            });
             when(contaRepository.save(any(Conta.class))).thenAnswer(invocation -> {
                 Conta savedConta = invocation.getArgument(0);
                 return savedConta;
@@ -97,6 +173,10 @@ class PagamentoServiceTest {
             assertNotNull(resultado);
             verify(pagamentoRepository, times(1)).save(any(Pagamento.class));
             verify(contaRepository, times(1)).save(argThat(Conta::getPago));
+
+            ArgumentCaptor<Pagamento> pagamentoCaptor = ArgumentCaptor.forClass(Pagamento.class);
+            verify(pagamentoRepository).save(pagamentoCaptor.capture());
+            assertEquals(USUARIO_TESTE, pagamentoCaptor.getValue().getUsuarioResponsavel());
         }
 
         @Test
@@ -104,7 +184,7 @@ class PagamentoServiceTest {
         void ct011_deveLancarExceptionSeContaInexistente() {
             PagamentoRequestDTO dto = new PagamentoRequestDTO(FormaPagamento.PIX, new BigDecimal("50.00"));
 
-            when(contaRepository.findById(any())).thenReturn(Optional.empty());
+            when(contaRepository.findByIdForUpdate(any())).thenReturn(Optional.empty());
 
             assertThrows(ResourceNotFoundException.class, () -> pagamentoService.registrarPagamento(UUID.randomUUID(), dto));
             verify(pagamentoRepository, never()).save(any());
@@ -115,10 +195,65 @@ class PagamentoServiceTest {
         void ct014_deveBarrarPagamentoEmContaJaPaga() {
             contaMock.setPago(true);
             PagamentoRequestDTO dto = new PagamentoRequestDTO(FormaPagamento.PIX, new BigDecimal("10.00"));
-            when(contaRepository.findById(contaId)).thenReturn(Optional.of(contaMock));
+            when(contaRepository.findByIdForUpdate(contaId)).thenReturn(Optional.of(contaMock));
 
             assertThrows(BusinessRuleException.class, () -> pagamentoService.registrarPagamento(contaId, dto));
             verify(pagamentoRepository, never()).save(any());
+        }
+
+        @Test
+        @DisplayName("CT-PAG-001: Deve registrar pagamento com 'SISTEMA' se não houver usuário autenticado")
+        void deveRegistrarPagamentoComSistemaSeNaoAutenticado() {
+            mockCaixaAberto();
+
+            PagamentoRequestDTO dto = new PagamentoRequestDTO(FormaPagamento.PIX, new BigDecimal("100.00"));
+
+            when(contaRepository.findByIdForUpdate(contaId)).thenReturn(Optional.of(contaMock));
+            when(pagamentoRepository.sumPagamentosPorConta(contaId)).thenReturn(BigDecimal.ZERO);
+            when(estornoPagamentoRepository.somarValorEstornadoPorContaId(contaId)).thenReturn(BigDecimal.ZERO);
+            when(pagamentoRepository.save(any(Pagamento.class))).thenAnswer(invocation -> {
+                Pagamento p = invocation.getArgument(0);
+                p.setId(UUID.randomUUID());
+                return p;
+            });
+            when(contaRepository.save(any(Conta.class))).thenAnswer(invocation -> {
+                Conta savedConta = invocation.getArgument(0);
+                return savedConta;
+            });
+
+            pagamentoService.registrarPagamento(contaId, dto);
+
+            ArgumentCaptor<Pagamento> pagamentoCaptor = ArgumentCaptor.forClass(Pagamento.class);
+            verify(pagamentoRepository).save(pagamentoCaptor.capture());
+            assertEquals(SISTEMA_FALLBACK, pagamentoCaptor.getValue().getUsuarioResponsavel());
+        }
+
+        @Test
+        @DisplayName("CT-PAG-002: Deve registrar pagamento com 'SISTEMA' se o usuário for anônimo")
+        void deveRegistrarPagamentoComSistemaSeUsuarioAnonimo() {
+            mockCaixaAberto();
+            mockAnonymousUser();
+
+            PagamentoRequestDTO dto = new PagamentoRequestDTO(FormaPagamento.PIX, new BigDecimal("100.00"));
+
+            when(contaRepository.findByIdForUpdate(contaId)).thenReturn(Optional.of(contaMock));
+            when(pagamentoRepository.sumPagamentosPorConta(contaId)).thenReturn(BigDecimal.ZERO);
+            when(estornoPagamentoRepository.somarValorEstornadoPorContaId(contaId)).thenReturn(BigDecimal.ZERO);
+            when(pagamentoRepository.save(any(Pagamento.class))).thenAnswer(invocation -> {
+                Pagamento p = invocation.getArgument(0);
+                p.setId(UUID.randomUUID());
+                return p;
+            });
+            when(contaRepository.save(any(Conta.class))).thenAnswer(invocation -> {
+                Conta savedConta = invocation.getArgument(0);
+                return savedConta;
+            });
+
+            pagamentoService.registrarPagamento(contaId, dto);
+
+            ArgumentCaptor<Pagamento> pagamentoCaptor = ArgumentCaptor.forClass(Pagamento.class);
+            verify(pagamentoRepository).save(pagamentoCaptor.capture());
+            assertEquals(SISTEMA_FALLBACK, pagamentoCaptor.getValue().getUsuarioResponsavel());
         }
     }
 
@@ -132,26 +267,41 @@ class PagamentoServiceTest {
         @Test
         @DisplayName("CT-016 ao CT-019, CT-059: Excedente em Espécie — Permite recebimento acima do saldo exclusivamente se a forma for DINHEIRO (troco)")
         void ct016_devePermitirExcedenteApenasEmDinheiro() {
-            PagamentoRequestDTO dtoDinheiroExcedente = new PagamentoRequestDTO(FormaPagamento.DINHEIRO, new BigDecimal("120.00")); // R$20 de troco
+            mockCaixaAberto();
+            mockAuthenticatedUser(USUARIO_TESTE);
 
-            when(contaRepository.findById(contaId)).thenReturn(Optional.of(contaMock));
+            PagamentoRequestDTO dtoDinheiroExcedente = new PagamentoRequestDTO(FormaPagamento.DINHEIRO, new BigDecimal("120.00"));
+
+            when(contaRepository.findByIdForUpdate(contaId)).thenReturn(Optional.of(contaMock));
             when(pagamentoRepository.sumPagamentosPorConta(contaId)).thenReturn(BigDecimal.ZERO);
-            when(pagamentoRepository.save(any(Pagamento.class))).thenReturn(pagamentoMock);
+            when(estornoPagamentoRepository.somarValorEstornadoPorContaId(contaId)).thenReturn(BigDecimal.ZERO);
+            when(pagamentoRepository.save(any(Pagamento.class))).thenAnswer(invocation -> {
+                Pagamento p = invocation.getArgument(0);
+                p.setId(UUID.randomUUID());
+                return p;
+            });
             when(contaRepository.save(any(Conta.class))).thenAnswer(invocation -> {
                 Conta savedConta = invocation.getArgument(0);
                 return savedConta;
             });
 
             assertDoesNotThrow(() -> pagamentoService.registrarPagamento(contaId, dtoDinheiroExcedente));
+
+            ArgumentCaptor<Pagamento> pagamentoCaptor = ArgumentCaptor.forClass(Pagamento.class);
+            verify(pagamentoRepository).save(pagamentoCaptor.capture());
+            assertEquals(USUARIO_TESTE, pagamentoCaptor.getValue().getUsuarioResponsavel());
         }
 
         @Test
         @DisplayName("CT-018, CT-056 ao CT-058: Rejeição de Excedente Digital — Injeções de valores acima do saldo para cartões ou PIX devem ser bloqueadas")
         void ct018_deveRejeitarExcedenteEmFormasDigitais() {
+            mockCaixaAberto();
+
             PagamentoRequestDTO dtoPixExcedente = new PagamentoRequestDTO(FormaPagamento.PIX, new BigDecimal("100.01"));
 
-            when(contaRepository.findById(contaId)).thenReturn(Optional.of(contaMock));
+            when(contaRepository.findByIdForUpdate(contaId)).thenReturn(Optional.of(contaMock));
             when(pagamentoRepository.sumPagamentosPorConta(contaId)).thenReturn(BigDecimal.ZERO);
+            when(estornoPagamentoRepository.somarValorEstornadoPorContaId(contaId)).thenReturn(BigDecimal.ZERO);
 
             assertThrows(BusinessRuleException.class, () -> pagamentoService.registrarPagamento(contaId, dtoPixExcedente));
             verify(pagamentoRepository, never()).save(any());
@@ -164,7 +314,7 @@ class PagamentoServiceTest {
             PagamentoRequestDTO dtoNegativo = new PagamentoRequestDTO(FormaPagamento.PIX, new BigDecimal("-5.00"));
             PagamentoRequestDTO dtoNull = new PagamentoRequestDTO(FormaPagamento.PIX, null);
 
-            when(contaRepository.findById(contaId)).thenReturn(Optional.of(contaMock));
+            when(contaRepository.findByIdForUpdate(contaId)).thenReturn(Optional.of(contaMock));
 
             assertThrows(BusinessRuleException.class, () -> pagamentoService.registrarPagamento(contaId, dtoZero));
             assertThrows(BusinessRuleException.class, () -> pagamentoService.registrarPagamento(contaId, dtoNegativo));
@@ -174,16 +324,164 @@ class PagamentoServiceTest {
         @Test
         @DisplayName("CT-023, CT-031 ao CT-036: Multi-amortizações — Valida acúmulos parcelados complexos usando a precisão decimal do BigDecimal")
         void ct023_deveProcessarMúltiplosPagamentosParciaisComPrecisao() {
+            mockCaixaAberto();
+            mockAuthenticatedUser(USUARIO_TESTE);
+
             PagamentoRequestDTO dtoParcial = new PagamentoRequestDTO(FormaPagamento.CREDITO, new BigDecimal("33.33"));
 
-            when(contaRepository.findById(contaId)).thenReturn(Optional.of(contaMock));
-            when(pagamentoRepository.sumPagamentosPorConta(contaId)).thenReturn(new BigDecimal("50.00")); // Já pagou metade
-            when(pagamentoRepository.save(any(Pagamento.class))).thenReturn(pagamentoMock);
-            // REMOVIDO: when(contaRepository.save(any(Conta.class))) pois o teste verifica que não é chamado.
+            when(contaRepository.findByIdForUpdate(contaId)).thenReturn(Optional.of(contaMock));
+            when(pagamentoRepository.sumPagamentosPorConta(contaId)).thenReturn(new BigDecimal("50.00"));
+            when(estornoPagamentoRepository.somarValorEstornadoPorContaId(contaId)).thenReturn(BigDecimal.ZERO);
+            when(pagamentoRepository.save(any(Pagamento.class))).thenAnswer(invocation -> {
+                Pagamento p = invocation.getArgument(0);
+                p.setId(UUID.randomUUID());
+                return p;
+            });
 
             assertDoesNotThrow(() -> pagamentoService.registrarPagamento(contaId, dtoParcial));
 
-            verify(contaRepository, never()).save(any()); // R$50 + R$33.33 = R$83.33 (Ainda não quitou, permanece aberta)
+            verify(contaRepository, times(1)).save(argThat(c -> !c.getPago()));
+
+            ArgumentCaptor<Pagamento> pagamentoCaptor = ArgumentCaptor.forClass(Pagamento.class);
+            verify(pagamentoRepository).save(pagamentoCaptor.capture());
+            assertEquals(USUARIO_TESTE, pagamentoCaptor.getValue().getUsuarioResponsavel());
+        }
+
+        @Test
+        @DisplayName("CT-PAG-010: Deve permitir novo pagamento após estorno parcial e quitar a conta")
+        void devePermitirNovoPagamentoAposEstornoParcialEQuitarConta() {
+            mockCaixaAberto();
+            mockAuthenticatedUser(USUARIO_TESTE);
+
+            contaMock.setValorTotal(new BigDecimal("100.00"));
+
+            when(pagamentoRepository.sumPagamentosPorConta(contaId)).thenReturn(new BigDecimal("100.00"));
+            when(estornoPagamentoRepository.somarValorEstornadoPorContaId(contaId)).thenReturn(new BigDecimal("40.00"));
+
+            when(contaRepository.findByIdForUpdate(contaId)).thenReturn(Optional.of(contaMock));
+            when(pagamentoRepository.save(any(Pagamento.class))).thenAnswer(invocation -> {
+                Pagamento p = invocation.getArgument(0);
+                p.setId(UUID.randomUUID());
+                return p;
+            });
+            when(contaRepository.save(any(Conta.class))).thenAnswer(invocation -> {
+                Conta savedConta = invocation.getArgument(0);
+                return savedConta;
+            });
+
+            PagamentoRequestDTO dto = new PagamentoRequestDTO(FormaPagamento.PIX, new BigDecimal("40.00"));
+            pagamentoService.registrarPagamento(contaId, dto);
+
+            assertTrue(contaMock.getPago(), "A conta deveria estar paga após o novo pagamento.");
+
+            verify(pagamentoRepository, times(1)).save(any(Pagamento.class));
+
+            verify(contaRepository, times(1)).save(argThat(c -> c.getPago() == true));
+        }
+
+        @Test
+        @DisplayName("CT-PAG-011: Meio digital aceita exatamente o saldo líquido restante")
+        void meioDigitalAceitaExatamenteSaldoLiquidoRestante() {
+            mockCaixaAberto();
+            mockAuthenticatedUser(USUARIO_TESTE);
+
+            contaMock.setValorTotal(new BigDecimal("100.00"));
+            when(pagamentoRepository.sumPagamentosPorConta(contaId)).thenReturn(new BigDecimal("50.00"));
+            when(estornoPagamentoRepository.somarValorEstornadoPorContaId(contaId)).thenReturn(new BigDecimal("10.00"));
+
+            when(contaRepository.findByIdForUpdate(contaId)).thenReturn(Optional.of(contaMock));
+            when(pagamentoRepository.save(any(Pagamento.class))).thenAnswer(invocation -> {
+                Pagamento p = invocation.getArgument(0);
+                p.setId(UUID.randomUUID());
+                return p;
+            });
+            when(contaRepository.save(any(Conta.class))).thenAnswer(invocation -> {
+                Conta savedConta = invocation.getArgument(0);
+                return savedConta;
+            });
+
+            PagamentoRequestDTO dto = new PagamentoRequestDTO(FormaPagamento.PIX, new BigDecimal("60.00"));
+            pagamentoService.registrarPagamento(contaId, dto);
+
+            assertTrue(contaMock.getPago());
+            verify(pagamentoRepository, times(1)).save(any(Pagamento.class));
+        }
+
+        @Test
+        @DisplayName("CT-PAG-012: Meio digital rejeita valor acima do saldo líquido restante")
+        void meioDigitalRejeitaValorAcimaDoSaldoLiquidoRestante() {
+            mockCaixaAberto();
+
+            contaMock.setValorTotal(new BigDecimal("100.00"));
+            when(pagamentoRepository.sumPagamentosPorConta(contaId)).thenReturn(new BigDecimal("50.00"));
+            when(estornoPagamentoRepository.somarValorEstornadoPorContaId(contaId)).thenReturn(new BigDecimal("10.00"));
+
+            when(contaRepository.findByIdForUpdate(contaId)).thenReturn(Optional.of(contaMock));
+
+            PagamentoRequestDTO dto = new PagamentoRequestDTO(FormaPagamento.PIX, new BigDecimal("60.01"));
+
+            assertThrows(BusinessRuleException.class, () -> pagamentoService.registrarPagamento(contaId, dto));
+            verify(pagamentoRepository, never()).save(any());
+        }
+
+        @Test
+        @DisplayName("CT-PAG-013: Dinheiro aceita valor recebido acima do saldo líquido mas valorPago fica limitado ao saldo")
+        void dinheiroAceitaValorRecebidoAcimaDoSaldoLiquidoMasValorPagoLimitado() {
+            mockCaixaAberto();
+            mockAuthenticatedUser(USUARIO_TESTE);
+
+            contaMock.setValorTotal(new BigDecimal("100.00"));
+            when(pagamentoRepository.sumPagamentosPorConta(contaId)).thenReturn(new BigDecimal("50.00"));
+            when(estornoPagamentoRepository.somarValorEstornadoPorContaId(contaId)).thenReturn(new BigDecimal("10.00"));
+
+            when(contaRepository.findByIdForUpdate(contaId)).thenReturn(Optional.of(contaMock));
+            when(pagamentoRepository.save(any(Pagamento.class))).thenAnswer(invocation -> {
+                Pagamento p = invocation.getArgument(0);
+                p.setId(UUID.randomUUID());
+                return p;
+            });
+            when(contaRepository.save(any(Conta.class))).thenAnswer(invocation -> {
+                Conta savedConta = invocation.getArgument(0);
+                return savedConta;
+            });
+
+            PagamentoRequestDTO dto = new PagamentoRequestDTO(FormaPagamento.DINHEIRO, new BigDecimal("70.00"));
+            pagamentoService.registrarPagamento(contaId, dto);
+
+            assertTrue(contaMock.getPago());
+            ArgumentCaptor<Pagamento> pagamentoCaptor = ArgumentCaptor.forClass(Pagamento.class);
+            verify(pagamentoRepository).save(pagamentoCaptor.capture());
+            assertEquals(new BigDecimal("60.00"), pagamentoCaptor.getValue().getValorPago());
+        }
+
+        @Test
+        @DisplayName("CT-PAG-014: Novo Pagamento após estorno continua vinculado corretamente à Conta")
+        void novoPagamentoAposEstornoVinculadoCorretamenteAConta() {
+            mockCaixaAberto();
+            mockAuthenticatedUser(USUARIO_TESTE);
+
+            contaMock.setValorTotal(new BigDecimal("100.00"));
+            when(pagamentoRepository.sumPagamentosPorConta(contaId)).thenReturn(new BigDecimal("50.00"));
+            when(estornoPagamentoRepository.somarValorEstornadoPorContaId(contaId)).thenReturn(new BigDecimal("10.00"));
+
+            when(contaRepository.findByIdForUpdate(contaId)).thenReturn(Optional.of(contaMock));
+            when(pagamentoRepository.save(any(Pagamento.class))).thenAnswer(invocation -> {
+                Pagamento p = invocation.getArgument(0);
+                p.setId(UUID.randomUUID());
+                return p;
+            });
+            when(contaRepository.save(any(Conta.class))).thenAnswer(invocation -> {
+                Conta savedConta = invocation.getArgument(0);
+                return savedConta;
+            });
+
+            PagamentoRequestDTO dto = new PagamentoRequestDTO(FormaPagamento.PIX, new BigDecimal("60.00"));
+            pagamentoService.registrarPagamento(contaId, dto);
+
+            ArgumentCaptor<Pagamento> pagamentoCaptor = ArgumentCaptor.forClass(Pagamento.class);
+            verify(pagamentoRepository).save(pagamentoCaptor.capture());
+            assertEquals(contaMock, pagamentoCaptor.getValue().getConta());
+            assertNull(pagamentoCaptor.getValue().getPedido());
         }
     }
 
@@ -197,11 +495,19 @@ class PagamentoServiceTest {
         @Test
         @DisplayName("CT-037 ao CT-041: Trigger de Fechamento — Quando a soma dos lançamentos atinge o valor total da subconta, o status muda para pago=true")
         void ct037_deveQuitarContaQuandoValorAlcancado() {
+            mockCaixaAberto();
+            mockAuthenticatedUser(USUARIO_TESTE);
+
             PagamentoRequestDTO dto = new PagamentoRequestDTO(FormaPagamento.PIX, new BigDecimal("100.00"));
 
-            when(contaRepository.findById(contaId)).thenReturn(Optional.of(contaMock));
+            when(contaRepository.findByIdForUpdate(contaId)).thenReturn(Optional.of(contaMock));
             when(pagamentoRepository.sumPagamentosPorConta(contaId)).thenReturn(BigDecimal.ZERO);
-            when(pagamentoRepository.save(any(Pagamento.class))).thenReturn(pagamentoMock);
+            when(estornoPagamentoRepository.somarValorEstornadoPorContaId(contaId)).thenReturn(BigDecimal.ZERO);
+            when(pagamentoRepository.save(any(Pagamento.class))).thenAnswer(invocation -> {
+                Pagamento p = invocation.getArgument(0);
+                p.setId(UUID.randomUUID());
+                return p;
+            });
             when(contaRepository.save(any(Conta.class))).thenAnswer(invocation -> {
                 Conta savedConta = invocation.getArgument(0);
                 return savedConta;
@@ -211,6 +517,10 @@ class PagamentoServiceTest {
 
             assertTrue(contaMock.getPago());
             verify(contaRepository, times(1)).save(contaMock);
+
+            ArgumentCaptor<Pagamento> pagamentoCaptor = ArgumentCaptor.forClass(Pagamento.class);
+            verify(pagamentoRepository).save(pagamentoCaptor.capture());
+            assertEquals(USUARIO_TESTE, pagamentoCaptor.getValue().getUsuarioResponsavel());
         }
 
         @Test
@@ -236,6 +546,9 @@ class PagamentoServiceTest {
         @Test
         @DisplayName("CT-067: Isolamento Financeiro de Subcontas — Liquidações na Conta 1 da mesa não podem dar baixa ou afetar os saldos da Conta 2")
         void ct067_deveManterContasIsoladas() {
+            mockCaixaAberto();
+            mockAuthenticatedUser(USUARIO_TESTE);
+
             Conta conta1 = new Conta();
             conta1.setId(UUID.randomUUID());
             conta1.setValorTotal(BigDecimal.TEN);
@@ -248,9 +561,14 @@ class PagamentoServiceTest {
 
             PagamentoRequestDTO dto = new PagamentoRequestDTO(FormaPagamento.PIX, BigDecimal.TEN);
 
-            when(contaRepository.findById(conta1.getId())).thenReturn(Optional.of(conta1));
+            when(contaRepository.findByIdForUpdate(conta1.getId())).thenReturn(Optional.of(conta1));
             when(pagamentoRepository.sumPagamentosPorConta(conta1.getId())).thenReturn(BigDecimal.ZERO);
-            when(pagamentoRepository.save(any(Pagamento.class))).thenReturn(new Pagamento()); // Retorna uma nova instância para evitar conflitos com pagamentoMock
+            when(estornoPagamentoRepository.somarValorEstornadoPorContaId(conta1.getId())).thenReturn(BigDecimal.ZERO);
+            when(pagamentoRepository.save(any(Pagamento.class))).thenAnswer(invocation -> {
+                Pagamento p = invocation.getArgument(0);
+                p.setId(UUID.randomUUID());
+                return p;
+            });
             when(contaRepository.save(any(Conta.class))).thenAnswer(invocation -> {
                 Conta savedConta = invocation.getArgument(0);
                 return savedConta;
@@ -260,6 +578,10 @@ class PagamentoServiceTest {
 
             assertTrue(conta1.getPago());
             assertFalse(conta2.getPago());
+
+            ArgumentCaptor<Pagamento> pagamentoCaptor = ArgumentCaptor.forClass(Pagamento.class);
+            verify(pagamentoRepository, times(1)).save(pagamentoCaptor.capture());
+            assertEquals(USUARIO_TESTE, pagamentoCaptor.getValue().getUsuarioResponsavel());
         }
     }
 
@@ -273,31 +595,49 @@ class PagamentoServiceTest {
         @Test
         @DisplayName("CT-078 ao CT-082: Corrida de Liquidação — Dois operadores submetendo transações PIX na mesma fração de segundo devem respeitar a barreira de estado")
         void ct078_corridaDePagamentoSimultaneo() {
+            mockCaixaAberto();
+            mockAuthenticatedUser(USUARIO_TESTE);
+
             PagamentoRequestDTO dto = new PagamentoRequestDTO(FormaPagamento.PIX, new BigDecimal("100.00"));
 
-            when(contaRepository.findById(contaId)).thenReturn(Optional.of(contaMock));
+            when(contaRepository.findByIdForUpdate(contaId)).thenReturn(Optional.of(contaMock));
             when(pagamentoRepository.sumPagamentosPorConta(contaId)).thenReturn(BigDecimal.ZERO);
-            when(pagamentoRepository.save(any(Pagamento.class))).thenReturn(pagamentoMock);
+            when(estornoPagamentoRepository.somarValorEstornadoPorContaId(contaId)).thenReturn(BigDecimal.ZERO);
+            when(pagamentoRepository.save(any(Pagamento.class))).thenAnswer(invocation -> {
+                Pagamento p = invocation.getArgument(0);
+                p.setId(UUID.randomUUID());
+                return p;
+            });
             when(contaRepository.save(any(Conta.class))).thenAnswer(invocation -> {
                 Conta savedConta = invocation.getArgument(0);
                 return savedConta;
             });
 
-            // Operador 1 processa a baixa com sucesso e muta o estado da instância em memória
             pagamentoService.registrarPagamento(contaId, dto);
 
-            // Operador 2 tenta injetar o pagamento paralelo concorrente, esbarrando na barreira de estado já mutado
             assertThrows(BusinessRuleException.class, () -> pagamentoService.registrarPagamento(contaId, dto));
-            verify(pagamentoRepository, times(1)).save(any(Pagamento.class)); // Garante escrita ÚNICA
+            verify(pagamentoRepository, times(1)).save(any(Pagamento.class));
+
+            ArgumentCaptor<Pagamento> pagamentoCaptor = ArgumentCaptor.forClass(Pagamento.class);
+            verify(pagamentoRepository).save(pagamentoCaptor.capture());
+            assertEquals(USUARIO_TESTE, pagamentoCaptor.getValue().getUsuarioResponsavel());
         }
 
         @Test
         @DisplayName("CT-087 ao CT-092, CT-098: Rastreabilidade Estrita — Impõe que toda persistência financeira possua auditoria contábil completa")
         void ct087_deveGarantirOrdemEAuditoriaTransacional() {
+            mockCaixaAberto();
+            mockAuthenticatedUser(USUARIO_TESTE);
+
             PagamentoRequestDTO dto = new PagamentoRequestDTO(FormaPagamento.PIX, new BigDecimal("100.00"));
-            when(contaRepository.findById(contaId)).thenReturn(Optional.of(contaMock));
+            when(contaRepository.findByIdForUpdate(contaId)).thenReturn(Optional.of(contaMock));
             when(pagamentoRepository.sumPagamentosPorConta(contaId)).thenReturn(BigDecimal.ZERO);
-            when(pagamentoRepository.save(any(Pagamento.class))).thenReturn(pagamentoMock);
+            when(estornoPagamentoRepository.somarValorEstornadoPorContaId(contaId)).thenReturn(BigDecimal.ZERO);
+            when(pagamentoRepository.save(any(Pagamento.class))).thenAnswer(invocation -> {
+                Pagamento p = invocation.getArgument(0);
+                p.setId(UUID.randomUUID());
+                return p;
+            });
             when(contaRepository.save(any(Conta.class))).thenAnswer(invocation -> {
                 Conta savedConta = invocation.getArgument(0);
                 return savedConta;
@@ -305,12 +645,292 @@ class PagamentoServiceTest {
 
             pagamentoService.registrarPagamento(contaId, dto);
 
-            // Rastreabilidade por verificação cronológica síncrona
-            InOrder ordemFiscal = inOrder(contaRepository, pagamentoRepository);
-            ordemFiscal.verify(contaRepository).findById(contaId);
+            InOrder ordemFiscal = inOrder(contaRepository, pagamentoRepository, estornoPagamentoRepository);
+            ordemFiscal.verify(contaRepository).findByIdForUpdate(contaId);
             ordemFiscal.verify(pagamentoRepository).sumPagamentosPorConta(contaId);
+            ordemFiscal.verify(estornoPagamentoRepository).somarValorEstornadoPorContaId(contaId);
             ordemFiscal.verify(pagamentoRepository).save(any(Pagamento.class));
             ordemFiscal.verify(contaRepository).save(any(Conta.class));
+
+            ArgumentCaptor<Pagamento> pagamentoCaptor = ArgumentCaptor.forClass(Pagamento.class);
+            verify(pagamentoRepository).save(pagamentoCaptor.capture());
+            assertEquals(USUARIO_TESTE, pagamentoCaptor.getValue().getUsuarioResponsavel());
+        }
+    }
+
+    // =========================================================================
+    // SESSÃO 6 — REGISTRAR PAGAMENTO PEDIDO
+    // =========================================================================
+    @Nested
+    @DisplayName("6. Camada de Blindagem — Fluxo de Pagamento de Pedido")
+    class RegistrarPagamentoPedidoTests {
+
+        @Test
+        @DisplayName("CT-PAG-003: Deve registrar pagamento de pedido com usuário autenticado")
+        void deveRegistrarPagamentoPedidoComUsuarioAutenticado() {
+            mockCaixaAberto();
+            mockAuthenticatedUser(USUARIO_TESTE);
+            mockPedidoDiretoComSaldoLiquidoZero(); // Configura os mocks para saldo zero
+
+            PagamentoRequestDTO dto = new PagamentoRequestDTO(FormaPagamento.PIX, new BigDecimal("50.00"));
+
+            when(pedidoRepository.findByIdForUpdate(pedidoMock.getId())).thenReturn(Optional.of(pedidoMock));
+            when(pagamentoRepository.save(any(Pagamento.class))).thenAnswer(invocation -> {
+                Pagamento p = invocation.getArgument(0);
+                p.setId(UUID.randomUUID());
+                return p;
+            });
+            when(pedidoRepository.save(any(Pedido.class))).thenReturn(pedidoMock);
+
+            PagamentoResponseDTO resultado = pagamentoService.registrarPagamentoPedido(pedidoMock.getId(), dto);
+
+            assertNotNull(resultado);
+            verify(pagamentoRepository, times(1)).save(any(Pagamento.class));
+            verify(pedidoRepository, times(1)).save(any(Pedido.class));
+
+            ArgumentCaptor<Pagamento> pagamentoCaptor = ArgumentCaptor.forClass(Pagamento.class);
+            verify(pagamentoRepository).save(pagamentoCaptor.capture());
+            assertEquals(USUARIO_TESTE, pagamentoCaptor.getValue().getUsuarioResponsavel());
+            assertEquals(pedidoMock.getTotal(), pagamentoCaptor.getValue().getValorPago());
+        }
+
+        @Test
+        @DisplayName("CT-PAG-004: Deve registrar pagamento de pedido com 'SISTEMA' se não houver usuário autenticado")
+        void deveRegistrarPagamentoPedidoComSistemaSeNaoAutenticado() {
+            mockCaixaAberto();
+            mockPedidoDiretoComSaldoLiquidoZero(); // Configura os mocks para saldo zero
+
+            PagamentoRequestDTO dto = new PagamentoRequestDTO(FormaPagamento.PIX, new BigDecimal("50.00"));
+
+            when(pedidoRepository.findByIdForUpdate(pedidoMock.getId())).thenReturn(Optional.of(pedidoMock));
+            when(pagamentoRepository.save(any(Pagamento.class))).thenAnswer(invocation -> {
+                Pagamento p = invocation.getArgument(0);
+                p.setId(UUID.randomUUID());
+                return p;
+            });
+            when(pedidoRepository.save(any(Pedido.class))).thenReturn(pedidoMock);
+
+            pagamentoService.registrarPagamentoPedido(pedidoMock.getId(), dto);
+
+            ArgumentCaptor<Pagamento> pagamentoCaptor = ArgumentCaptor.forClass(Pagamento.class);
+            verify(pagamentoRepository).save(pagamentoCaptor.capture());
+            verify(pedidoRepository, times(1)).save(any(Pedido.class));
+            assertEquals(SISTEMA_FALLBACK, pagamentoCaptor.getValue().getUsuarioResponsavel());
+            assertEquals(pedidoMock.getTotal(), pagamentoCaptor.getValue().getValorPago());
+        }
+
+        @Test
+        @DisplayName("CT-PAG-005: Deve lançar BusinessRuleException se já existir saldo financeiro para o pedido")
+        void deveLancarExcecaoSePagamentoPedidoDuplicado() {
+            PagamentoRequestDTO dto = new PagamentoRequestDTO(FormaPagamento.PIX, new BigDecimal("50.00"));
+
+            UUID pedidoId = pedidoMock.getId();
+            Pagamento pagamentoAnterior = new Pagamento();
+            pagamentoAnterior.setId(UUID.randomUUID());
+            pagamentoAnterior.setPedido(pedidoMock);
+            pagamentoAnterior.setValorPago(new BigDecimal("10.00"));
+
+            when(pedidoRepository.findByIdForUpdate(pedidoId)).thenReturn(Optional.of(pedidoMock));
+            when(pedidoRepository.findById(pedidoId)).thenReturn(Optional.of(pedidoMock)); // Para getSaldoLiquidoPagoPorPedido
+            when(pagamentoRepository.sumPagamentosPorPedido(pedidoId)).thenReturn(new BigDecimal("10.00")); // Saldo bruto de 10
+            when(pagamentoRepository.findByPedidoId(pedidoId)).thenReturn(List.of(pagamentoAnterior));
+            when(estornoPagamentoRepository.somarValorEstornadoPorPagamentoId(pagamentoAnterior.getId())).thenReturn(BigDecimal.ZERO); // Sem estorno
+
+            assertThrows(BusinessRuleException.class, () -> pagamentoService.registrarPagamentoPedido(pedidoMock.getId(), dto));
+            verify(pagamentoRepository, never()).save(any());
+            verify(pedidoRepository, never()).save(any());
+        }
+
+        @Test
+        @DisplayName("CT-PAG-006: Deve lançar BusinessRuleException se valor recebido for insuficiente")
+        void deveLancarExcecaoSeValorRecebidoInsuficiente() {
+            mockPedidoDiretoComSaldoLiquidoZero(); // Configura os mocks para saldo zero
+
+            PagamentoRequestDTO dto = new PagamentoRequestDTO(FormaPagamento.PIX, new BigDecimal("40.00"));
+
+            when(pedidoRepository.findByIdForUpdate(pedidoMock.getId())).thenReturn(Optional.of(pedidoMock));
+
+            assertThrows(BusinessRuleException.class, () -> pagamentoService.registrarPagamentoPedido(pedidoMock.getId(), dto));
+            verify(pagamentoRepository, never()).save(any());
+            verify(pedidoRepository, never()).save(any());
+        }
+
+        @Test
+        @DisplayName("CT-PAG-007: Deve lançar BusinessRuleException se valor recebido exceder o total para formas digitais")
+        void deveLancarExcecaoSeValorExcederParaFormasDigitais() {
+            mockPedidoDiretoComSaldoLiquidoZero(); // Configura os mocks para saldo zero
+
+            PagamentoRequestDTO dto = new PagamentoRequestDTO(FormaPagamento.PIX, new BigDecimal("60.00"));
+
+            when(pedidoRepository.findByIdForUpdate(pedidoMock.getId())).thenReturn(Optional.of(pedidoMock));
+
+            assertThrows(BusinessRuleException.class, () -> pagamentoService.registrarPagamentoPedido(pedidoMock.getId(), dto));
+            verify(pagamentoRepository, never()).save(any());
+            verify(pedidoRepository, never()).save(any());
+        }
+
+        @Test
+        @DisplayName("CT-PAG-008: Deve permitir valor recebido excedente para DINHEIRO (troco) em pedido")
+        void devePermitirValorExcedenteParaDinheiroEmPedido() {
+            mockCaixaAberto();
+            mockAuthenticatedUser(USUARIO_TESTE);
+            mockPedidoDiretoComSaldoLiquidoZero(); // Configura os mocks para saldo zero
+
+            PagamentoRequestDTO dto = new PagamentoRequestDTO(FormaPagamento.DINHEIRO, new BigDecimal("60.00"));
+
+            when(pedidoRepository.findByIdForUpdate(pedidoMock.getId())).thenReturn(Optional.of(pedidoMock));
+            when(pagamentoRepository.save(any(Pagamento.class))).thenAnswer(invocation -> {
+                Pagamento p = invocation.getArgument(0);
+                p.setId(UUID.randomUUID());
+                return p;
+            });
+            when(pedidoRepository.save(any(Pedido.class))).thenReturn(pedidoMock);
+
+            PagamentoResponseDTO resultado = pagamentoService.registrarPagamentoPedido(pedidoMock.getId(), dto);
+
+            assertNotNull(resultado);
+            verify(pagamentoRepository, times(1)).save(any(Pagamento.class));
+            verify(pedidoRepository, times(1)).save(any(Pedido.class));
+            ArgumentCaptor<Pagamento> pagamentoCaptor = ArgumentCaptor.forClass(Pagamento.class);
+            verify(pagamentoRepository).save(pagamentoCaptor.capture());
+            assertEquals(USUARIO_TESTE, pagamentoCaptor.getValue().getUsuarioResponsavel());
+            assertEquals(pedidoMock.getTotal(), pagamentoCaptor.getValue().getValorPago());
+        }
+
+        @Test
+        @DisplayName("CT-PAG-009: Deve lançar BusinessRuleException se o caixa estiver fechado ao registrar pagamento de pedido")
+        void deveLancarExcecaoSeCaixaFechadoAoRegistrarPagamentoPedido() {
+            mockPedidoDiretoComSaldoLiquidoZero(); // Configura os mocks para saldo zero
+
+            PagamentoRequestDTO dto = new PagamentoRequestDTO(FormaPagamento.PIX, new BigDecimal("50.00"));
+
+            when(pedidoRepository.findByIdForUpdate(pedidoMock.getId())).thenReturn(Optional.of(pedidoMock));
+            when(caixaRepository.findByStatus(StatusCaixa.ABERTO)).thenReturn(Optional.empty());
+
+            assertThrows(BusinessRuleException.class, () -> pagamentoService.registrarPagamentoPedido(pedidoMock.getId(), dto));
+            verify(pagamentoRepository, never()).save(any());
+            verify(pedidoRepository, never()).save(any());
+        }
+    }
+
+    // =========================================================================
+    // SESSÃO 7 — CÁLCULO DE SALDO LÍQUIDO
+    // =========================================================================
+    @Nested
+    @DisplayName("7. Camada de Blindagem — Cálculo de Saldo Líquido (Pagamentos - Estornos)")
+    class SaldoLiquidoTests {
+
+        @Test
+        @DisplayName("CT-SALDO-001: Deve calcular saldo líquido corretamente para uma conta sem estornos")
+        void deveCalcularSaldoLiquidoContaSemEstornos() {
+            when(pagamentoRepository.sumPagamentosPorConta(contaId)).thenReturn(new BigDecimal("100.00"));
+            when(estornoPagamentoRepository.somarValorEstornadoPorContaId(contaId)).thenReturn(BigDecimal.ZERO);
+
+            BigDecimal saldoLiquido = pagamentoService.getSaldoLiquidoPagoPorConta(contaId);
+
+            assertEquals(new BigDecimal("100.00"), saldoLiquido);
+        }
+
+        @Test
+        @DisplayName("CT-SALDO-002: Deve calcular saldo líquido corretamente para uma conta com estornos parciais")
+        void deveCalcularSaldoLiquidoContaComEstornosParciais() {
+            when(pagamentoRepository.sumPagamentosPorConta(contaId)).thenReturn(new BigDecimal("100.00"));
+            when(estornoPagamentoRepository.somarValorEstornadoPorContaId(contaId)).thenReturn(new BigDecimal("40.00"));
+
+            BigDecimal saldoLiquido = pagamentoService.getSaldoLiquidoPagoPorConta(contaId);
+
+            assertEquals(new BigDecimal("60.00"), saldoLiquido);
+        }
+
+        @Test
+        @DisplayName("CT-SALDO-003: Deve calcular saldo líquido corretamente para uma conta com estornos totais")
+        void deveCalcularSaldoLiquidoContaComEstornosTotais() {
+            when(pagamentoRepository.sumPagamentosPorConta(contaId)).thenReturn(new BigDecimal("100.00"));
+            when(estornoPagamentoRepository.somarValorEstornadoPorContaId(contaId)).thenReturn(new BigDecimal("100.00"));
+
+            BigDecimal saldoLiquido = pagamentoService.getSaldoLiquidoPagoPorConta(contaId);
+
+            assertThat(saldoLiquido).isEqualByComparingTo(BigDecimal.ZERO);
+        }
+
+        @Test
+        @DisplayName("CT-SALDO-004: Deve calcular saldo líquido corretamente para um pedido direto sem estornos")
+        void deveCalcularSaldoLiquidoPedidoDiretoSemEstornos() {
+            UUID pedidoId = pedidoMock.getId();
+            pedidoMock.setConta(null);
+            when(pedidoRepository.findById(pedidoId)).thenReturn(Optional.of(pedidoMock));
+            when(pagamentoRepository.sumPagamentosPorPedido(pedidoId)).thenReturn(new BigDecimal("50.00"));
+            when(pagamentoRepository.findByPedidoId(pedidoId)).thenReturn(Collections.emptyList());
+
+            BigDecimal saldoLiquido = pagamentoService.getSaldoLiquidoPagoPorPedido(pedidoId);
+
+            assertEquals(new BigDecimal("50.00"), saldoLiquido);
+        }
+
+        @Test
+        @DisplayName("CT-SALDO-005: Deve calcular saldo líquido corretamente para um pedido direto com estornos")
+        void deveCalcularSaldoLiquidoPedidoDiretoComEstornos() {
+            UUID pedidoId = pedidoMock.getId();
+            UUID pagamentoPedidoId = UUID.randomUUID();
+            pedidoMock.setConta(null);
+
+            Pagamento pagamentoDoPedido = new Pagamento();
+            pagamentoDoPedido.setId(pagamentoPedidoId);
+            pagamentoDoPedido.setPedido(pedidoMock);
+            pagamentoDoPedido.setValorPago(new BigDecimal("50.00"));
+
+            when(pedidoRepository.findById(pedidoId)).thenReturn(Optional.of(pedidoMock));
+            when(pagamentoRepository.sumPagamentosPorPedido(pedidoId)).thenReturn(new BigDecimal("50.00"));
+            when(pagamentoRepository.findByPedidoId(pedidoId)).thenReturn(List.of(pagamentoDoPedido));
+            when(estornoPagamentoRepository.somarValorEstornadoPorPagamentoId(pagamentoPedidoId)).thenReturn(new BigDecimal("20.00"));
+
+            BigDecimal saldoLiquido = pagamentoService.getSaldoLiquidoPagoPorPedido(pedidoId);
+
+            assertEquals(new BigDecimal("30.00"), saldoLiquido);
+        }
+
+        @Test
+        @DisplayName("CT-SALDO-006: Deve calcular saldo líquido para um pedido vinculado a uma conta")
+        void deveCalcularSaldoLiquidoPedidoVinculadoAConta() {
+            UUID pedidoId = pedidoMock.getId();
+            UUID contaAssociadaId = UUID.randomUUID();
+            Conta contaAssociada = new Conta();
+            contaAssociada.setId(contaAssociadaId);
+            pedidoMock.setConta(contaAssociada);
+
+            when(pedidoRepository.findById(pedidoId)).thenReturn(Optional.of(pedidoMock));
+            when(pagamentoRepository.sumPagamentosPorConta(contaAssociadaId)).thenReturn(new BigDecimal("150.00"));
+            when(estornoPagamentoRepository.somarValorEstornadoPorContaId(contaAssociadaId)).thenReturn(new BigDecimal("50.00"));
+
+            BigDecimal saldoLiquido = pagamentoService.getSaldoLiquidoPagoPorPedido(pedidoId);
+
+            assertEquals(new BigDecimal("100.00"), saldoLiquido);
+            verify(pagamentoRepository, never()).sumPagamentosPorPedido(any());
+        }
+
+        @Test
+        @DisplayName("CT-SALDO-007: Deve retornar zero se não houver pagamentos nem estornos para conta")
+        void deveRetornarZeroSeSemPagamentosNemEstornosConta() {
+            when(pagamentoRepository.sumPagamentosPorConta(contaId)).thenReturn(BigDecimal.ZERO);
+            when(estornoPagamentoRepository.somarValorEstornadoPorContaId(contaId)).thenReturn(BigDecimal.ZERO);
+
+            BigDecimal saldoLiquido = pagamentoService.getSaldoLiquidoPagoPorConta(contaId);
+
+            assertEquals(BigDecimal.ZERO, saldoLiquido);
+        }
+
+        @Test
+        @DisplayName("CT-SALDO-008: Deve retornar zero se não houver pagamentos nem estornos para pedido direto")
+        void deveRetornarZeroSeSemPagamentosNemEstornosPedidoDireto() {
+            UUID pedidoId = pedidoMock.getId();
+            pedidoMock.setConta(null);
+            when(pedidoRepository.findById(pedidoId)).thenReturn(Optional.of(pedidoMock));
+            when(pagamentoRepository.sumPagamentosPorPedido(pedidoId)).thenReturn(BigDecimal.ZERO);
+            when(pagamentoRepository.findByPedidoId(pedidoId)).thenReturn(Collections.emptyList());
+
+            BigDecimal saldoLiquido = pagamentoService.getSaldoLiquidoPagoPorPedido(pedidoId);
+
+            assertEquals(BigDecimal.ZERO, saldoLiquido);
         }
     }
 }

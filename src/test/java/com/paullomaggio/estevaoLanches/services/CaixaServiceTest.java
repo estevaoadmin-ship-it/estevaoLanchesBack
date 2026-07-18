@@ -11,6 +11,7 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.ArgumentCaptor;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
@@ -20,6 +21,7 @@ import java.time.LocalDateTime;
 import java.util.*;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
@@ -30,11 +32,13 @@ import static org.mockito.Mockito.*;
 class CaixaServiceTest {
 
     @Mock private CaixaRepository caixaRepository;
-    @Mock private PagamentoRepository pagamentoRepository;
+    @Mock private PagamentoRepository pagamentoRepository; // Manter para obterResumoTurno
     @Mock private PedidoRepository pedidoRepository;
     @Mock private ContaRepository contaRepository;
     @Mock private MovimentacaoCaixaRepository movimentacaoCaixaRepository;
     @Mock private UsuarioRepository usuarioRepository;
+    @Mock private EstornoPagamentoRepository estornoPagamentoRepository;
+    @Mock private PagamentoService pagamentoService; // NOVA DEPENDÊNCIA
 
     @InjectMocks private CaixaService caixaService;
 
@@ -355,17 +359,30 @@ class CaixaServiceTest {
         void setUpConta() {
             pedidoId = UUID.randomUUID();
             Comanda comanda = new Comanda(); comanda.setId(UUID.randomUUID());
-            // 🎯 FIX: Construtor da Conta atualizado com os novos campos nomeResponsavel e telefoneResponsavel
             conta = new Conta(UUID.randomUUID(), 1, false, new BigDecimal("100.00"), null, null, comanda, null, new ArrayList<>(), new ArrayList<>());
             pedido = new Pedido(); pedido.setId(pedidoId); pedido.setConta(conta);
         }
 
         @Test
-        @DisplayName("Deve abater amortizações e calcular o saldo devedor restante com precisão matemática")
-        void deveCalcularSaldoParcial() {
+        @DisplayName("CT-SALDO-001: Saldo sem Pagamento = valorTotal.")
+        void saldoSemPagamento_deveSerValorTotal() {
+            when(pedidoRepository.findById(pedidoId)).thenReturn(Optional.of(pedido));
+            when(contaRepository.findByComandaIdAndNumeroConta(any(), eq(1))).thenReturn(Optional.of(conta));
+            when(pagamentoRepository.sumPagamentosPorConta(conta.getId())).thenReturn(BigDecimal.ZERO);
+            when(estornoPagamentoRepository.somarValorEstornadoPorContaId(conta.getId())).thenReturn(BigDecimal.ZERO);
+
+            BigDecimal saldo = caixaService.calcularSaldoDevedorDaConta(pedidoId, 1);
+
+            assertThat(saldo).isEqualByComparingTo(new BigDecimal("100.00"));
+        }
+
+        @Test
+        @DisplayName("CT-SALDO-002: Saldo com Pagamento parcial = restante.")
+        void saldoComPagamentoParcial_deveSerRestante() {
             when(pedidoRepository.findById(pedidoId)).thenReturn(Optional.of(pedido));
             when(contaRepository.findByComandaIdAndNumeroConta(any(), eq(1))).thenReturn(Optional.of(conta));
             when(pagamentoRepository.sumPagamentosPorConta(conta.getId())).thenReturn(new BigDecimal("40.00"));
+            when(estornoPagamentoRepository.somarValorEstornadoPorContaId(conta.getId())).thenReturn(BigDecimal.ZERO);
 
             BigDecimal saldo = caixaService.calcularSaldoDevedorDaConta(pedidoId, 1);
 
@@ -373,15 +390,67 @@ class CaixaServiceTest {
         }
 
         @Test
-        @DisplayName("Garantia de Não-Negativo: Se o pagamento for superior ao valor total da conta, o saldo deve ser retido em zero")
-        void deveRetornarZeroSePagamentosSuperaremValorDaConta() {
+        @DisplayName("CT-SALDO-003: Saldo após estorno parcial aumenta corretamente.")
+        void saldoAposEstornoParcial_aumentaCorretamente() {
             when(pedidoRepository.findById(pedidoId)).thenReturn(Optional.of(pedido));
             when(contaRepository.findByComandaIdAndNumeroConta(any(), eq(1))).thenReturn(Optional.of(conta));
-            when(pagamentoRepository.sumPagamentosPorConta(conta.getId())).thenReturn(new BigDecimal("120.00"));
+            when(pagamentoRepository.sumPagamentosPorConta(conta.getId())).thenReturn(new BigDecimal("80.00")); // Pagou 80
+            when(estornoPagamentoRepository.somarValorEstornadoPorContaId(conta.getId())).thenReturn(new BigDecimal("30.00")); // Estornou 30
 
+            // Saldo líquido pago = 80 - 30 = 50
+            // Saldo devedor = 100 - 50 = 50
+            BigDecimal saldo = caixaService.calcularSaldoDevedorDaConta(pedidoId, 1);
+
+            assertThat(saldo).isEqualByComparingTo(new BigDecimal("50.00"));
+        }
+
+        @Test
+        @DisplayName("CT-SALDO-004: Saldo após estorno total volta ao valor devido correspondente.")
+        void saldoAposEstornoTotal_voltaAoValorDevido() {
+            when(pedidoRepository.findById(pedidoId)).thenReturn(Optional.of(pedido));
+            when(contaRepository.findByComandaIdAndNumeroConta(any(), eq(1))).thenReturn(Optional.of(conta));
+            when(pagamentoRepository.sumPagamentosPorConta(conta.getId())).thenReturn(new BigDecimal("100.00")); // Pagou 100
+            when(estornoPagamentoRepository.somarValorEstornadoPorContaId(conta.getId())).thenReturn(new BigDecimal("100.00")); // Estornou 100
+
+            // Saldo líquido pago = 100 - 100 = 0
+            // Saldo devedor = 100 - 0 = 100
+            BigDecimal saldo = caixaService.calcularSaldoDevedorDaConta(pedidoId, 1);
+
+            assertThat(saldo).isEqualByComparingTo(new BigDecimal("100.00"));
+        }
+
+        @Test
+        @DisplayName("CT-SALDO-005: Saldo nunca fica negativo.")
+        void saldoNuncaFicaNegativo() {
+            when(pedidoRepository.findById(pedidoId)).thenReturn(Optional.of(pedido));
+            when(contaRepository.findByComandaIdAndNumeroConta(any(), eq(1))).thenReturn(Optional.of(conta));
+            when(pagamentoRepository.sumPagamentosPorConta(conta.getId())).thenReturn(new BigDecimal("120.00")); // Pagou 120
+            when(estornoPagamentoRepository.somarValorEstornadoPorContaId(conta.getId())).thenReturn(BigDecimal.ZERO); // Sem estorno
+
+            // Saldo líquido pago = 120 - 0 = 120
+            // Saldo devedor = 100 - 120 = -20 (mas deve ser 0)
             BigDecimal saldo = caixaService.calcularSaldoDevedorDaConta(pedidoId, 1);
 
             assertThat(saldo).isEqualByComparingTo(BigDecimal.ZERO);
+        }
+
+        @Test
+        @DisplayName("Deve lançar ResourceNotFoundException se o pedido de origem não for localizado")
+        void deveLancarExceptionSePedidoOrigemNaoLocalizado() {
+            when(pedidoRepository.findById(pedidoId)).thenReturn(Optional.empty());
+
+            assertThrows(ResourceNotFoundException.class, () -> caixaService.calcularSaldoDevedorDaConta(pedidoId, 1));
+            verify(contaRepository, never()).findByComandaIdAndNumeroConta(any(), any());
+        }
+
+        @Test
+        @DisplayName("Deve lançar ResourceNotFoundException se a subconta não existir na mesa correspondente")
+        void deveLancarExceptionSeSubcontaNaoExistir() {
+            when(pedidoRepository.findById(pedidoId)).thenReturn(Optional.of(pedido));
+            when(contaRepository.findByComandaIdAndNumeroConta(any(), eq(1))).thenReturn(Optional.empty());
+
+            assertThrows(ResourceNotFoundException.class, () -> caixaService.calcularSaldoDevedorDaConta(pedidoId, 1));
+            verify(pagamentoRepository, never()).sumPagamentosPorConta(any());
         }
     }
 
@@ -395,97 +464,130 @@ class CaixaServiceTest {
         private Pedido pedido;
         private Conta conta;
         private UUID pedidoId;
+        private UUID contaId;
+        private Comanda comanda;
 
         @BeforeEach
         void setUpFaturamento() {
             pedidoId = UUID.randomUUID();
-            Comanda comanda = new Comanda(); comanda.setId(UUID.randomUUID());
-            // 🎯 FIX: Construtor da Conta atualizado com os novos campos nomeResponsavel e telefoneResponsavel
-            conta = new Conta(UUID.randomUUID(), 1, false, new BigDecimal("50.00"), null, null, comanda, null, new ArrayList<>(), new ArrayList<>());
-            pedido = new Pedido(); pedido.setId(pedidoId); pedido.setConta(conta);
+            contaId = UUID.randomUUID();
+            comanda = new Comanda();
+            comanda.setId(UUID.randomUUID());
+            conta = new Conta(contaId, 1, false, new BigDecimal("50.00"), null, null, comanda, null, new ArrayList<>(), new ArrayList<>());
+            pedido = new Pedido();
+            pedido.setId(pedidoId);
+            pedido.setConta(conta);
         }
 
         @Test
         @DisplayName("Fluxo Parcial Feliz: Deve processar amortização e manter a subconta com status pago = false")
         void deveRegistrarPagamentoParcialComSucesso() {
-            ContaPagamentoRequestDTO dto = new ContaPagamentoRequestDTO(1, new BigDecimal("20.00"), FormaPagamento.PIX);
-            when(caixaRepository.existsByStatus(StatusCaixa.ABERTO)).thenReturn(true);
+            ContaPagamentoRequestDTO contaPagamentoDto = new ContaPagamentoRequestDTO(1, new BigDecimal("20.00"), FormaPagamento.PIX);
+            PagamentoRequestDTO pagamentoRequestDto = new PagamentoRequestDTO(contaPagamentoDto.formaPagamento(), contaPagamentoDto.valorRecebido());
+            PagamentoResponseDTO respostaEsperada = mock(PagamentoResponseDTO.class);
+
             when(pedidoRepository.findById(pedidoId)).thenReturn(Optional.of(pedido));
-            when(contaRepository.findByComandaIdAndNumeroConta(any(), eq(1))).thenReturn(Optional.of(conta));
-            when(pagamentoRepository.sumPagamentosPorConta(conta.getId())).thenReturn(new BigDecimal("20.00"));
+            when(contaRepository.findByComandaIdAndNumeroConta(comanda.getId(), contaPagamentoDto.numeroConta())).thenReturn(Optional.of(conta));
+            when(pagamentoService.registrarPagamento(contaId, pagamentoRequestDto)).thenReturn(respostaEsperada);
 
-            caixaService.registrarPagamentoFracionado(pedidoId, dto);
+            caixaService.registrarPagamentoFracionado(pedidoId, contaPagamentoDto);
 
-            assertThat(conta.getPago()).isFalse(); // Ainda restam 30 reais
-            verify(pagamentoRepository, times(1)).save(any(Pagamento.class));
-            verify(contaRepository, never()).save(conta);
+            verify(pagamentoService, times(1)).registrarPagamento(contaId, pagamentoRequestDto);
+            verify(pedidoRepository, times(1)).findById(pedidoId);
+            verify(contaRepository, times(1)).findByComandaIdAndNumeroConta(comanda.getId(), contaPagamentoDto.numeroConta());
+            verifyNoMoreInteractions(pagamentoRepository, caixaRepository); // Remove obsolete stubs
         }
 
         @Test
         @DisplayName("Fluxo Totalizador Feliz: Deve registrar pagamento da última cota e flaggar a subconta como quitada (pago = true)")
         void deveQuitarContaAoAtingirValorTotal() {
-            ContaPagamentoRequestDTO dto = new ContaPagamentoRequestDTO(1, new BigDecimal("30.00"), FormaPagamento.DINHEIRO);
-            when(caixaRepository.existsByStatus(StatusCaixa.ABERTO)).thenReturn(true);
+            ContaPagamentoRequestDTO contaPagamentoDto = new ContaPagamentoRequestDTO(1, new BigDecimal("50.00"), FormaPagamento.DINHEIRO);
+            PagamentoRequestDTO pagamentoRequestDto = new PagamentoRequestDTO(contaPagamentoDto.formaPagamento(), contaPagamentoDto.valorRecebido());
+            PagamentoResponseDTO respostaEsperada = mock(PagamentoResponseDTO.class);
+
             when(pedidoRepository.findById(pedidoId)).thenReturn(Optional.of(pedido));
-            when(contaRepository.findByComandaIdAndNumeroConta(any(), eq(1))).thenReturn(Optional.of(conta));
-            // Simula que com este pagamento de 30 reais, a soma histórica atingiu os 50 reais totais da conta
-            when(pagamentoRepository.sumPagamentosPorConta(conta.getId())).thenReturn(new BigDecimal("50.00"));
+            when(contaRepository.findByComandaIdAndNumeroConta(comanda.getId(), contaPagamentoDto.numeroConta())).thenReturn(Optional.of(conta));
+            when(pagamentoService.registrarPagamento(contaId, pagamentoRequestDto)).thenReturn(respostaEsperada);
 
-            caixaService.registrarPagamentoFracionado(pedidoId, dto);
+            caixaService.registrarPagamentoFracionado(pedidoId, contaPagamentoDto);
 
-            assertThat(conta.getPago()).isTrue(); // Totalmente quitada
-            verify(contaRepository, times(1)).save(conta);
+            verify(pagamentoService, times(1)).registrarPagamento(contaId, pagamentoRequestDto);
+            verify(pedidoRepository, times(1)).findById(pedidoId);
+            verify(contaRepository, times(1)).findByComandaIdAndNumeroConta(comanda.getId(), contaPagamentoDto.numeroConta());
+            verifyNoMoreInteractions(pagamentoRepository, caixaRepository); // Remove obsolete stubs
         }
 
         @Test
         @DisplayName("Deve barrar qualquer tentativa de processamento de faturamento se o caixa geral constar como fechado")
         void deveFalharSeCaixaTiverFechado() {
-            ContaPagamentoRequestDTO dto = new ContaPagamentoRequestDTO(1, BigDecimal.TEN, FormaPagamento.DEBITO);
-            when(caixaRepository.existsByStatus(StatusCaixa.ABERTO)).thenReturn(false);
+            ContaPagamentoRequestDTO contaPagamentoDto = new ContaPagamentoRequestDTO(1, BigDecimal.TEN, FormaPagamento.DEBITO);
+            PagamentoRequestDTO pagamentoRequestDto = new PagamentoRequestDTO(contaPagamentoDto.formaPagamento(), contaPagamentoDto.valorRecebido());
 
-            assertThrows(BusinessRuleException.class, () -> caixaService.registrarPagamentoFracionado(pedidoId, dto));
+            when(pedidoRepository.findById(pedidoId)).thenReturn(Optional.of(pedido));
+            when(contaRepository.findByComandaIdAndNumeroConta(comanda.getId(), contaPagamentoDto.numeroConta())).thenReturn(Optional.of(conta));
+            when(pagamentoService.registrarPagamento(contaId, pagamentoRequestDto))
+                    .thenThrow(new BusinessRuleException("Operação bloqueada! O caixa geral está fechado no momento."));
+
+            BusinessRuleException exception = assertThrows(BusinessRuleException.class, () ->
+                    caixaService.registrarPagamentoFracionado(pedidoId, contaPagamentoDto)
+            );
+
+            assertEquals("Operação bloqueada! O caixa geral está fechado no momento.", exception.getMessage());
+            verify(pagamentoService, times(1)).registrarPagamento(contaId, pagamentoRequestDto);
+            verify(pedidoRepository, times(1)).findById(pedidoId);
+            verify(contaRepository, times(1)).findByComandaIdAndNumeroConta(comanda.getId(), contaPagamentoDto.numeroConta());
+            verifyNoMoreInteractions(pagamentoRepository, caixaRepository); // Remove obsolete stubs
         }
 
         @Test
-        @DisplayName("CENÁRIO D (ORIGINAL): Deve rejeitar pagamento se a subconta informada já estiver marcada como paga")
+        @DisplayName("Deve rejeitar pagamento se a subconta informada já estiver marcada como paga ou valor excede saldo")
         void deveRejeitarPagamentoAcimaDoSaldoDaConta() {
-            Comanda comanda = new Comanda(); comanda.setId(UUID.randomUUID());
+            ContaPagamentoRequestDTO contaPagamentoDto = new ContaPagamentoRequestDTO(1, new BigDecimal("100.00"), FormaPagamento.CREDITO);
+            PagamentoRequestDTO pagamentoRequestDto = new PagamentoRequestDTO(contaPagamentoDto.formaPagamento(), contaPagamentoDto.valorRecebido());
 
-            // 🎯 TRAVA DE SEGURANÇA MANTIDA: Configura a conta como PAGO = TRUE de partida
-            // 🎯 FIX: Construtor da Conta atualizado com os novos campos nomeResponsavel e telefoneResponsavel
-            Conta contaJaPaga = new Conta(UUID.randomUUID(), 1, true, new BigDecimal("50.00"), null, null, comanda, null, new ArrayList<>(), new ArrayList<>());
-            pedido.setConta(contaJaPaga);
-
-            when(caixaRepository.existsByStatus(StatusCaixa.ABERTO)).thenReturn(true);
             when(pedidoRepository.findById(pedidoId)).thenReturn(Optional.of(pedido));
-            when(contaRepository.findByComandaIdAndNumeroConta(any(UUID.class), eq(1))).thenReturn(Optional.of(contaJaPaga));
+            when(contaRepository.findByComandaIdAndNumeroConta(comanda.getId(), contaPagamentoDto.numeroConta())).thenReturn(Optional.of(conta));
+            when(pagamentoService.registrarPagamento(contaId, pagamentoRequestDto))
+                    .thenThrow(new BusinessRuleException("Valor informado excede o saldo devedor atual."));
 
-            ContaPagamentoRequestDTO dtoInvalido = new ContaPagamentoRequestDTO(1, new BigDecimal("10.00"), FormaPagamento.CREDITO);
-
-            assertThrows(BusinessRuleException.class, () ->
-                    caixaService.registrarPagamentoFracionado(pedidoId, dtoInvalido)
+            BusinessRuleException exception = assertThrows(BusinessRuleException.class, () ->
+                    caixaService.registrarPagamentoFracionado(pedidoId, contaPagamentoDto)
             );
-            verify(pagamentoRepository, never()).save(any());
+
+            assertEquals("Valor informado excede o saldo devedor atual.", exception.getMessage());
+            verify(pagamentoService, times(1)).registrarPagamento(contaId, pagamentoRequestDto);
+            verify(pedidoRepository, times(1)).findById(pedidoId);
+            verify(contaRepository, times(1)).findByComandaIdAndNumeroConta(comanda.getId(), contaPagamentoDto.numeroConta());
+            verifyNoMoreInteractions(pagamentoRepository, caixaRepository); // Remove obsolete stubs
         }
 
         @Test
         @DisplayName("Regressão — Testar integridade e consistência sequencial de pagamentos em lotes sucessivos")
         void testeRegressaoMultiplosPagamentosSucessivos() {
-            when(caixaRepository.existsByStatus(StatusCaixa.ABERTO)).thenReturn(true);
+            ContaPagamentoRequestDTO contaPagamentoDto1 = new ContaPagamentoRequestDTO(1, new BigDecimal("15.00"), FormaPagamento.PIX);
+            PagamentoRequestDTO pagamentoRequestDto1 = new PagamentoRequestDTO(contaPagamentoDto1.formaPagamento(), contaPagamentoDto1.valorRecebido());
+            PagamentoResponseDTO respostaEsperada1 = mock(PagamentoResponseDTO.class);
+
+            ContaPagamentoRequestDTO contaPagamentoDto2 = new ContaPagamentoRequestDTO(1, new BigDecimal("35.00"), FormaPagamento.DINHEIRO);
+            PagamentoRequestDTO pagamentoRequestDto2 = new PagamentoRequestDTO(contaPagamentoDto2.formaPagamento(), contaPagamentoDto2.valorRecebido());
+            PagamentoResponseDTO respostaEsperada2 = mock(PagamentoResponseDTO.class);
+
             when(pedidoRepository.findById(pedidoId)).thenReturn(Optional.of(pedido));
-            when(contaRepository.findByComandaIdAndNumeroConta(any(), eq(1))).thenReturn(Optional.of(conta));
+            when(contaRepository.findByComandaIdAndNumeroConta(comanda.getId(), contaPagamentoDto1.numeroConta())).thenReturn(Optional.of(conta));
+            when(pagamentoService.registrarPagamento(contaId, pagamentoRequestDto1)).thenReturn(respostaEsperada1);
+            when(pagamentoService.registrarPagamento(contaId, pagamentoRequestDto2)).thenReturn(respostaEsperada2);
 
-            // Primeiro Drop de Amortização
-            when(pagamentoRepository.sumPagamentosPorConta(conta.getId())).thenReturn(new BigDecimal("15.00"));
-            caixaService.registrarPagamentoFracionado(pedidoId, new ContaPagamentoRequestDTO(1, new BigDecimal("15.00"), FormaPagamento.PIX));
-            assertThat(conta.getPago()).isFalse();
+            // Primeiro pagamento
+            caixaService.registrarPagamentoFracionado(pedidoId, contaPagamentoDto1);
 
-            // Segundo Drop de Amortização que estoura a meta
-            when(pagamentoRepository.sumPagamentosPorConta(conta.getId())).thenReturn(new BigDecimal("50.01"));
-            caixaService.registrarPagamentoFracionado(pedidoId, new ContaPagamentoRequestDTO(1, new BigDecimal("35.01"), FormaPagamento.DINHEIRO));
+            // Segundo pagamento
+            caixaService.registrarPagamentoFracionado(pedidoId, contaPagamentoDto2);
 
-            assertThat(conta.getPago()).isTrue();
-            verify(contaRepository, times(1)).save(conta);
+            verify(pagamentoService, times(1)).registrarPagamento(contaId, pagamentoRequestDto1);
+            verify(pagamentoService, times(1)).registrarPagamento(contaId, pagamentoRequestDto2);
+            verify(pedidoRepository, times(2)).findById(pedidoId);
+            verify(contaRepository, times(2)).findByComandaIdAndNumeroConta(comanda.getId(), contaPagamentoDto1.numeroConta());
+            verifyNoMoreInteractions(pagamentoRepository, caixaRepository); // Remove obsolete stubs
         }
     }
 
@@ -500,14 +602,43 @@ class CaixaServiceTest {
         @DisplayName("Deve computar e somar faturamentos segregados por canais e bater a prova real exata da gaveta de dinheiro")
         void deveCalcularResumoTurnoCorretamente() {
             when(caixaRepository.findByStatus(StatusCaixa.ABERTO)).thenReturn(Optional.of(caixaAbertoPadrao));
+            
+            // Pagamentos
+            Pagamento p1 = new Pagamento();
+            p1.setId(UUID.randomUUID());
+            p1.setCaixa(caixaAbertoPadrao);
+            p1.setValorPago(new BigDecimal("100.00"));
+            p1.setFormaPagamento(FormaPagamento.DINHEIRO);
 
-            // Configura pagamentos cronológicos cruzando a linha do tempo após a abertura do caixa atual
-            Pagamento p1 = new Pagamento(UUID.randomUUID(), null, new BigDecimal("100.00"), FormaPagamento.DINHEIRO, LocalDateTime.now(), "OP");
-            Pagamento p2 = new Pagamento(UUID.randomUUID(), null, new BigDecimal("200.00"), FormaPagamento.PIX, LocalDateTime.now(), "OP");
-            Pagamento p3 = new Pagamento(UUID.randomUUID(), null, new BigDecimal("50.00"), FormaPagamento.CREDITO, LocalDateTime.now(), "OP");
-            when(pagamentoRepository.findAll()).thenReturn(List.of(p1, p2, p3));
+            Pagamento p2 = new Pagamento();
+            p2.setId(UUID.randomUUID());
+            p2.setCaixa(caixaAbertoPadrao);
+            p2.setValorPago(new BigDecimal("200.00"));
+            p2.setFormaPagamento(FormaPagamento.PIX);
 
-            // 🎯 FIX DEFINITIVO: Instanciação por setters para evitar acoplamento com construtores ausentes
+            Pagamento p3 = new Pagamento();
+            p3.setId(UUID.randomUUID());
+            p3.setCaixa(caixaAbertoPadrao);
+            p3.setValorPago(new BigDecimal("50.00"));
+            p3.setFormaPagamento(FormaPagamento.CREDITO);
+
+            when(pagamentoRepository.findByCaixaId(caixaAbertoPadrao.getId())).thenReturn(List.of(p1, p2, p3));
+
+            // Estornos
+            EstornoPagamento e1 = new EstornoPagamento();
+            e1.setId(UUID.randomUUID());
+            e1.setCaixa(caixaAbertoPadrao);
+            e1.setPagamento(p1); // Estorno do pagamento em dinheiro
+            e1.setValorEstornado(new BigDecimal("10.00"));
+
+            EstornoPagamento e2 = new EstornoPagamento();
+            e2.setId(UUID.randomUUID());
+            e2.setCaixa(caixaAbertoPadrao);
+            e2.setPagamento(p2); // Estorno do pagamento em pix
+            e2.setValorEstornado(new BigDecimal("20.00"));
+
+            when(estornoPagamentoRepository.findByCaixaId(caixaAbertoPadrao.getId())).thenReturn(List.of(e1, e2));
+
             MovimentacaoCaixa m1 = new MovimentacaoCaixa();
             m1.setId(UUID.randomUUID());
             m1.setTipo(TipoMovimentacao.SUPRIMENTO);
@@ -526,77 +657,131 @@ class CaixaServiceTest {
 
             when(movimentacaoCaixaRepository.findByCaixaIdAndEstornadaFalse(caixaId)).thenReturn(List.of(m1, m2));
 
-            // Configura contador da esteira operacional da cozinha (Ignorando finalizados/cancelados)
             when(pedidoRepository.countPedidosAtivos(StatusPedido.FINALIZADO, StatusPedido.CANCELADO)).thenReturn(4L);
 
             CaixaResumoResponseDTO resumo = caixaService.obterResumoTurno();
 
-            // Provas Reais Totais
-            assertThat(resumo.faturamentoTotal()).isEqualByComparingTo(new BigDecimal("350.00"));
-            assertThat(resumo.faturamentoDinheiro()).isEqualByComparingTo(new BigDecimal("100.00"));
-            assertThat(resumo.faturamentoPix()).isEqualByComparingTo(new BigDecimal("200.00"));
-            assertThat(resumo.faturamentoCredito()).isEqualByComparingTo(new BigDecimal("50.00"));
-            assertThat(resumo.faturamentoDebito()).isEqualByComparingTo(BigDecimal.ZERO);
+            // Faturamento Total: (100+200+50) - (10+20) = 350 - 30 = 320
+            assertThat(resumo.faturamentoTotal()).isEqualByComparingTo(new BigDecimal("320.00"));
+            // Faturamento Dinheiro: 100 - 10 = 90
+            assertThat(resumo.faturamentoDinheiro()).isEqualByComparingTo(new BigDecimal("90.00"));
+            // Faturamento Pix: 200 - 20 = 180
+            assertThat(resumo.faturamentoPix()).isEqualByComparingTo(new BigDecimal("180.00"));
+            // Faturamento Credito: 50 - 0 = 50
+            assertThat(resumo.faturamentoCredito())
+                    .isEqualByComparingTo(new BigDecimal("50.00"));
 
-            // Fórmula Atômica de Auditoria: Abertura (150) + Dinheiro (100) + Suprimentos (50) - Sangrias (20) = 280.00
-            assertThat(resumo.totalEsperadoGaveta()).isEqualByComparingTo(new BigDecimal("280.00"));
+            // Total Esperado Gaveta: Abertura (150) + Faturamento Dinheiro (90) + Suprimentos (50) - Sangrias (20) = 150 + 90 + 50 - 20 = 270
+            assertThat(resumo.totalEsperadoGaveta()).isEqualByComparingTo(new BigDecimal("270.00"));
             assertThat(resumo.pedidosEmEsteira()).isEqualTo(4L);
         }
 
-    // =========================================================================
-    // 13. MATRIZ — SIMULAÇÃO DETERMINÍSTICA DE CONCORRÊNCIA EM PDV
-    // =========================================================================
-    @Nested
-    @DisplayName("13. Camada de Blindagem — Testes de Concorrência Simulada")
-    class ConcorrenciaSimuladaTests {
-
+        // =========================================================================
+        // 13. MATRIZ — SIMULAÇÃO DETERMINÍSTICA DE CONCORRÊNCIA EM PDV
+        // =========================================================================
+        @Nested
+        @DisplayName("13. Camada de Blindagem — Testes de Concorrência Simulada")
+        class ConcorrenciaSimuladaTests {
 
             @Test
             @DisplayName("Concorrência — Bloqueio de faturamento enquanto outra estação dispara o fechamento geral do caixa")
             void simulacaoFaturamentoSobreFechamento() {
                 UUID pedidoId = UUID.randomUUID();
-                ContaPagamentoRequestDTO dto = new ContaPagamentoRequestDTO(1, BigDecimal.ONE, FormaPagamento.PIX);
+                UUID contaId = UUID.randomUUID();
 
-                when(caixaRepository.existsByStatus(StatusCaixa.ABERTO))
-                        .thenReturn(true)
-                        .thenReturn(false);
+                Comanda comanda = new Comanda();
+                comanda.setId(UUID.randomUUID());
+
+                Conta conta = new Conta(
+                        contaId,
+                        1,
+                        false,
+                        BigDecimal.TEN,
+                        null,
+                        null,
+                        comanda,
+                        null,
+                        new ArrayList<>(),
+                        new ArrayList<>()
+                );
 
                 Pedido pedido = new Pedido();
-                Comanda comanda = new Comanda(); comanda.setId(UUID.randomUUID());
-                // 🎯 FIX: Construtor da Conta atualizado com os novos campos nomeResponsavel e telefoneResponsavel
-                Conta conta = new Conta(UUID.randomUUID(), 1, false, BigDecimal.TEN, null, null, comanda, null, new ArrayList<>(), new ArrayList<>());
+                pedido.setId(pedidoId);
                 pedido.setConta(conta);
 
-                when(pedidoRepository.findById(pedidoId)).thenReturn(Optional.of(pedido));
-                when(contaRepository.findByComandaIdAndNumeroConta(any(), eq(1))).thenReturn(Optional.of(conta));
+                ContaPagamentoRequestDTO contaPagamentoDto =
+                        new ContaPagamentoRequestDTO(
+                                1,
+                                BigDecimal.ONE,
+                                FormaPagamento.PIX
+                        );
 
-                // 🎯 FIX DEFINITIVO: Evita NullPointerException ao simular o retorno da soma histórica de amortizações
-                when(pagamentoRepository.sumPagamentosPorConta(any())).thenReturn(BigDecimal.ONE);
+                PagamentoRequestDTO pagamentoRequestDto =
+                        new PagamentoRequestDTO(
+                                contaPagamentoDto.formaPagamento(),
+                                contaPagamentoDto.valorRecebido()
+                        );
 
-                // Execução do faturamento simultâneo
-                caixaService.registrarPagamentoFracionado(pedidoId, dto);
+                PagamentoResponseDTO respostaEsperada =
+                        mock(PagamentoResponseDTO.class);
 
-                verify(pagamentoRepository, times(1)).save(any(Pagamento.class));
+                when(pedidoRepository.findById(pedidoId))
+                        .thenReturn(Optional.of(pedido));
+
+                when(contaRepository.findByComandaIdAndNumeroConta(
+                        comanda.getId(),
+                        contaPagamentoDto.numeroConta()
+                )).thenReturn(Optional.of(conta));
+
+                when(pagamentoService.registrarPagamento(
+                        contaId,
+                        pagamentoRequestDto
+                )).thenReturn(respostaEsperada);
+
+                caixaService.registrarPagamentoFracionado(
+                        pedidoId,
+                        contaPagamentoDto
+                );
+
+                verify(pagamentoService, times(1))
+                        .registrarPagamento(contaId, pagamentoRequestDto);
+
+                verify(pedidoRepository, times(1))
+                        .findById(pedidoId);
+
+                verify(contaRepository, times(1))
+                        .findByComandaIdAndNumeroConta(
+                                comanda.getId(),
+                                contaPagamentoDto.numeroConta()
+                        );
+
+                verifyNoMoreInteractions(
+                        pagamentoRepository,
+                        caixaRepository
+                );
+            }
+
+        // =========================================================================
+        // 14 & 15. MATRIZ — AUDITORIA ATÓMICA E INTEGRALIDADE DE REGRESSÃO
+        // =========================================================================
+        @Nested
+        @DisplayName("14 & 15. Camada de Blindagem — Auditoria de Metadados e Linha do Tempo")
+        class AuditoriaERegressaoIntegradaTests {
+
+            @Test
+            @DisplayName("Auditoria — Fluxo de fechamento deve registrar rigorosamente a autoria das modificações para conformidade fiscal")
+            void devePreservarUsuariosETrilhasDeAuditoria() {
+                CaixaFechamentoRequestDTO dto = new CaixaFechamentoRequestDTO(BigDecimal.ONE, "Auditoria 15");
+                when(caixaRepository.findByStatus(StatusCaixa.ABERTO)).thenReturn(Optional.of(caixaAbertoPadrao));
+                when(usuarioRepository.findAll()).thenReturn(List.of(usuarioPadrao));
+
+                caixaService.fecharCaixa(dto);
+
+                assertThat(caixaAbertoPadrao.getUsuarioAbertura().getNome()).isEqualTo("ESTEVAO ADMINISTRADOR");
+                assertThat(caixaAbertoPadrao.getUsuarioFechamento().getNome()).isEqualTo("ESTEVAO ADMINISTRADOR");
+                assertThat(caixaAbertoPadrao.getJustificativaDiferenca()).isEqualTo("Auditoria 15");
             }
         }
-
-    // =========================================================================
-    // 14 & 15. MATRIZ — AUDITORIA ATÓMICA E INTEGRALIDADE DE REGRESSÃO
-    // =========================================================================
-    @Nested
-    @DisplayName("14 & 15. Camada de Blindagem — Auditoria de Metadados e Linha do Tempo")
-    class AuditoriaERegressaoIntegradaTests {
-
-        @Test
-        @DisplayName("Auditoria — Fluxo de fechamento deve registrar rigorosamente a autoria das modificações para conformidade fiscal")
-        void devePreservarUsuariosETrilhasDeAuditoria() {
-            CaixaFechamentoRequestDTO dto = new CaixaFechamentoRequestDTO(BigDecimal.ONE, "Auditoria 15");
-            when(caixaRepository.findByStatus(StatusCaixa.ABERTO)).thenReturn(Optional.of(caixaAbertoPadrao));
-            when(usuarioRepository.findAll()).thenReturn(List.of(usuarioPadrao));
-
-            caixaService.fecharCaixa(dto);
-
-            assertThat(caixaAbertoPadrao.getUsuarioAbertura().getNome()).isEqualTo("ESTEVAO ADMINISTRADOR");
-            assertThat(caixaAbertoPadrao.getUsuarioFechamento().getNome()).isEqualTo("ESTEVAO ADMINISTRADOR");
-            assertThat(caixaAbertoPadrao.getJustificativaDiferenca()).isEqualTo("Auditoria 15");
-        }}}}
+    }
+}
+}

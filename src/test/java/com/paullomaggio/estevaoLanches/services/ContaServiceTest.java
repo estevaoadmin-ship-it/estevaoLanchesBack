@@ -174,34 +174,8 @@ class ContaServiceTest {
     }
 
     // =========================================================================
-    // BLOCO 7 — LIQUIDAÇÃO FINANCEIRA (BAIXA NO CAIXA)
+    // BLOCO 7 — LIQUIDAÇÃO FINANCEIRA (BAIXA NO CAIXA) -- REMOVIDO
     // =========================================================================
-    @Nested
-    @DisplayName("7. Camada de Blindagem — Liquidação e Baixa de Contas")
-    class LiquidacaoFinanceiraTests {
-
-        @Test
-        @DisplayName("CT-036 ao CT-039: Baixa com Sucesso — Liquidar conta em aberto deve mutar o token pago para true e registrar no banco")
-        void deveLiquidarContaAberta() {
-            when(contaRepository.findById(contaId)).thenReturn(Optional.of(contaMock));
-            when(contaRepository.save(any(Conta.class))).thenAnswer(i -> i.getArgument(0));
-
-            ContaResponseDTO resultado = contaService.liquidarConta(contaId);
-
-            assertTrue(resultado.pago());
-            verify(contaRepository, times(1)).save(contaMock);
-        }
-
-        @Test
-        @DisplayName("CT-041 e CT-042: Violação de Baixa — Tentar liquidar uma conta que já consta como paga no sistema deve estourar BusinessRuleException")
-        void deveImpedirLiquidarContaJaPaga() {
-            contaMock.setPago(true);
-            when(contaRepository.findById(contaId)).thenReturn(Optional.of(contaMock));
-
-            assertThrows(BusinessRuleException.class, () -> contaService.liquidarConta(contaId));
-            verify(contaRepository, never()).save(any());
-        }
-    }
 
     // =========================================================================
     // BLOCO 8 & 9 — EXCLUSÃO FÍSICA E CADASTRO DE SALDO DEVEDOR
@@ -239,23 +213,8 @@ class ContaServiceTest {
     @DisplayName("10, 11 & 14. Camada de Blindagem — Linha do Tempo do Salão e Regressão")
     class LinhaTempoMesaTests {
 
-        @Test
-        @DisplayName("CT-060 ao CT-068, CT-082: Isolamento Financeiro — Multi-contas na mesma mesa devem operar de forma independente: pagar a Conta 1 não quita a Conta 2")
-        void deveGarantirIsolamentoEntreSubcontasDaMesa() {
-            // 🎯 FIX: Construtor da Conta atualizado com os novos campos nomeResponsavel e telefoneResponsavel
-            // Cliente artificial não é mais criado, então o construtor da Conta não deve mais recebê-lo
-            Conta conta1 = new Conta(UUID.randomUUID(), 1, false, BigDecimal.ZERO, null, null, comandaMock, null, new ArrayList<>(), new ArrayList<>());
-            Conta conta2 = new Conta(UUID.randomUUID(), 2, false, BigDecimal.ZERO, null, null, comandaMock, null, new ArrayList<>(), new ArrayList<>());
-
-            when(contaRepository.findById(conta1.getId())).thenReturn(Optional.of(conta1));
-            when(contaRepository.save(any(Conta.class))).thenAnswer(i -> i.getArgument(0));
-
-            // Liquida apenas a partição 1
-            ContaResponseDTO res1 = contaService.liquidarConta(conta1.getId());
-
-            assertTrue(res1.pago());
-            assertFalse(conta2.getPago()); // A partição 2 permanece aberta para consumo
-        }
+        // Teste removido: CT-060 ao CT-068, CT-082: Isolamento Financeiro — Multi-contas na mesma mesa devem operar de forma independente: pagar a Conta 1 não quita a Conta 2
+        // Motivo: O método liquidarConta foi removido.
     }
 
     // =========================================================================
@@ -288,17 +247,7 @@ class ContaServiceTest {
             verify(clienteRepository, never()).save(any(Cliente.class)); // Adicionado: Cliente não deve ser salvo
         }
 
-        @Test
-        @DisplayName("CT-071: Corrida de Liquidação — Dois caixas clicando em 'Liquidar' na mesma fração de segundo")
-        void corridaLiquidacaoSimultanea() {
-            when(contaRepository.findById(contaId)).thenReturn(Optional.of(contaMock));
-            when(contaRepository.save(any(Conta.class))).thenAnswer(i -> i.getArgument(0));
-
-            // Caixa 1 liquida a conta
-            contaService.liquidarConta(contaId);
-
-            // Caixa 2 tenta liquidar na sequência paralela e esbarra no status mutado
-            assertThrows(BusinessRuleException.class, () -> contaService.liquidarConta(contaId));
-        }
+        // Teste removido: CT-071: Corrida de Liquidação — Dois caixas clicando em 'Liquidar' na mesma fração de segundo
+        // Motivo: O método liquidarConta foi removido.
     }
 }

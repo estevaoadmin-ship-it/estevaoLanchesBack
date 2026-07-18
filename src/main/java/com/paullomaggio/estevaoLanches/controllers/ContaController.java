@@ -66,19 +66,6 @@ public class ContaController {
         return ResponseEntity.ok(contaService.listarPorComanda(comandaId));
     }
 
-    @Operation(summary = "Liquida uma conta (marca como paga)",
-               description = "Marca uma conta específica como paga, encerrando seu ciclo financeiro.")
-    @ApiResponses(value = {
-            @ApiResponse(responseCode = "200", description = "Conta liquidada com sucesso"),
-            @ApiResponse(responseCode = "404", description = "Conta não encontrada"),
-            @ApiResponse(responseCode = "401", description = "Não autenticado"),
-            @ApiResponse(responseCode = "403", description = "Sem permissão (apenas ADMIN ou GARCOM)")
-    })
-    @PutMapping("/{id}/pagar")
-    public ResponseEntity<ContaResponseDTO> liquidarConta(@PathVariable UUID id) {
-        return ResponseEntity.ok(contaService.liquidarConta(id));
-    }
-
     @Operation(summary = "Deleta uma conta",
                description = "Remove uma conta do sistema. Esta operação geralmente é restrita e usada para correção de erros.")
     @ApiResponses(value = {

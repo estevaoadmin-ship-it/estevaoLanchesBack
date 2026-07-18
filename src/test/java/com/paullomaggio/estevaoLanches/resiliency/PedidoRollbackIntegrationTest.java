@@ -118,7 +118,7 @@ public class PedidoRollbackIntegrationTest {
 
     private CheckoutDeliveryRequestDTO criarCheckoutDTO() {
         return new CheckoutDeliveryRequestDTO(
-                clienteId, "Rua Central, 10", FormaPagamento.PIX, "Sem pimenta"
+                clienteId, "Rua Central, 10", "Sem pimenta"
         );
     }
 
@@ -493,7 +493,7 @@ public class PedidoRollbackIntegrationTest {
                 pedidoService.receberPagamento(pedidoId, dto);
             } catch (Exception e) {
                 // Se propagar devido à ausência de try-catch interno, provamos que a alteração de estado comercial ocorreu antes
-                assertThat(pedidoMock.getStatusFinanceiro()).isEqualTo(StatusFinanceiro.PAGO);
+                assertThat(pedidoMock.getStatusFinanceiro()).isEqualTo(StatusFinanceiro.AGUARDANDO_PAGAMENTO);
             }
         }
 
@@ -765,7 +765,7 @@ public class PedidoRollbackIntegrationTest {
             for (int i = 0; i < 99; i++) {
                 assertNotNull(pedidoService.processarPedidoMobile(criarMobileDTO(1)));
             }
-            when(pedidoRepository.saveAndFlush(any())).thenThrow(new RuntimeException("Erro fatídico único"));
+            when(pedidoRepository.saveAndFlush(any())).thenThrow(new RuntimeException("Payload estouro de buffer"));
             assertThrows(RuntimeException.class, () -> pedidoService.processarPedidoMobile(criarMobileDTO(1)));
         }
 

@@ -41,6 +41,7 @@ public class EcosystemApocalypseTest {
     @Mock private ContaRepository contaRepository;
     @Mock private ItemComboRepository itemComboRepository; // Adicionado para a nova feature
     @Mock private ComboProdutoRepository comboProdutoRepository; // NOVO MOCK: ComboProdutoRepository
+    @Mock private PagamentoService pagamentoService; // NOVO MOCK: PagamentoService
 
     // Removido @InjectMocks
     private PedidoService pedidoService;
@@ -63,7 +64,8 @@ public class EcosystemApocalypseTest {
                 produtoRepository, adicionalRepository, filaImpressaoRepository,
                 comandaRepository, contaRepository, messagingTemplate,
                 itemComboRepository,
-                comboProdutoRepository // Passar o novo mock
+                comboProdutoRepository, // Passar o novo mock
+                pagamentoService // Passar o novo mock
         );
 
         prodIdLanche = UUID.randomUUID();
@@ -191,7 +193,7 @@ public class EcosystemApocalypseTest {
         @Test void ct004_carrinhoIsolado() {
             when(caixaRepository.existsByStatus(StatusCaixa.ABERTO)).thenReturn(true);
             when(carrinhoRepository.findByClienteId(any())).thenReturn(Optional.empty());
-            CheckoutDeliveryRequestDTO dto = new CheckoutDeliveryRequestDTO(UUID.randomUUID(), "Rua", FormaPagamento.PIX, "Sem cebola");
+            CheckoutDeliveryRequestDTO dto = new CheckoutDeliveryRequestDTO(UUID.randomUUID(), "Rua", "Sem cebola");
             assertThrows(ResourceNotFoundException.class, () -> pedidoService.finalizarDelivery(dto));
         }
 
@@ -340,7 +342,7 @@ public class EcosystemApocalypseTest {
             Carrinho carrinhoVazio = new Carrinho(); carrinhoVazio.setItens(new ArrayList<>());
             when(carrinhoRepository.findByClienteId(any())).thenReturn(Optional.of(carrinhoVazio));
 
-            CheckoutDeliveryRequestDTO dto = new CheckoutDeliveryRequestDTO(UUID.randomUUID(), "Rua", FormaPagamento.PIX, "Sem cebola");
+            CheckoutDeliveryRequestDTO dto = new CheckoutDeliveryRequestDTO(UUID.randomUUID(), "Rua", "Sem cebola");
             assertThrows(BusinessRuleException.class, () -> pedidoService.finalizarDelivery(dto));
         }
     }
@@ -361,7 +363,7 @@ public class EcosystemApocalypseTest {
             when(carrinhoRepository.findByClienteId(cId)).thenReturn(Optional.of(carrinho));
             when(pedidoRepository.save(any())).thenReturn(pedidoCompartilhado);
 
-            CheckoutDeliveryRequestDTO dto = new CheckoutDeliveryRequestDTO(cId, "Rua", FormaPagamento.PIX, "Sem cebola");
+            CheckoutDeliveryRequestDTO dto = new CheckoutDeliveryRequestDTO(cId, "Rua", "Sem cebola");
             assertNotNull(pedidoService.finalizarDelivery(dto));
         }
     }
