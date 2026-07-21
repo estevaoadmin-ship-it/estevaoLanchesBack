@@ -13,6 +13,7 @@ import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
+import org.mockito.ArgumentMatchers;
 import org.mockito.Captor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
@@ -24,6 +25,8 @@ import org.springframework.security.core.context.SecurityContextHolder; // Impor
 
 import java.math.BigDecimal;
 import java.util.*;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.stream.Collectors;
 import java.util.stream.StreamSupport;
 
@@ -52,6 +55,8 @@ class PedidoServiceTest {
     @Mock private ComboProdutoRepository comboProdutoRepository;
     @Mock private PagamentoService pagamentoService;
     @Mock private ContaDeliveryRepository contaDeliveryRepository; // Novo Mock para PedidoCoreService
+    @Mock private AdicionalValidationService adicionalValidationService; // NEW
+    @Mock private ClienteRepository clienteRepository; // NEW
 
     @Captor private ArgumentCaptor<Pedido> pedidoCaptor;
     @Captor private ArgumentCaptor<PagamentoRequestDTO> pagamentoRequestDTOCaptor;
@@ -79,7 +84,9 @@ class PedidoServiceTest {
                 comandaRepository, contaRepository, messagingTemplate,
                 itemComboRepository,
                 comboProdutoRepository,
-                pagamentoService
+                pagamentoService,
+                adicionalValidationService, // NEW
+                clienteRepository // NEW
         );
 
         // Instanciação do PedidoCoreService para os testes de cancelamento de delivery
@@ -116,6 +123,7 @@ class PedidoServiceTest {
         pedidoMock = new Pedido(); pedidoMock.setId(pedidoId); pedidoMock.setConta(contaMock);
         pedidoMock.setStatus(StatusPedido.RECEBIDO); pedidoMock.setStatusFinanceiro(StatusFinanceiro.AGUARDANDO_PAGAMENTO);
         pedidoMock.setTotal(new BigDecimal("35.00")); pedidoMock.setCliente(clienteMock);
+        pedidoMock.setItens(new ArrayList<>()); // Initialize items list
 
         carrinhoMock = new Carrinho(); carrinhoMock.setId(UUID.randomUUID()); carrinhoMock.setCliente(clienteMock);
         carrinhoMock.setItens(new ArrayList<>());
@@ -147,39 +155,96 @@ class PedidoServiceTest {
 
     @Nested @DisplayName("1. Processo Mobile Context") class Bloco1 {
         @Test void ct001_caixaAberto() {
+            AtomicReference<Pedido> pedidoPersistido = new AtomicReference<>();
             when(caixaRepository.existsByStatus(StatusCaixa.ABERTO)).thenReturn(true);
             when(contaRepository.findByComandaIdAndNumeroConta(comandaId, 1)).thenReturn(Optional.of(contaMock));
             when(produtoRepository.findById(produtoId)).thenReturn(Optional.of(produtoMock));
-            when(pedidoRepository.saveAndFlush(any())).thenReturn(pedidoMock);
+            when(pedidoRepository.saveAndFlush(any(Pedido.class))).thenAnswer(invocation -> {
+                Pedido p = invocation.getArgument(0);
+                if (p.getId() == null) p.setId(pedidoId);
+                pedidoPersistido.set(p);
+                return p;
+            });
+            when(pedidoRepository.findById(pedidoId)).thenAnswer(invocation -> Optional.ofNullable(pedidoPersistido.get()));
+            when(pedidoRepository.save(any(Pedido.class))).thenAnswer(invocation -> {
+                Pedido p = invocation.getArgument(0);
+                pedidoPersistido.set(p);
+                return p;
+            });
+
             assertNotNull(pedidoService.processarPedidoMobile(criarRequestMobile(1)));
+            verify(filaImpressaoRepository, times(1)).save(any());
+            verify(messagingTemplate, times(3)).convertAndSend(anyString(), any(PedidoResponseDTO.class));
+            verify(pedidoRepository, times(1)).saveAndFlush(any(Pedido.class));
+            verify(pedidoRepository, times(1)).save(any(Pedido.class)); // For recalculateTotalPedido
         }
+
         @Test void ct002_caixaFechado() {
             when(caixaRepository.existsByStatus(StatusCaixa.ABERTO)).thenReturn(false);
             assertThrows(BusinessRuleException.class, () -> pedidoService.processarPedidoMobile(criarRequestMobile(1)));
         }
+
         @Test void ct003_comandaInexistente() {
             when(caixaRepository.existsByStatus(StatusCaixa.ABERTO)).thenReturn(true);
             when(contaRepository.findByComandaIdAndNumeroConta(comandaId, 2)).thenReturn(Optional.empty());
             when(comandaRepository.findById(comandaId)).thenReturn(Optional.empty());
             assertThrows(ResourceNotFoundException.class, () -> pedidoService.processarPedidoMobile(criarRequestMobile(2)));
         }
+
         @Test void ct004_contaExistente() {
+            AtomicReference<Pedido> pedidoPersistido = new AtomicReference<>();
             when(caixaRepository.existsByStatus(StatusCaixa.ABERTO)).thenReturn(true);
             when(contaRepository.findByComandaIdAndNumeroConta(comandaId, 1)).thenReturn(Optional.of(contaMock));
             when(produtoRepository.findById(produtoId)).thenReturn(Optional.of(produtoMock));
-            when(pedidoRepository.saveAndFlush(any())).thenReturn(pedidoMock);
+            when(pedidoRepository.saveAndFlush(any(Pedido.class))).thenAnswer(invocation -> {
+                Pedido p = invocation.getArgument(0);
+                if (p.getId() == null) p.setId(pedidoId);
+                pedidoPersistido.set(p);
+                return p;
+            });
+            when(pedidoRepository.findById(pedidoId)).thenAnswer(invocation -> Optional.ofNullable(pedidoPersistido.get()));
+            when(pedidoRepository.save(any(Pedido.class))).thenAnswer(invocation -> {
+                Pedido p = invocation.getArgument(0);
+                pedidoPersistido.set(p);
+                return p;
+            });
+
             assertNotNull(pedidoService.processarPedidoMobile(criarRequestMobile(1)));
+            verify(filaImpressaoRepository, times(1)).save(any());
+            verify(messagingTemplate, times(3)).convertAndSend(anyString(), any(PedidoResponseDTO.class));
+            verify(pedidoRepository, times(1)).saveAndFlush(any(Pedido.class));
+            verify(pedidoRepository, times(1)).save(any(Pedido.class)); // For recalculateTotalPedido
         }
+
         @Test void ct005_contaInexistenteCriarAutomatica() {
+            AtomicReference<Pedido> pedidoPersistido = new AtomicReference<>();
             when(caixaRepository.existsByStatus(StatusCaixa.ABERTO)).thenReturn(true);
             when(contaRepository.findByComandaIdAndNumeroConta(comandaId, 2)).thenReturn(Optional.empty());
             when(comandaRepository.findById(comandaId)).thenReturn(Optional.of(comandaMock));
             when(contaRepository.saveAndFlush(any())).thenReturn(contaMock);
             when(produtoRepository.findById(produtoId)).thenReturn(Optional.of(produtoMock));
-            when(pedidoRepository.saveAndFlush(any())).thenReturn(pedidoMock);
+            when(pedidoRepository.saveAndFlush(any(Pedido.class))).thenAnswer(invocation -> {
+                Pedido p = invocation.getArgument(0);
+                if (p.getId() == null) p.setId(pedidoId);
+                pedidoPersistido.set(p);
+                return p;
+            });
+            when(pedidoRepository.findById(pedidoId)).thenAnswer(invocation -> Optional.ofNullable(pedidoPersistido.get()));
+            when(pedidoRepository.save(any(Pedido.class))).thenAnswer(invocation -> {
+                Pedido p = invocation.getArgument(0);
+                pedidoPersistido.set(p);
+                return p;
+            });
+
             assertNotNull(pedidoService.processarPedidoMobile(criarRequestMobile(2)));
+            verify(filaImpressaoRepository, times(1)).save(any());
+            verify(messagingTemplate, times(3)).convertAndSend(anyString(), any(PedidoResponseDTO.class));
+            verify(pedidoRepository, times(1)).saveAndFlush(any(Pedido.class));
+            verify(pedidoRepository, times(1)).save(any(Pedido.class)); // For recalculateTotalPedido
         }
+
         @Test void ct006_novaContaCriadaSemClienteHerdado() {
+            AtomicReference<Pedido> pedidoPersistido = new AtomicReference<>();
             when(caixaRepository.existsByStatus(StatusCaixa.ABERTO)).thenReturn(true);
             when(contaRepository.findByComandaIdAndNumeroConta(comandaId, 2)).thenReturn(Optional.empty());
             when(comandaRepository.findById(comandaId)).thenReturn(Optional.of(comandaMock));
@@ -189,15 +254,32 @@ class PedidoServiceTest {
                 return savedConta;
             });
             when(produtoRepository.findById(produtoId)).thenReturn(Optional.of(produtoMock));
-            when(pedidoRepository.saveAndFlush(any())).thenReturn(pedidoMock);
+            when(pedidoRepository.saveAndFlush(any(Pedido.class))).thenAnswer(invocation -> {
+                Pedido p = invocation.getArgument(0);
+                if (p.getId() == null) p.setId(pedidoId);
+                pedidoPersistido.set(p);
+                return p;
+            });
+            when(pedidoRepository.findById(pedidoId)).thenAnswer(invocation -> Optional.ofNullable(pedidoPersistido.get()));
+            when(pedidoRepository.save(any(Pedido.class))).thenAnswer(invocation -> {
+                Pedido p = invocation.getArgument(0);
+                pedidoPersistido.set(p);
+                return p;
+            });
 
             PedidoResponseDTO response = pedidoService.processarPedidoMobile(criarRequestMobile(2));
             assertNotNull(response);
+            verify(filaImpressaoRepository, times(1)).save(any());
+            verify(messagingTemplate, times(3)).convertAndSend(anyString(), any(PedidoResponseDTO.class));
+            verify(pedidoRepository, times(1)).saveAndFlush(any(Pedido.class));
+            verify(pedidoRepository, times(1)).save(any(Pedido.class)); // For recalculateTotalPedido
         }
+
         @Test void ct007_novaContaAtributosIniciais() {
             Conta nConta = new Conta(); nConta.setPago(false); nConta.setValorTotal(BigDecimal.ZERO);
             assertFalse(nConta.getPago()); assertEquals(BigDecimal.ZERO, nConta.getValorTotal());
         }
+
         @Test void ct008_contaPagaBloquearNovoPedido() {
             when(caixaRepository.existsByStatus(StatusCaixa.ABERTO)).thenReturn(true);
             contaMock.setPago(true);
@@ -260,19 +342,45 @@ class PedidoServiceTest {
 
     @Nested @DisplayName("7. Impressão Context") class Bloco7 {
         @Test void ct040_produtoPrecisaPreparoFilaCriada() {
+            AtomicReference<Pedido> pedidoPersistido = new AtomicReference<>();
             when(caixaRepository.existsByStatus(StatusCaixa.ABERTO)).thenReturn(true);
             when(contaRepository.findByComandaIdAndNumeroConta(comandaId, 1)).thenReturn(Optional.of(contaMock));
             when(produtoRepository.findById(produtoId)).thenReturn(Optional.of(produtoMock));
-            when(pedidoRepository.saveAndFlush(any())).thenReturn(pedidoMock);
+            when(pedidoRepository.saveAndFlush(any(Pedido.class))).thenAnswer(invocation -> {
+                Pedido p = invocation.getArgument(0);
+                if (p.getId() == null) p.setId(pedidoId);
+                pedidoPersistido.set(p);
+                return p;
+            });
+            when(pedidoRepository.findById(pedidoId)).thenAnswer(invocation -> Optional.ofNullable(pedidoPersistido.get()));
+            when(pedidoRepository.save(any(Pedido.class))).thenAnswer(invocation -> {
+                Pedido p = invocation.getArgument(0);
+                pedidoPersistido.set(p);
+                return p;
+            });
+
             pedidoService.processarPedidoMobile(criarRequestMobile(1));
             verify(filaImpressaoRepository, times(1)).save(any());
         }
         @Test void ct041_produtoSemPreparoNaoCriaFila() {
+            AtomicReference<Pedido> pedidoPersistido = new AtomicReference<>();
             when(caixaRepository.existsByStatus(StatusCaixa.ABERTO)).thenReturn(true);
             when(contaRepository.findByComandaIdAndNumeroConta(comandaId, 1)).thenReturn(Optional.of(contaMock));
             produtoMock.setPrecisaPreparo(false);
             when(produtoRepository.findById(produtoId)).thenReturn(Optional.of(produtoMock));
-            when(pedidoRepository.saveAndFlush(any())).thenReturn(pedidoMock);
+            when(pedidoRepository.saveAndFlush(any(Pedido.class))).thenAnswer(invocation -> {
+                Pedido p = invocation.getArgument(0);
+                if (p.getId() == null) p.setId(pedidoId);
+                pedidoPersistido.set(p);
+                return p;
+            });
+            when(pedidoRepository.findById(pedidoId)).thenAnswer(invocation -> Optional.ofNullable(pedidoPersistido.get()));
+            when(pedidoRepository.save(any(Pedido.class))).thenAnswer(invocation -> {
+                Pedido p = invocation.getArgument(0);
+                pedidoPersistido.set(p);
+                return p;
+            });
+
             pedidoService.processarPedidoMobile(criarRequestMobile(1));
             verify(filaImpressaoRepository, never()).save(any());
         }
@@ -333,32 +441,46 @@ class PedidoServiceTest {
 
     @Nested @DisplayName("10. Checkout Context") class Bloco10 {
         @Test void ct055_carrinhoLocalizado() {
+            AtomicReference<Pedido> pedidoPersistido = new AtomicReference<>();
             when(caixaRepository.existsByStatus(StatusCaixa.ABERTO)).thenReturn(true);
             ItemCarrinho item = new ItemCarrinho(); item.setProduto(produtoMock); item.setQuantidade(1);
             carrinhoMock.getItens().add(item);
             when(carrinhoRepository.findByClienteId(clienteId)).thenReturn(Optional.of(carrinhoMock));
-            when(pedidoRepository.save(any())).thenReturn(pedidoMock);
+            when(clienteRepository.findById(clienteId)).thenReturn(Optional.of(clienteMock)); // NEW
+            when(pedidoRepository.save(any(Pedido.class))).thenAnswer(invocation -> {
+                Pedido p = invocation.getArgument(0);
+                if (p.getId() == null) p.setId(pedidoId);
+                pedidoPersistido.set(p);
+                return p;
+            });
+            when(pedidoRepository.findById(pedidoId)).thenAnswer(invocation -> Optional.ofNullable(pedidoPersistido.get()));
+            when(carrinhoRepository.save(any(Carrinho.class))).thenReturn(carrinhoMock);
 
             CheckoutDeliveryRequestDTO dto = new CheckoutDeliveryRequestDTO(
-                    clienteId, "Rua 1", "Sem cebola"
+                    clienteId, "Rua 1", "Sem cebola", null // Added null for explicit items
             );
             assertNotNull(pedidoService.finalizarDelivery(dto));
+            verify(filaImpressaoRepository, times(1)).save(any());
+            verify(carrinhoRepository, times(1)).save(any(Carrinho.class)); // For limparCarrinho
+            verify(pedidoRepository, times(2)).save(any(Pedido.class)); // Initial save + recalculateTotalPedido
         }
         @Test void ct056_carrinhoInexistente() {
             when(caixaRepository.existsByStatus(StatusCaixa.ABERTO)).thenReturn(true);
+            when(clienteRepository.findById(clienteId)).thenReturn(Optional.of(clienteMock)); // NEW
             when(carrinhoRepository.findByClienteId(clienteId)).thenReturn(Optional.empty());
 
             CheckoutDeliveryRequestDTO dto = new CheckoutDeliveryRequestDTO(
-                    clienteId, "Rua 1", "Sem cebola"
+                    clienteId, "Rua 1", "Sem cebola", null
             );
             assertThrows(ResourceNotFoundException.class, () -> pedidoService.finalizarDelivery(dto));
         }
         @Test void ct057_carrinhoVazio() {
             when(caixaRepository.existsByStatus(StatusCaixa.ABERTO)).thenReturn(true);
-            when(carrinhoRepository.findByClienteId(clienteId)).thenReturn(Optional.of(carrinhoMock));
+            when(clienteRepository.findById(clienteId)).thenReturn(Optional.of(clienteMock)); // NEW
+            when(carrinhoRepository.findByClienteId(clienteId)).thenReturn(Optional.of(carrinhoMock)); // Carrinho vazio
 
             CheckoutDeliveryRequestDTO dto = new CheckoutDeliveryRequestDTO(
-                    clienteId, "Rua 1", "Sem cebola"
+                    clienteId, "Rua 1", "Sem cebola", null
             );
             assertThrows(BusinessRuleException.class, () -> pedidoService.finalizarDelivery(dto));
         }
@@ -369,12 +491,19 @@ class PedidoServiceTest {
 
     @Nested @DisplayName("11. Adicionar Item Context") class Bloco11 {
         @Test void ct061_adicionarItem() {
+            AtomicReference<Pedido> pedidoPersistido = new AtomicReference<>();
             when(pedidoRepository.findById(pedidoId)).thenReturn(Optional.of(pedidoMock));
             when(produtoRepository.findById(produtoId)).thenReturn(Optional.of(produtoMock));
-            when(pedidoRepository.save(any())).thenReturn(pedidoMock);
+            when(pedidoRepository.save(any(Pedido.class))).thenAnswer(invocation -> {
+                Pedido p = invocation.getArgument(0);
+                if (p.getId() == null) p.setId(pedidoId);
+                pedidoPersistido.set(p);
+                return p;
+            });
 
             ItemPedidoRequestDTO dto = new ItemPedidoRequestDTO(produtoId, 1, "Sem cebola", new ArrayList<>(), 1);
             assertNotNull(pedidoService.adicionarItemPedido(pedidoId, dto));
+            verify(messagingTemplate, times(1)).convertAndSend(anyString(), any(PedidoResponseDTO.class));
         }
         @Test void ct062_pedidoFinalizadoBloquear() {
             pedidoMock.setStatus(StatusPedido.FINALIZADO);
@@ -406,8 +535,10 @@ class PedidoServiceTest {
             ItemPedido item = new ItemPedido(); item.setId(itemId); item.setPrecoUnitario(BigDecimal.TEN); item.setQuantidade(1);
             pedidoMock.getItens().add(item);
             when(pedidoRepository.findById(pedidoId)).thenReturn(Optional.of(pedidoMock));
+            when(itemComboRepository.findByItemPedidoId(itemId)).thenReturn(new ArrayList<>()); // NEW
             when(pedidoRepository.save(any())).thenReturn(pedidoMock);
             assertNotNull(pedidoService.removerItemPedido(pedidoId, itemId));
+            verify(messagingTemplate, times(1)).convertAndSend(anyString(), any(PedidoResponseDTO.class));
         }
         @Test void ct067_recalculateTotal() { assertTrue(true); }
         @Test void ct068_itemInexistente() {
@@ -425,13 +556,23 @@ class PedidoServiceTest {
 
     @Nested @DisplayName("13. Atualizar Adicionais Context") class Bloco13 {
         @Test void ct070_atualizarLista() {
+            AtomicReference<Pedido> pedidoPersistido = new AtomicReference<>();
             UUID itemId = UUID.randomUUID();
             ItemPedido item = new ItemPedido(); item.setId(itemId); item.setPrecoUnitario(BigDecimal.TEN); item.setQuantidade(1);
+            item.setProduto(produtoMock); // Ensure product is set for combo checks
             pedidoMock.getItens().add(item);
             when(pedidoRepository.findById(pedidoId)).thenReturn(Optional.of(pedidoMock));
-            when(adicionalRepository.findAllById(any())).thenReturn(new ArrayList<>());
-            when(pedidoRepository.save(any())).thenReturn(pedidoMock);
+            when(adicionalRepository.findAllById(anyCollection())).thenReturn(new ArrayList<>());
+            when(pedidoRepository.save(any(Pedido.class))).thenAnswer(invocation -> {
+                Pedido p = invocation.getArgument(0);
+                if (p.getId() == null) p.setId(pedidoId);
+                pedidoPersistido.set(p);
+                return p;
+            });
+
             assertNotNull(pedidoService.atualizarAdicionaisDoItem(pedidoId, itemId, List.of(UUID.randomUUID())));
+            verify(messagingTemplate, times(1)).convertAndSend(anyString(), any(PedidoResponseDTO.class));
+            verify(pedidoRepository, times(1)).save(any(Pedido.class)); // For recalculateTotalPedido
         }
         @Test void ct071_recalcularTotal() { assertTrue(true); }
         @Test void ct072_itemInexistente() {
@@ -452,6 +593,7 @@ class PedidoServiceTest {
             when(pedidoRepository.findById(pedidoId)).thenReturn(Optional.of(pedidoMock));
             when(pedidoRepository.save(any())).thenReturn(pedidoMock);
             assertNotNull(pedidoService.atualizarStatus(pedidoId, new PedidoStatusRequestDTO(StatusPedido.EM_PREPARO)));
+            verify(messagingTemplate, times(2)).convertAndSend(anyString(), any(PedidoResponseDTO.class));
         }
         @Test void ct075_emPreparoParaPronto() { assertTrue(true); }
         @Test void ct076_prontoParaServido() { assertTrue(true); }
@@ -742,26 +884,29 @@ class PedidoServiceTest {
                     .thenReturn(Optional.of(produtoMock));
         }
 
-        // Helper method for additional mocks
         private void prepararAdicionaisBalcao() {
-            when(adicionalRepository.findAllById(anyCollection()))
-                    .thenAnswer(invocation -> {
-                        Iterable<UUID> ids = invocation.getArgument(0);
-                        return StreamSupport.stream(ids.spliterator(), false)
-                                .filter(adicionalMap::containsKey)
-                                .map(adicionalMap::get)
-                                .collect(Collectors.toList());
-                    });
+            when(adicionalValidationService.validarAdicionaisPermitidos(
+                    any(UUID.class),
+                    ArgumentMatchers.<List<UUID>>any()
+            )).thenAnswer(invocation -> {
+                List<UUID> ids = invocation.getArgument(1);
+                return ids.stream()
+                        .filter(adicionalMap::containsKey)
+                        .map(adicionalMap::get)
+                        .collect(Collectors.toList());
+            });
         }
 
         // Helper method for persistence mocks
         private void prepararPersistenciaBalcao() {
+            AtomicReference<Pedido> pedidoPersistido = new AtomicReference<>();
             when(pedidoRepository.save(any(Pedido.class)))
                     .thenAnswer(invocation -> {
                         Pedido p = invocation.getArgument(0);
                         if (p.getId() == null) {
                             p.setId(UUID.randomUUID());
                         }
+                        pedidoPersistido.set(p);
                         return p;
                     });
         }
@@ -827,13 +972,13 @@ class PedidoServiceTest {
                             any(PagamentoRequestDTO.class)
                     );
 
-            verify(pedidoRepository, times(2))
+            verify(pedidoRepository, times(2)) // Initial save + final save after payment
                     .save(any(Pedido.class));
 
             verify(filaImpressaoRepository, times(1))
                     .save(any(FilaImpressao.class));
 
-            verifyNoInteractions(messagingTemplate);
+            verifyNoInteractions(messagingTemplate); // Balcão doesn't send to topics
         }
 
         @Test
@@ -852,7 +997,7 @@ class PedidoServiceTest {
             verify(pagamentoService, times(1)).registrarPagamentoPedido(pedidoIdArgumentCaptor.capture(), any(PagamentoRequestDTO.class));
             UUID capturedPedidoIdForPayment = pedidoIdArgumentCaptor.getValue();
 
-            // Capture the Pedido object saved by pedidoRepository.save
+            // Capture the Pedido object saved by pedidoRepository.save (the final one)
             verify(pedidoRepository, times(2)).save(pedidoCaptor.capture()); // The second save is the final state
             Pedido finalSavedPedido = pedidoCaptor.getValue();
 
@@ -901,7 +1046,7 @@ class PedidoServiceTest {
 
             assertThrows(BusinessRuleException.class, () -> pedidoService.finalizarBalcao(dto));
 
-            verify(pedidoRepository, times(1)).save(any(Pedido.class));
+            verify(pedidoRepository, times(1)).save(any(Pedido.class)); // Initial save happens
             verify(pagamentoService, times(1)).registrarPagamentoPedido(any(UUID.class), any(PagamentoRequestDTO.class));
             verify(filaImpressaoRepository, never()).save(any(FilaImpressao.class));
             verify(messagingTemplate, never()).convertAndSend(anyString(), any(Object.class));
@@ -920,7 +1065,7 @@ class PedidoServiceTest {
 
             assertThrows(BusinessRuleException.class, () -> pedidoService.finalizarBalcao(dto));
 
-            verify(pedidoRepository, times(1)).save(any(Pedido.class));
+            verify(pedidoRepository, times(1)).save(any(Pedido.class)); // Initial save happens
             verify(pagamentoService, times(1)).registrarPagamentoPedido(any(UUID.class), any(PagamentoRequestDTO.class));
             verify(filaImpressaoRepository, never()).save(any(FilaImpressao.class));
             verify(messagingTemplate, never()).convertAndSend(anyString(), any(Object.class));
@@ -954,7 +1099,7 @@ class PedidoServiceTest {
 
             assertThrows(RuntimeException.class, () -> pedidoService.finalizarBalcao(dto));
 
-            verify(pedidoRepository, times(1)).save(any(Pedido.class));
+            verify(pedidoRepository, times(1)).save(any(Pedido.class)); // Initial save happens
             verify(pagamentoService, times(1)).registrarPagamentoPedido(any(UUID.class), any(PagamentoRequestDTO.class));
             verify(filaImpressaoRepository, never()).save(any(FilaImpressao.class));
             verify(messagingTemplate, never()).convertAndSend(anyString(), any(Object.class));
@@ -969,12 +1114,14 @@ class PedidoServiceTest {
             List<ItemPedidoRequestDTO> itens = List.of(criarItemPedidoRequest(produtoId, 1, new ArrayList<>()));
             CheckoutBalcaoRequestDTO dto = criarCheckoutBalcaoRequest(FormaPagamento.DINHEIRO, new BigDecimal("35.00"), itens);
 
+            AtomicInteger saveInvocationCount = new AtomicInteger(0); // NEW: Contador para invocações de save
             when(pedidoRepository.save(any(Pedido.class))).thenAnswer(invocation -> {
                 Pedido p = invocation.getArgument(0);
                 if (p.getId() == null) {
                     p.setId(UUID.randomUUID());
                 }
-                if (p.getStatusFinanceiro() == null || p.getStatusFinanceiro() == StatusFinanceiro.AGUARDANDO_PAGAMENTO) {
+                // NEW: Verifica a primeira invocação usando o contador
+                if (saveInvocationCount.getAndIncrement() == 0) {
                     assertEquals(StatusFinanceiro.AGUARDANDO_PAGAMENTO, p.getStatusFinanceiro());
                 }
                 return p;
@@ -1062,12 +1209,12 @@ class PedidoServiceTest {
         @DisplayName("ct137_copiarItensDasRequests_comAdicionais_calculoTotalCorreto")
         void ct137_copiarItensDasRequests_comAdicionais_calculoTotalCorreto() {
             prepararInfraestruturaBalcao();
-            prepararAdicionaisBalcao(); // Call the new helper for adicionais
             prepararPagamentoBalcaoComSucesso();
 
             Produto produtoComAdicionais = new Produto();
             produtoComAdicionais.setId(produtoId);
             produtoComAdicionais.setPreco(new BigDecimal("10.00"));
+            produtoComAdicionais.setIsCombo(false);
 
             Adicional adicional1 = new Adicional();
             adicional1.setId(adicionalId1);
@@ -1077,37 +1224,78 @@ class PedidoServiceTest {
             adicional2.setId(adicionalId2);
             adicional2.setPreco(new BigDecimal("3.00"));
 
-            adicionalMap.put(adicionalId1, adicional1);
-            adicionalMap.put(adicionalId2, adicional2);
+            when(produtoRepository.findById(produtoId))
+                    .thenReturn(Optional.of(produtoComAdicionais));
 
-            when(produtoRepository.findById(produtoId)).thenReturn(Optional.of(produtoComAdicionais));
+            when(adicionalRepository.findAllById(
+                    List.of(adicionalId1, adicionalId2)
+            )).thenReturn(List.of(adicional1, adicional2));
 
             List<ItemPedidoRequestDTO> itensRequest = List.of(
-                    criarItemPedidoRequest(produtoId, 2, List.of(adicionalId1, adicionalId2))
+                    criarItemPedidoRequest(
+                            produtoId,
+                            2,
+                            List.of(adicionalId1, adicionalId2)
+                    )
             );
-            CheckoutBalcaoRequestDTO dto = criarCheckoutBalcaoRequest(FormaPagamento.DINHEIRO, new BigDecimal("30.00"), itensRequest);
 
-            when(pedidoRepository.save(any(Pedido.class))).thenAnswer(invocation -> {
-                Pedido p = invocation.getArgument(0);
-                if (p.getId() == null) {
-                    p.setId(UUID.randomUUID());
-                }
-                if (!p.getItens().isEmpty()) {
-                    assertEquals(1, p.getItens().size());
-                    ItemPedido item = p.getItens().get(0);
-                    assertEquals(new BigDecimal("15.00"), item.getPrecoUnitario());
-                    assertEquals(2, item.getQuantidade());
-                    assertEquals(2, item.getAdicionais().size());
-                    assertEquals(StatusPagamento.ABERTO, item.getStatusPagamento());
-                }
-                return p;
-            });
+            CheckoutBalcaoRequestDTO dto = criarCheckoutBalcaoRequest(
+                    FormaPagamento.DINHEIRO,
+                    new BigDecimal("30.00"),
+                    itensRequest
+            );
 
-            pedidoService.finalizarBalcao(dto);
+            when(pedidoRepository.save(any(Pedido.class)))
+                    .thenAnswer(invocation -> {
+                        Pedido pedido = invocation.getArgument(0);
 
-            verify(pedidoRepository, times(2)).save(pedidoCaptor.capture());
-            Pedido finalPedido = pedidoCaptor.getValue();
-            assertEquals(new BigDecimal("30.00"), finalPedido.getTotal());
+                        if (pedido.getId() == null) {
+                            pedido.setId(UUID.randomUUID());
+                        }
+
+                        return pedido;
+                    });
+
+            PedidoResponseDTO response = pedidoService.finalizarBalcao(dto);
+
+            assertNotNull(response);
+
+            verify(pedidoRepository, times(2))
+                    .save(pedidoCaptor.capture());
+
+            Pedido pedidoSalvo = pedidoCaptor.getValue();
+
+            assertEquals(1, pedidoSalvo.getItens().size());
+
+            ItemPedido item = pedidoSalvo.getItens().get(0);
+
+            assertEquals(
+                    0,
+                    new BigDecimal("15.00").compareTo(item.getPrecoUnitario())
+            );
+
+            assertEquals(2, item.getQuantidade());
+            assertEquals(2, item.getAdicionais().size());
+            assertEquals(StatusPagamento.ABERTO, item.getStatusPagamento());
+
+            assertEquals(
+                    0,
+                    new BigDecimal("30.00").compareTo(pedidoSalvo.getTotal())
+            );
+
+            assertEquals(
+                    0,
+                    new BigDecimal("30.00").compareTo(response.total())
+            );
+
+            verify(adicionalRepository, times(1))
+                    .findAllById(List.of(adicionalId1, adicionalId2));
+
+            verify(pagamentoService, times(1))
+                    .registrarPagamentoPedido(
+                            any(UUID.class),
+                            any(PagamentoRequestDTO.class)
+                    );
         }
 
         @Test
@@ -1119,11 +1307,13 @@ class PedidoServiceTest {
             List<ItemPedidoRequestDTO> itens = List.of(criarItemPedidoRequest(produtoId, 1, new ArrayList<>()));
             CheckoutBalcaoRequestDTO dto = criarCheckoutBalcaoRequest(FormaPagamento.DINHEIRO, new BigDecimal("35.00"), itens);
 
+            AtomicReference<Pedido> pedidoPersistido = new AtomicReference<>();
             when(pedidoRepository.save(any(Pedido.class))).thenAnswer(invocation -> {
                 Pedido p = invocation.getArgument(0);
                 if (p.getId() == null) {
                     p.setId(UUID.randomUUID());
                 }
+                pedidoPersistido.set(p);
                 p.getItens().forEach(item -> assertEquals(StatusPagamento.ABERTO, item.getStatusPagamento()));
                 return p;
             });

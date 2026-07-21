@@ -18,6 +18,23 @@ public record GarcomMesaSessaoRequestDTO(
             UUID produtoId,
             Integer quantidade,
             String observacao,
-            List<UUID> adicionaisIds
-    ) {}
+            List<UUID> adicionaisIds,
+            List<ItemComboCustomizacaoRequestDTO> itensCombo
+    ) {
+        // Construtor retrocompatível
+        public ItemNovoDTO(
+                UUID produtoId,
+                Integer quantidade,
+                String observacao,
+                List<UUID> adicionaisIds
+        ) {
+            this(
+                produtoId,
+                quantidade,
+                observacao,
+                adicionaisIds,
+                null // itensCombo é nulo para retrocompatibilidade
+            );
+        }
+    }
 }

@@ -107,7 +107,16 @@ class MesaUserJourneyTest {
 
         @Test @DisplayName("MESA-USER-005 e 006 - Abrir primeiro caixa do dia e reter abertura simultânea redundante")
         void mesaUser005And006() {
-            caixaRepository.deleteAll();
+            // Procura por um caixa aberto existente e o fecha
+            caixaRepository.findByStatus(StatusCaixa.ABERTO)
+                    .ifPresent(caixaAberto -> {
+                        caixaAberto.setStatus(StatusCaixa.FECHADO);
+                        caixaAberto.setDataHoraFechamento(LocalDateTime.now());
+                        caixaRepository.saveAndFlush(caixaAberto);
+                        entityManager.flush();
+                        entityManager.clear();
+                    });
+
             // 🎯 FIX: Garante que o garçom exista para ser o operador do caixa
             Usuario adminOperador = usuarioRepository.findByEmail("admin@estevaolanches.com")
                     .orElseGet(() -> {

@@ -11,6 +11,8 @@ import com.paullomaggio.estevaoLanches.exceptions.ResourceNotFoundException;
 import com.paullomaggio.estevaoLanches.repositories.AdicionalRepository;
 import com.paullomaggio.estevaoLanches.repositories.CarrinhoRepository;
 import com.paullomaggio.estevaoLanches.repositories.ClienteRepository;
+import com.paullomaggio.estevaoLanches.repositories.ComboProdutoRepository; // Nova dependência
+import com.paullomaggio.estevaoLanches.repositories.ItemCarrinhoComboCustomizacaoRepository; // Nova dependência
 import com.paullomaggio.estevaoLanches.repositories.ProdutoRepository;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -41,9 +43,11 @@ class CarrinhoServiceTest {
     @Mock private CarrinhoRepository carrinhoRepository;
     @Mock private ClienteRepository clienteRepository;
     @Mock private ProdutoRepository produtoRepository;
-    @Mock private AdicionalRepository adicionalRepository; // ADICIONADO: Mock de AdicionalRepository
+    @Mock private AdicionalRepository adicionalRepository;
+    @Mock private ComboProdutoRepository comboProdutoRepository; // NOVO MOCK
+    @Mock private AdicionalValidationService adicionalValidationService; // NOVO MOCK
+    @Mock private ItemCarrinhoComboCustomizacaoRepository itemCarrinhoComboCustomizacaoRepository; // NOVO MOCK
 
-    // Removido @InjectMocks
     private CarrinhoService carrinhoService;
 
     private UUID clienteId;
@@ -55,8 +59,15 @@ class CarrinhoServiceTest {
     @BeforeEach
     void setUp() {
         // Instanciação manual do serviço com os mocks
-        // MODIFICADO: Passando adicionalRepository ao construtor
-        carrinhoService = new CarrinhoService(carrinhoRepository, clienteRepository, produtoRepository, adicionalRepository);
+        carrinhoService = new CarrinhoService(
+                carrinhoRepository,
+                clienteRepository,
+                produtoRepository,
+                adicionalRepository,
+                comboProdutoRepository, // Passando novo mock
+                adicionalValidationService, // Passando novo mock
+                itemCarrinhoComboCustomizacaoRepository // Passando novo mock
+        );
 
         clienteId = UUID.randomUUID();
         produtoId = UUID.randomUUID();
@@ -490,6 +501,9 @@ class CarrinhoServiceTest {
 
             verifyNoInteractions(clienteRepository); // No fluxo feliz de carrinho existente, a tabela cliente não deve ser tocada
             verifyNoInteractions(adicionalRepository); // ADICIONADO: No fluxo sem adicionais, o AdicionalRepository não deve ser tocado
+            verifyNoInteractions(comboProdutoRepository); // NOVO: No fluxo sem combos, o ComboProdutoRepository não deve ser tocado
+            verifyNoInteractions(adicionalValidationService); // NOVO: No fluxo sem combos, o AdicionalValidationService não deve ser tocado
+            verifyNoInteractions(itemCarrinhoComboCustomizacaoRepository); // NOVO: No fluxo sem combos, o ItemCarrinhoComboCustomizacaoRepository não deve ser tocado
         }
     }
 
@@ -587,6 +601,9 @@ class CarrinhoServiceTest {
             assertThat(itemConsolidado.getObservacao()).isEqualTo("Com tudo");
             assertThat(itemConsolidado.getAdicionais()).containsExactlyInAnyOrder(adicional1, adicional2);
             verify(adicionalRepository, times(2)).findAllById(idsAdicionais); // MODIFICADO: times(1) para times(2)
+            verifyNoInteractions(comboProdutoRepository); // NOVO
+            verifyNoInteractions(adicionalValidationService); // NOVO
+            verifyNoInteractions(itemCarrinhoComboCustomizacaoRepository); // NOVO
         }
 
         @Test
@@ -619,6 +636,9 @@ class CarrinhoServiceTest {
             assertThat(item2.get().getAdicionais()).containsExactly(adicional2);
             verify(adicionalRepository, times(1)).findAllById(idsAdicionais1);
             verify(adicionalRepository, times(1)).findAllById(idsAdicionais2);
+            verifyNoInteractions(comboProdutoRepository); // NOVO
+            verifyNoInteractions(adicionalValidationService); // NOVO
+            verifyNoInteractions(itemCarrinhoComboCustomizacaoRepository); // NOVO
         }
 
         @Test
@@ -637,6 +657,9 @@ class CarrinhoServiceTest {
             assertThat(ex.getMessage()).contains(adicionalInexistenteId.toString());
             verify(adicionalRepository, times(1)).findAllById(idsAdicionais);
             verify(carrinhoRepository, never()).save(any());
+            verifyNoInteractions(comboProdutoRepository); // NOVO
+            verifyNoInteractions(adicionalValidationService); // NOVO
+            verifyNoInteractions(itemCarrinhoComboCustomizacaoRepository); // NOVO
         }
 
         @Test
@@ -653,6 +676,9 @@ class CarrinhoServiceTest {
             carrinhoService.adicionarItem(clienteId, new ItemCarrinhoRequestDTO(produtoId, 1, "Obs B", idsAdicionais2));
 
             assertThat(carrinhoExistentePadrao.getItens()).hasSize(2);
+            verifyNoInteractions(comboProdutoRepository); // NOVO
+            verifyNoInteractions(adicionalValidationService); // NOVO
+            verifyNoInteractions(itemCarrinhoComboCustomizacaoRepository); // NOVO
         }
 
         @Test
@@ -666,6 +692,9 @@ class CarrinhoServiceTest {
             carrinhoService.adicionarItem(clienteId, new ItemCarrinhoRequestDTO(produtoId, 1, "Obs B", idsAdicionais));
 
             assertThat(carrinhoExistentePadrao.getItens()).hasSize(2);
+            verifyNoInteractions(comboProdutoRepository); // NOVO
+            verifyNoInteractions(adicionalValidationService); // NOVO
+            verifyNoInteractions(itemCarrinhoComboCustomizacaoRepository); // NOVO
         }
 
         @Test
@@ -682,6 +711,9 @@ class CarrinhoServiceTest {
             carrinhoService.adicionarItem(clienteId, new ItemCarrinhoRequestDTO(produtoId, 1, "Obs Comum", idsAdicionais2));
 
             assertThat(carrinhoExistentePadrao.getItens()).hasSize(2);
+            verifyNoInteractions(comboProdutoRepository); // NOVO
+            verifyNoInteractions(adicionalValidationService); // NOVO
+            verifyNoInteractions(itemCarrinhoComboCustomizacaoRepository); // NOVO
         }
     }
 }

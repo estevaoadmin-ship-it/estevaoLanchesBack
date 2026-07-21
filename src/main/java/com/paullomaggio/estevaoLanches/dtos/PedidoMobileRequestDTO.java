@@ -25,6 +25,27 @@ public record PedidoMobileRequestDTO(
                 Integer quantidade,
                 Double precoCalculado,
                 String observacao,
-                List<UUID> adicionaisIds // Recebe apenas a lista de UUIDs dos adicionais atrelados
-        ) {}
+                List<UUID> adicionaisIds, // Recebe apenas a lista de UUIDs dos adicionais atrelados
+                List<ItemComboCustomizacaoRequestDTO> itensCombo
+        ) {
+                // Construtor retrocompatível
+                public ItemPedidoPayloadDTO(
+                        UUID produtoId,
+                        String nome,
+                        Integer quantidade,
+                        Double precoCalculado,
+                        String observacao,
+                        List<UUID> adicionaisIds
+                ) {
+                        this(
+                                produtoId,
+                                nome,
+                                quantidade,
+                                precoCalculado,
+                                observacao,
+                                adicionaisIds,
+                                null // itensCombo é nulo para retrocompatibilidade
+                        );
+                }
+        }
 }

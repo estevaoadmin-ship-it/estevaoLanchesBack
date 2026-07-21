@@ -11,19 +11,24 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.ArgumentMatchers;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.messaging.simp.SimpMessagingTemplate;
 
 import java.math.BigDecimal;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyInt;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.*;
 
 @ExtendWith(MockitoExtension.class)
@@ -40,11 +45,11 @@ public class PedidoIntegridadeComercialTest {
     @Mock private CarrinhoRepository carrinhoRepository;
     @Mock private ClienteRepository clienteRepository;
     @Mock private SimpMessagingTemplate messagingTemplate;
-    @Mock private ItemComboRepository itemComboRepository; // Adicionado para a nova feature
-    @Mock private ComboProdutoRepository comboProdutoRepository; // NOVO MOCK: ComboProdutoRepository
-    @Mock private PagamentoService pagamentoService; // NOVO MOCK: PagamentoService
+    @Mock private ItemComboRepository itemComboRepository;
+    @Mock private ComboProdutoRepository comboProdutoRepository;
+    @Mock private PagamentoService pagamentoService;
+    @Mock private AdicionalValidationService adicionalValidationService;
 
-    // Removido @InjectMocks
     private PedidoService pedidoService;
 
     private UUID prodIdLanche;
@@ -54,16 +59,28 @@ public class PedidoIntegridadeComercialTest {
     private Comanda comandaMestre;
     private Conta contaMestre;
 
+    private final Map<UUID, Pedido> pedidosPersistidos = new HashMap<>();
+
     @BeforeEach
     void setUp() {
+        pedidosPersistidos.clear();
+
         // Instanciação manual do serviço com os mocks
         pedidoService = new PedidoService(
-                pedidoRepository, carrinhoRepository, caixaRepository,
-                produtoRepository, adicionalRepository, filaImpressaoRepository,
-                comandaRepository, contaRepository, messagingTemplate,
+                pedidoRepository,
+                carrinhoRepository,
+                caixaRepository,
+                produtoRepository,
+                adicionalRepository,
+                filaImpressaoRepository,
+                comandaRepository,
+                contaRepository,
+                messagingTemplate,
                 itemComboRepository,
-                comboProdutoRepository, // Passar o novo mock
-                pagamentoService // Passar o novo mock
+                comboProdutoRepository,
+                pagamentoService,
+                adicionalValidationService,
+                clienteRepository
         );
 
         prodIdLanche = UUID.randomUUID();
@@ -104,8 +121,33 @@ public class PedidoIntegridadeComercialTest {
 
         lenient().when(contaRepository.save(any(Conta.class))).thenAnswer(i -> i.getArgument(0));
         lenient().when(filaImpressaoRepository.save(any(FilaImpressao.class))).thenAnswer(i -> i.getArgument(0));
-        lenient().when(pedidoRepository.save(any(Pedido.class))).thenAnswer(i -> i.getArgument(0));
-        lenient().when(pedidoRepository.saveAndFlush(any(Pedido.class))).thenAnswer(i -> i.getArgument(0));
+
+        // Persistência simulada de Pedido
+        lenient().when(pedidoRepository.save(any(Pedido.class))).thenAnswer(invocation -> {
+            Pedido pedido = invocation.getArgument(0);
+            if (pedido.getId() == null) {
+                pedido.setId(UUID.randomUUID());
+            }
+            pedidosPersistidos.put(pedido.getId(), pedido);
+            return pedido;
+        });
+
+        lenient().when(pedidoRepository.saveAndFlush(any(Pedido.class))).thenAnswer(invocation -> {
+            Pedido pedido = invocation.getArgument(0);
+            if (pedido.getId() == null) {
+                pedido.setId(UUID.randomUUID());
+            }
+            pedidosPersistidos.put(pedido.getId(), pedido);
+            return pedido;
+        });
+
+        lenient().when(pedidoRepository.findById(any(UUID.class))).thenAnswer(invocation -> {
+            UUID id = invocation.getArgument(0);
+            return Optional.ofNullable(pedidosPersistidos.get(id));
+        });
+
+        // Configuração padrão para AdicionalValidationService
+        lenient().when(adicionalValidationService.validarAdicionaisPermitidos(any(), any())).thenReturn(new ArrayList<>());
     }
 
     @Nested
@@ -284,23 +326,89 @@ public class PedidoIntegridadeComercialTest {
     @Nested
     @DisplayName("BLOCO 4 — Adicionais")
     class AdicionaisTests {
-        @Test void ct025_semAdicionais() { assertTrue(lancheQuente.getAdicionais().isEmpty()); }
-        @Test void ct026_umAdicional() {
-            Adicional a = new Adicional(); a.setId(UUID.randomUUID()); a.setPreco(BigDecimal.ONE);
-            when(caixaRepository.existsByStatus(StatusCaixa.ABERTO)).thenReturn(true);
-            when(contaRepository.findByComandaIdAndNumeroConta(comandaId, 1)).thenReturn(Optional.of(contaMestre));
-            when(produtoRepository.findById(prodIdLanche)).thenReturn(Optional.of(lancheQuente));
-            when(adicionalRepository.findAllById(any())).thenReturn(List.of(a));
-            PedidoMobileRequestDTO.ItemPedidoPayloadDTO item = new PedidoMobileRequestDTO.ItemPedidoPayloadDTO(prodIdLanche, "X", 1, 26.0, "", List.of(a.getId()));
-            PedidoMobileRequestDTO p = new PedidoMobileRequestDTO(comandaId, 10, 1, new PedidoMobileRequestDTO.ClientePayloadDTO("A", "1"), List.of(item));
-            PedidoResponseDTO res = pedidoService.processarPedidoMobile(p);
-            assertThat(res.total()).isEqualByComparingTo(new BigDecimal("26.00"));
+
+        @Test
+        void ct025_semAdicionais() {
+            assertTrue(lancheQuente.getAdicionais().isEmpty());
         }
-        @Test void ct027_cincoAdicionais() { assertTrue(true); }
-        @Test void ct028_adicionalInexistente() { assertTrue(true); }
-        @Test void ct029_adicionalDuplicado() { assertTrue(true); }
-        @Test void ct030_precoAdicionalRecalculado() { assertTrue(true); }
-        @Test void ct031_payloadAdulterado() { assertTrue(true); }
+
+        @Test
+        void ct026_umAdicional() {
+            UUID adicionalId = UUID.randomUUID();
+
+            Adicional adicional = new Adicional();
+            adicional.setId(adicionalId);
+            adicional.setPreco(new BigDecimal("3.00"));
+
+            when(adicionalRepository.findAllById(
+                    ArgumentMatchers.<UUID>anyCollection()
+            )).thenReturn(List.of(adicional));
+
+            PedidoMobileRequestDTO.ItemPedidoPayloadDTO itemDto =
+                    new PedidoMobileRequestDTO.ItemPedidoPayloadDTO(
+                            prodIdLanche,
+                            "X-TUDO MONSTRO",
+                            2,
+                            50.0,
+                            "",
+                            List.of(adicionalId)
+                    );
+
+            PedidoMobileRequestDTO.ClientePayloadDTO clienteDto =
+                    new PedidoMobileRequestDTO.ClientePayloadDTO(
+                            "CLIENTE TESTE",
+                            "16999999999"
+                    );
+
+            PedidoMobileRequestDTO payload =
+                    new PedidoMobileRequestDTO(
+                            comandaId,
+                            10,
+                            1,
+                            clienteDto,
+                            List.of(itemDto)
+                    );
+
+            when(caixaRepository.existsByStatus(StatusCaixa.ABERTO))
+                    .thenReturn(true);
+
+            when(contaRepository.findByComandaIdAndNumeroConta(comandaId, 1))
+                    .thenReturn(Optional.of(contaMestre));
+
+            when(produtoRepository.findById(prodIdLanche))
+                    .thenReturn(Optional.of(lancheQuente));
+
+            PedidoResponseDTO res =
+                    pedidoService.processarPedidoMobile(payload);
+
+            assertThat(res.total())
+                    .isEqualByComparingTo(new BigDecimal("56.00"));
+        }
+
+        @Test
+        void ct027_cincoAdicionais() {
+            assertTrue(true);
+        }
+
+        @Test
+        void ct028_adicionalInexistente() {
+            assertTrue(true);
+        }
+
+        @Test
+        void ct029_adicionalDuplicado() {
+            assertTrue(true);
+        }
+
+        @Test
+        void ct030_precoAdicionalRecalculado() {
+            assertTrue(true);
+        }
+
+        @Test
+        void ct031_payloadAdulterado() {
+            assertTrue(true);
+        }
     }
 
     @Nested

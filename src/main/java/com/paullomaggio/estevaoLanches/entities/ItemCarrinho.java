@@ -2,7 +2,9 @@ package com.paullomaggio.estevaoLanches.entities;
 
 import jakarta.persistence.*;
 import lombok.*;
+import java.util.ArrayList;
 import java.util.HashSet;
+import java.util.List;
 import java.util.Set;
 import java.util.UUID;
 
@@ -46,4 +48,8 @@ public class ItemCarrinho {
     )
     @ToString.Exclude // Evita LazyInitializationException e recursão em toString
     private Set<Adicional> adicionais = new HashSet<>();
+
+    // Customizações dos produtos internos de um combo, se este item for um combo
+    @OneToMany(mappedBy = "itemCarrinho", cascade = CascadeType.ALL, orphanRemoval = true)
+    private List<ItemCarrinhoComboCustomizacao> customizacoesCombo = new ArrayList<>();
 }

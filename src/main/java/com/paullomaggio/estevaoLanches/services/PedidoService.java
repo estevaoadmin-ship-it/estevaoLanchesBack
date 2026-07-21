@@ -18,9 +18,12 @@ import java.math.BigDecimal;
 import java.sql.SQLException;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 import java.util.Optional;
+import java.util.Set;
 import java.util.stream.Collectors;
 
 @Service
@@ -43,6 +46,26 @@ public class PedidoService {
     private final ItemComboRepository itemComboRepository;
     private final ComboProdutoRepository comboProdutoRepository;
     private final PagamentoService pagamentoService;
+    private final AdicionalValidationService adicionalValidationService;
+    private final ClienteRepository clienteRepository;
+
+    // Record temporário para correlacionar o DTO de entrada com o ItemPedido criado (PedidoMobile)
+    private record ItemPedidoCorrelation(
+            PedidoMobileRequestDTO.ItemPedidoPayloadDTO payloadDTO,
+            ItemPedido itemPedido
+    ) {}
+
+    // Record temporário para correlacionar o DTO de entrada com o ItemPedido criado (CheckoutDelivery explícito)
+    private record CheckoutDeliveryItemCorrelation(
+            CheckoutDeliveryItemRequestDTO payloadDTO,
+            ItemPedido itemPedido
+    ) {}
+
+    // Record temporário para correlacionar ItemCarrinho com ItemPedido criado (Checkout Delivery legado)
+    private record ItemCarrinhoToItemPedidoCorrelation(
+            ItemCarrinho itemCarrinho,
+            ItemPedido itemPedido
+    ) {}
 
     @Transactional
     public PedidoResponseDTO processarPedidoMobile(PedidoMobileRequestDTO dto) {
@@ -82,7 +105,7 @@ public class PedidoService {
 
         BigDecimal subtotalLote = BigDecimal.ZERO;
         boolean necessitaPreparoCozinha = false;
-
+        List<ItemPedidoCorrelation> correlations = new ArrayList<>(); // Lista para correlação
 
         for (PedidoMobileRequestDTO.ItemPedidoPayloadDTO itemDto : dto.itens()) {
             Produto produto = produtoRepository.findById(itemDto.produtoId())
@@ -116,12 +139,32 @@ public class PedidoService {
             if (produto.getPrecisaPreparo()) {
                 necessitaPreparoCozinha = true;
             }
+            correlations.add(new ItemPedidoCorrelation(itemDto, item)); // Adiciona a correlação
         }
 
         pedido.setTotal(subtotalLote);
         Pedido pedidoSalvo = pedidoRepository.saveAndFlush(pedido);
 
-        criarSnapshotsDosCombos(pedidoSalvo);
+        Map<UUID, Map<UUID, ItemCombo>> comboSnapshotsCriados = criarSnapshotsDosCombos(pedidoSalvo);
+
+        // Apply customizations using the direct correlation
+        for (ItemPedidoCorrelation correlation : correlations) {
+            PedidoMobileRequestDTO.ItemPedidoPayloadDTO itemDto = correlation.payloadDTO();
+            ItemPedido itemPedido = correlation.itemPedido();
+
+            if (itemDto.itensCombo() != null && !itemDto.itensCombo().isEmpty()) {
+                Map<UUID, ItemCombo> itemComboMap = comboSnapshotsCriados.get(itemPedido.getId());
+                if (itemComboMap == null || itemComboMap.isEmpty()) {
+                    throw new BusinessRuleException("Snapshots de combo não encontrados para o ItemPedido " + itemPedido.getId());
+                }
+
+                aplicarCustomizacoesDosItensCombo(itemPedido, itemComboMap, itemDto.itensCombo());
+            }
+        }
+
+        // Recalculate total after applying combo customizations
+        recalcularTotalPedido(pedidoSalvo.getId());
+
 
         if (necessitaPreparoCozinha) {
             FilaImpressao cupomCozinha = new FilaImpressao();
@@ -217,11 +260,11 @@ public class PedidoService {
     public PedidoResponseDTO finalizarDelivery(CheckoutDeliveryRequestDTO dto) {
         validarCaixaAberto();
 
-        Carrinho carrinho = localizarCarrinho(dto.clienteId());
-        validarCarrinhoNaoVazio(carrinho);
+        Cliente cliente = clienteRepository.findById(dto.clienteId())
+                .orElseThrow(() -> new ResourceNotFoundException("Cliente não localizado para o pedido de Delivery."));
 
         Pedido pedido = new Pedido();
-        pedido.setCliente(carrinho.getCliente());
+        pedido.setCliente(cliente);
         pedido.setTipo(TipoPedido.DELIVERY);
         pedido.setEnderecoEntrega(dto.enderecoEntrega());
         pedido.setStatus(StatusPedido.RECEBIDO);
@@ -231,13 +274,110 @@ public class PedidoService {
         pedido.setObservacaoGeral(dto.observacao());
         pedido.setItens(new ArrayList<>());
 
-        copiarItensDoCarrinho(carrinho, pedido);
-        calcularEPreencherTotal(pedido);
+        List<CheckoutDeliveryItemCorrelation> explicitCorrelations = new ArrayList<>();
+        List<ItemCarrinhoToItemPedidoCorrelation> cartCorrelations = new ArrayList<>();
+        boolean necessitaPreparoCozinha = false;
 
+        if (dto.itens() != null && !dto.itens().isEmpty()) {
+            // Fluxo PDV Delivery com itens explícitos
+            for (CheckoutDeliveryItemRequestDTO itemDto : dto.itens()) {
+                Produto produto = produtoRepository.findById(itemDto.produtoId())
+                        .orElseThrow(() -> new ResourceNotFoundException("Produto do cardápio não localizado."));
+
+                List<Adicional> adicionaisVinculados = itemDto.adicionaisIds() != null ?
+                        adicionalRepository.findAllById(itemDto.adicionaisIds()) : new ArrayList<>();
+
+                BigDecimal precoAdicionais = adicionaisVinculados.stream()
+                        .map(Adicional::getPreco)
+                        .reduce(BigDecimal.ZERO, BigDecimal::add);
+
+                BigDecimal precoFinalItemUnitario = produto.getPreco().add(precoAdicionais);
+                if (precoFinalItemUnitario.compareTo(BigDecimal.ZERO) <= 0) {
+                    throw new BusinessRuleException("Preço final do item não pode ser zero ou negativo.");
+                }
+
+                ItemPedido item = new ItemPedido();
+                item.setProduto(produto);
+                item.setQuantidade(itemDto.quantidade());
+                item.setPrecoUnitario(precoFinalItemUnitario);
+                item.setAdicionais(adicionaisVinculados);
+                item.setPedido(pedido);
+                item.setObservacaoItem(itemDto.observacao());
+                item.setStatusPagamento(StatusPagamento.ABERTO);
+
+                pedido.getItens().add(item);
+                if (produto.getPrecisaPreparo()) {
+                    necessitaPreparoCozinha = true;
+                }
+                explicitCorrelations.add(new CheckoutDeliveryItemCorrelation(itemDto, item));
+            }
+        } else {
+            // Fluxo legado Delivery pelo Carrinho backend
+            Carrinho carrinho = localizarCarrinho(dto.clienteId());
+            validarCarrinhoNaoVazio(carrinho);
+            cartCorrelations = copiarItensDoCarrinho(carrinho, pedido); // Agora retorna as correlações
+            // Determine if prep is needed for legacy flow
+            necessitaPreparoCozinha = pedido.getItens().stream()
+                    .anyMatch(item -> Boolean.TRUE.equals(item.getProduto().getPrecisaPreparo()));
+        }
+
+        calcularEPreencherTotal(pedido);
         Pedido pedidoSalvo = salvarPedido(pedido);
-        criarSnapshotsDosCombos(pedidoSalvo);
-        gerarFilaImpressao(pedidoSalvo);
-        limparCarrinho(carrinho);
+
+        Map<UUID, Map<UUID, ItemCombo>> comboSnapshotsCriados = criarSnapshotsDosCombos(pedidoSalvo);
+
+        // Apply customizations for explicit items (PDV Delivery)
+        for (CheckoutDeliveryItemCorrelation correlation : explicitCorrelations) {
+            CheckoutDeliveryItemRequestDTO itemDto = correlation.payloadDTO();
+            ItemPedido itemPedido = correlation.itemPedido();
+
+            if (itemDto.itensCombo() != null && !itemDto.itensCombo().isEmpty()) {
+                Map<UUID, ItemCombo> itemComboMap = comboSnapshotsCriados.get(itemPedido.getId());
+                if (itemComboMap == null || itemComboMap.isEmpty()) {
+                    throw new BusinessRuleException("Snapshots de combo não encontrados para o ItemPedido " + itemPedido.getId());
+                }
+                aplicarCustomizacoesDosItensCombo(itemPedido, itemComboMap, itemDto.itensCombo());
+            }
+        }
+
+        // Apply customizations for cart items (Legacy Delivery)
+        for (ItemCarrinhoToItemPedidoCorrelation correlation : cartCorrelations) {
+            ItemCarrinho itemCarrinho = correlation.itemCarrinho();
+            ItemPedido itemPedido = correlation.itemPedido();
+
+            if (Boolean.TRUE.equals(itemCarrinho.getProduto().getIsCombo()) &&
+                itemCarrinho.getCustomizacoesCombo() != null &&
+                !itemCarrinho.getCustomizacoesCombo().isEmpty()) {
+
+                Map<UUID, ItemCombo> itemComboMap = comboSnapshotsCriados.get(itemPedido.getId());
+                if (itemComboMap == null || itemComboMap.isEmpty()) {
+                    throw new BusinessRuleException("Snapshots de combo não encontrados para o ItemPedido " + itemPedido.getId());
+                }
+
+                // Converter ItemCarrinhoComboCustomizacao para ItemComboCustomizacaoRequestDTO
+                List<ItemComboCustomizacaoRequestDTO> customizacoesParaAplicar = itemCarrinho.getCustomizacoesCombo().stream()
+                        .map(cartCustom -> new ItemComboCustomizacaoRequestDTO(
+                                cartCustom.getComboProdutoId(),
+                                cartCustom.getAdicionais().stream().map(Adicional::getId).collect(Collectors.toList())
+                        ))
+                        .collect(Collectors.toList());
+
+                aplicarCustomizacoesDosItensCombo(itemPedido, itemComboMap, customizacoesParaAplicar);
+            }
+        }
+
+
+        // Recalculate total after applying combo customizations (if any)
+        recalcularTotalPedido(pedidoSalvo.getId());
+
+        if (necessitaPreparoCozinha) {
+            gerarFilaImpressao(pedidoSalvo);
+        }
+
+        // Only clear cart if it was the legacy flow
+        if (dto.itens() == null || dto.itens().isEmpty()) {
+            limparCarrinho(localizarCarrinho(dto.clienteId()));
+        }
 
         return new PedidoResponseDTO(pedidoSalvo);
     }
@@ -259,11 +399,38 @@ public class PedidoService {
         pedido.setObservacaoGeral(dto.observacao());
         pedido.setItens(new ArrayList<>());
 
-        copiarItensDoCarrinho(carrinho, pedido);
+        List<ItemCarrinhoToItemPedidoCorrelation> cartCorrelations = copiarItensDoCarrinho(carrinho, pedido); // Retorna as correlações
         calcularEPreencherTotal(pedido);
 
         Pedido pedidoSalvo = salvarPedido(pedido);
-        criarSnapshotsDosCombos(pedidoSalvo);
+        Map<UUID, Map<UUID, ItemCombo>> comboSnapshotsCriados = criarSnapshotsDosCombos(pedidoSalvo);
+
+        // Apply customizations for cart items
+        for (ItemCarrinhoToItemPedidoCorrelation correlation : cartCorrelations) {
+            ItemCarrinho itemCarrinho = correlation.itemCarrinho();
+            ItemPedido itemPedido = correlation.itemPedido();
+
+            if (Boolean.TRUE.equals(itemCarrinho.getProduto().getIsCombo()) &&
+                itemCarrinho.getCustomizacoesCombo() != null &&
+                !itemCarrinho.getCustomizacoesCombo().isEmpty()) {
+
+                Map<UUID, ItemCombo> itemComboMap = comboSnapshotsCriados.get(itemPedido.getId());
+                if (itemComboMap == null || itemComboMap.isEmpty()) {
+                    throw new BusinessRuleException("Snapshots de combo não encontrados para o ItemPedido " + itemPedido.getId());
+                }
+
+                List<ItemComboCustomizacaoRequestDTO> customizacoesParaAplicar = itemCarrinho.getCustomizacoesCombo().stream()
+                        .map(cartCustom -> new ItemComboCustomizacaoRequestDTO(
+                                cartCustom.getComboProdutoId(),
+                                cartCustom.getAdicionais().stream().map(Adicional::getId).collect(Collectors.toList())
+                        ))
+                        .collect(Collectors.toList());
+
+                aplicarCustomizacoesDosItensCombo(itemPedido, itemComboMap, customizacoesParaAplicar);
+            }
+        }
+        recalcularTotalPedido(pedidoSalvo.getId()); // Recalcular após aplicar customizações
+
         gerarFilaImpressao(pedidoSalvo);
         limparCarrinho(carrinho);
 
@@ -388,7 +555,8 @@ public class PedidoService {
         }
     }
 
-    private void copiarItensDoCarrinho(Carrinho carrinho, Pedido pedido) {
+    private List<ItemCarrinhoToItemPedidoCorrelation> copiarItensDoCarrinho(Carrinho carrinho, Pedido pedido) {
+        List<ItemCarrinhoToItemPedidoCorrelation> correlations = new ArrayList<>();
         for (ItemCarrinho itemCarrinho : carrinho.getItens()) {
             ItemPedido item = new ItemPedido();
             item.setProduto(itemCarrinho.getProduto());
@@ -408,7 +576,9 @@ public class PedidoService {
             item.setPedido(pedido);
             item.setStatusPagamento(StatusPagamento.ABERTO);
             pedido.getItens().add(item);
+            correlations.add(new ItemCarrinhoToItemPedidoCorrelation(itemCarrinho, item));
         }
+        return correlations;
     }
 
     private void copiarItensDasRequests(List<ItemPedidoRequestDTO> itens, Pedido pedido) {
@@ -732,51 +902,103 @@ public class PedidoService {
         return totalAdicionaisCombos;
     }
 
-    private void criarSnapshotsDoCombo(ItemPedido itemPedido) {
+    private Map<UUID, ItemCombo> criarSnapshotsDoCombo(ItemPedido itemPedido) {
         if (itemPedido == null
                 || itemPedido.getProduto() == null
                 || itemPedido.getId() == null) {
-            return;
+            return new HashMap<>();
         }
 
         if (!Boolean.TRUE.equals(itemPedido.getProduto().getIsCombo())) {
-            return;
+            return new HashMap<>();
         }
 
         List<ItemCombo> existentes = itemComboRepository.findByItemPedidoId(itemPedido.getId());
         if (!existentes.isEmpty()) {
-            return;
+            // If snapshots already exist, we assume they were created in a previous call
+            // and we don't need to re-create or correlate them for *this* creation flow.
+            // The instruction states "A correlação é necessária apenas durante a criação."
+            return new HashMap<>();
         }
 
         List<ComboProduto> composicao = comboProdutoRepository.findByComboId(itemPedido.getProduto().getId());
 
         if (composicao.isEmpty()) {
-            return;
+            return new HashMap<>();
         }
 
-        List<ItemCombo> snapshots = composicao.stream()
-                .map(config -> {
-                    Produto produtoInterno = config.getProduto();
-                    ItemCombo itemCombo = new ItemCombo();
+        List<ItemCombo> snapshots = new ArrayList<>();
+        Map<UUID, ItemCombo> comboProdutoIdToItemComboMap = new HashMap<>();
 
-                    itemCombo.setItemPedido(itemPedido);
-                    itemCombo.setProdutoId(produtoInterno.getId());
-                    itemCombo.setNomeProduto(produtoInterno.getNome());
-                    itemCombo.setQuantidade(config.getQuantidade());
-                    itemCombo.setPrecoUnitario(produtoInterno.getPreco());
+        for (ComboProduto config : composicao) {
+            Produto produtoInterno = config.getProduto();
+            ItemCombo itemCombo = new ItemCombo();
 
-                    return itemCombo;
-                })
-                .collect(Collectors.toList());
+            itemCombo.setItemPedido(itemPedido);
+            itemCombo.setProdutoId(produtoInterno.getId());
+            itemCombo.setNomeProduto(produtoInterno.getNome());
+            itemCombo.setQuantidade(config.getQuantidade());
+            itemCombo.setPrecoUnitario(produtoInterno.getPreco());
+            itemCombo.setAdicionais(new ArrayList<>()); // Initialize empty list for new ItemCombo
+
+            snapshots.add(itemCombo);
+            comboProdutoIdToItemComboMap.put(config.getId(), itemCombo); // Correlate ComboProduto.id with ItemCombo
+        }
 
         itemComboRepository.saveAll(snapshots);
+        return comboProdutoIdToItemComboMap;
     }
 
-    private void criarSnapshotsDosCombos(Pedido pedido) {
+    private Map<UUID, Map<UUID, ItemCombo>> criarSnapshotsDosCombos(Pedido pedido) {
         if (pedido == null || pedido.getItens() == null) {
-            return;
+            return new HashMap<>();
         }
 
-        pedido.getItens().forEach(this::criarSnapshotsDoCombo);
+        Map<UUID, Map<UUID, ItemCombo>> allComboSnapshots = new HashMap<>();
+        for (ItemPedido itemPedido : pedido.getItens()) {
+            if (Boolean.TRUE.equals(itemPedido.getProduto().getIsCombo())) {
+                Map<UUID, ItemCombo> comboSnapshots = criarSnapshotsDoCombo(itemPedido);
+                if (!comboSnapshots.isEmpty()) {
+                    allComboSnapshots.put(itemPedido.getId(), comboSnapshots);
+                }
+            }
+        }
+        return allComboSnapshots;
+    }
+
+    private void aplicarCustomizacoesDosItensCombo(
+            ItemPedido itemPedidoPai,
+            Map<UUID, ItemCombo> comboProdutoIdToItemComboMap,
+            List<ItemComboCustomizacaoRequestDTO> customizacoes
+    ) {
+        Produto comboProdutoPrincipal = itemPedidoPai.getProduto();
+
+        for (ItemComboCustomizacaoRequestDTO customizacao : customizacoes) {
+            UUID comboProdutoId = customizacao.comboProdutoId();
+            List<UUID> adicionaisIds = customizacao.adicionaisIds();
+
+            // 1. Validar que comboProdutoId pertence ao Combo do ItemPedido
+            ComboProduto comboProdutoConfig = comboProdutoRepository.findById(comboProdutoId)
+                    .orElseThrow(() -> new BusinessRuleException("Configuração de ComboProduto não localizada para o ID: " + comboProdutoId));
+
+            if (!comboProdutoConfig.getCombo().getId().equals(comboProdutoPrincipal.getId())) {
+                throw new BusinessRuleException("ComboProduto com ID " + comboProdutoId + " não pertence ao combo principal " + comboProdutoPrincipal.getNome());
+            }
+
+            // 2. O ItemCombo correspondente foi realmente criado
+            ItemCombo itemCombo = comboProdutoIdToItemComboMap.get(comboProdutoId);
+            if (itemCombo == null) {
+                throw new BusinessRuleException("ItemCombo correspondente ao ComboProduto " + comboProdutoId + " não foi encontrado após a criação dos snapshots.");
+            }
+
+            // 3. Validar e aplicar os adicionais
+            if (adicionaisIds != null && !adicionaisIds.isEmpty()) {
+                List<Adicional> adicionaisValidados = adicionalValidationService.validarAdicionaisPermitidos(itemCombo.getProdutoId(), adicionaisIds);
+                itemCombo.setAdicionais(adicionaisValidados);
+            } else {
+                itemCombo.setAdicionais(new ArrayList<>()); // Clear if empty list is sent
+            }
+            itemComboRepository.save(itemCombo); // Save the updated ItemCombo
+        }
     }
 }

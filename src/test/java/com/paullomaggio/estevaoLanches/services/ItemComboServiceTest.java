@@ -42,7 +42,7 @@ class ItemComboServiceTest {
     @Mock private AdicionalRepository adicionalRepository;
     @Mock private ProdutoRepository produtoRepository;
     @Mock private PedidoService pedidoService;
-    // @Mock private ComboProdutoRepository comboProdutoRepository; // NOVO MOCK: ComboProdutoRepository - REMOVIDO
+    @Mock private AdicionalValidationService adicionalValidationService; // NOVO MOCK
 
     private ItemComboService itemComboService;
 
@@ -64,8 +64,8 @@ class ItemComboServiceTest {
                 itemPedidoRepository,
                 adicionalRepository,
                 produtoRepository,
-                pedidoService
-                // comboProdutoRepository // Passar o novo mock - REMOVIDO
+                pedidoService,
+                adicionalValidationService // Passando novo mock
         );
 
         itemPedidoId = UUID.randomUUID();
@@ -224,26 +224,52 @@ class ItemComboServiceTest {
             produtoInternoMock.getAdicionais().add(adicional1); // Adicional permitido para o produto
             produtoInternoMock.getAdicionais().add(adicional2); // Adicional permitido para o produto
 
+            pedidoMock.setItens(List.of(itemPedidoMock)); // Adicionar itemPedidoMock ao pedidoMock
+            itemPedidoMock.setProduto(new Produto()); // Produto do itemPedidoMock
+            itemPedidoMock.getProduto().setIsCombo(true); // Marcar como combo
+
             pedidoResponseDTOMock = new PedidoResponseDTO(pedidoMock);
         }
 
         @Test
         @DisplayName("CT-NOVO-001: Deve adicionar adicionais a um ItemCombo com sucesso")
         void deveAdicionarAdicionaisComSucesso() {
-            when(itemComboRepository.findById(itemComboId)).thenReturn(Optional.of(itemComboMock));
-            when(produtoRepository.findById(produtoFilhoId)).thenReturn(Optional.of(produtoInternoMock));
-            when(adicionalRepository.findAllById(List.of(adicional1.getId()))).thenReturn(List.of(adicional1));
-            when(itemComboRepository.save(any(ItemCombo.class))).thenReturn(itemComboMock);
-            when(pedidoService.recalcularTotalPedido(pedidoId)).thenReturn(pedidoResponseDTOMock);
+            when(itemComboRepository.findById(itemComboId))
+                    .thenReturn(Optional.of(itemComboMock));
 
-            PedidoResponseDTO resultado = itemComboService.atualizarAdicionaisDoItemCombo(itemComboId, List.of(adicional1.getId()));
+            when(adicionalValidationService.validarAdicionaisPermitidos(
+                    eq(produtoFilhoId),
+                    anyList()
+            )).thenReturn(List.of(adicional1));
+
+            when(itemComboRepository.save(any(ItemCombo.class)))
+                    .thenReturn(itemComboMock);
+
+            when(pedidoService.recalcularTotalPedido(pedidoId))
+                    .thenReturn(pedidoResponseDTOMock);
+
+            PedidoResponseDTO resultado =
+                    itemComboService.atualizarAdicionaisDoItemCombo(
+                            itemComboId,
+                            List.of(adicional1.getId())
+                    );
 
             assertNotNull(resultado);
-            verify(itemComboRepository, times(1)).findById(itemComboId);
-            verify(produtoRepository, times(1)).findById(produtoFilhoId);
-            verify(adicionalRepository, times(1)).findAllById(List.of(adicional1.getId()));
-            verify(itemComboRepository, times(1)).save(argThat(ic -> ic.getAdicionais().contains(adicional1)));
-            verify(pedidoService, times(1)).recalcularTotalPedido(pedidoId);
+
+            verify(itemComboRepository, times(1))
+                    .findById(itemComboId);
+
+            verify(produtoRepository, never())
+                    .findById(produtoFilhoId);
+
+            verify(adicionalValidationService, times(1))
+                    .validarAdicionaisPermitidos(eq(produtoFilhoId), anyList());
+
+            verify(itemComboRepository, times(1))
+                    .save(argThat(ic -> ic.getAdicionais().contains(adicional1)));
+
+            verify(pedidoService, times(1))
+                    .recalcularTotalPedido(pedidoId);
         }
 
         @Test
@@ -252,8 +278,7 @@ class ItemComboServiceTest {
             itemComboMock.getAdicionais().add(adicional1); // Adicionar um adicional para remover
 
             when(itemComboRepository.findById(itemComboId)).thenReturn(Optional.of(itemComboMock));
-            when(produtoRepository.findById(produtoFilhoId)).thenReturn(Optional.of(produtoInternoMock));
-            when(adicionalRepository.findAllById(Collections.emptyList())).thenReturn(Collections.emptyList());
+            when(adicionalValidationService.validarAdicionaisPermitidos(eq(produtoFilhoId), anyList())).thenReturn(Collections.emptyList());
             when(itemComboRepository.save(any(ItemCombo.class))).thenReturn(itemComboMock);
             when(pedidoService.recalcularTotalPedido(pedidoId)).thenReturn(pedidoResponseDTOMock);
 
@@ -270,8 +295,7 @@ class ItemComboServiceTest {
             itemComboMock.getAdicionais().add(adicional1); // Adicional inicial
 
             when(itemComboRepository.findById(itemComboId)).thenReturn(Optional.of(itemComboMock));
-            when(produtoRepository.findById(produtoFilhoId)).thenReturn(Optional.of(produtoInternoMock));
-            when(adicionalRepository.findAllById(List.of(adicional2.getId()))).thenReturn(List.of(adicional2));
+            when(adicionalValidationService.validarAdicionaisPermitidos(eq(produtoFilhoId), anyList())).thenReturn(List.of(adicional2));
             when(itemComboRepository.save(any(ItemCombo.class))).thenReturn(itemComboMock);
             when(pedidoService.recalcularTotalPedido(pedidoId)).thenReturn(pedidoResponseDTOMock);
 
@@ -292,6 +316,7 @@ class ItemComboServiceTest {
             assertThrows(ResourceNotFoundException.class, () ->
                     itemComboService.atualizarAdicionaisDoItemCombo(itemComboId, List.of(adicional1.getId())));
             verify(produtoRepository, never()).findById(any());
+            verify(adicionalValidationService, never()).validarAdicionaisPermitidos(any(), anyList());
             verify(adicionalRepository, never()).findAllById(any());
             verify(itemComboRepository, never()).save(any());
             verify(pedidoService, never()).recalcularTotalPedido(any());
@@ -300,12 +325,15 @@ class ItemComboServiceTest {
         @Test
         @DisplayName("CT-NOVO-005: Deve rejeitar adicionais se Produto interno não for encontrado")
         void deveRejeitarSeProdutoInternoNaoEncontrado() {
+            // Este cenário não deve mais ocorrer, pois a validação é feita pelo AdicionalValidationService
+            // que já lida com a busca do produto interno.
+            // O mock de produtoRepository.findById(produtoFilhoId) não é mais necessário aqui.
             when(itemComboRepository.findById(itemComboId)).thenReturn(Optional.of(itemComboMock));
-            when(produtoRepository.findById(produtoFilhoId)).thenReturn(Optional.empty());
+            when(adicionalValidationService.validarAdicionaisPermitidos(eq(produtoFilhoId), anyList()))
+                    .thenThrow(new ResourceNotFoundException("Produto interno não localizado para validação de adicionais."));
 
             assertThrows(ResourceNotFoundException.class, () ->
                     itemComboService.atualizarAdicionaisDoItemCombo(itemComboId, List.of(adicional1.getId())));
-            verify(adicionalRepository, never()).findAllById(any());
             verify(itemComboRepository, never()).save(any());
             verify(pedidoService, never()).recalcularTotalPedido(any());
         }
@@ -316,10 +344,8 @@ class ItemComboServiceTest {
             UUID adicionalInexistenteId = UUID.randomUUID();
 
             when(itemComboRepository.findById(itemComboId)).thenReturn(Optional.of(itemComboMock));
-            when(produtoRepository.findById(produtoFilhoId)).thenReturn(Optional.of(produtoInternoMock));
-            // Retorna apenas o adicional existente, indicando que um ID não foi encontrado
-            when(adicionalRepository.findAllById(List.of(adicional1.getId(), adicionalInexistenteId)))
-                    .thenReturn(List.of(adicional1));
+            when(adicionalValidationService.validarAdicionaisPermitidos(eq(produtoFilhoId), anyList()))
+                    .thenThrow(new BusinessRuleException("Adicionais não encontrados: [" + adicionalInexistenteId + "]"));
 
             assertThrows(BusinessRuleException.class, () ->
                     itemComboService.atualizarAdicionaisDoItemCombo(itemComboId, List.of(adicional1.getId(), adicionalInexistenteId)));
@@ -331,12 +357,10 @@ class ItemComboServiceTest {
         @DisplayName("CT-NOVO-007: Deve rejeitar adicional não permitido para o produto interno")
         void deveRejeitarAdicionalNaoPermitido() {
             Adicional adicionalNaoPermitido = new Adicional(UUID.randomUUID(), "Picles", BigDecimal.valueOf(1.00));
-            // produtoInternoMock não tem adicionalNaoPermitido em sua lista de permitidos
 
             when(itemComboRepository.findById(itemComboId)).thenReturn(Optional.of(itemComboMock));
-            when(produtoRepository.findById(produtoFilhoId)).thenReturn(Optional.of(produtoInternoMock));
-            when(adicionalRepository.findAllById(List.of(adicionalNaoPermitido.getId())))
-                    .thenReturn(List.of(adicionalNaoPermitido));
+            when(adicionalValidationService.validarAdicionaisPermitidos(eq(produtoFilhoId), anyList()))
+                    .thenThrow(new BusinessRuleException("Adicional 'Picles' não permitido para o produto 'X-Bacon'."));
 
             assertThrows(BusinessRuleException.class, () ->
                     itemComboService.atualizarAdicionaisDoItemCombo(itemComboId, List.of(adicionalNaoPermitido.getId())));

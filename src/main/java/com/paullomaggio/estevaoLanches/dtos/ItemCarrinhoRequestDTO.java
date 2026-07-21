@@ -1,6 +1,7 @@
 package com.paullomaggio.estevaoLanches.dtos;
 
 import io.swagger.v3.oas.annotations.media.Schema;
+import java.util.List;
 import java.util.Set;
 import java.util.UUID;
 
@@ -28,5 +29,26 @@ public record ItemCarrinhoRequestDTO(
             description = "Lista de IDs dos adicionais selecionados para este item do carrinho",
             example = "[\"1a2b3c4d-5e6f-7890-1234-567890abcdef\", \"f1e2d3c4-b5a6-9876-5432-10fedcba9876\"]"
         )
-        Set<UUID> adicionaisIds
-) {}
+        Set<UUID> adicionaisIds,
+        @Schema(
+            description = "Customizações de produtos internos de um combo, se o produto principal for um combo",
+            implementation = ItemComboCustomizacaoRequestDTO.class
+        )
+        List<ItemComboCustomizacaoRequestDTO> itensCombo
+) {
+    // Construtor retrocompatível
+    public ItemCarrinhoRequestDTO(
+            UUID produtoId,
+            Integer quantidade,
+            String observacao,
+            Set<UUID> adicionaisIds
+    ) {
+        this(
+            produtoId,
+            quantidade,
+            observacao,
+            adicionaisIds,
+            null // itensCombo é nulo para retrocompatibilidade
+        );
+    }
+}

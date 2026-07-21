@@ -679,7 +679,16 @@ class MesaE2ETest {
                 .orElseThrow(() -> new RuntimeException("Usuário ADMIN não encontrado para abrir o caixa."));
 
         // 1. Abertura forçada de caixa limpo
-        caixaRepository.deleteAll(); // Limpa caixas existentes para garantir um novo
+        // Procura por um caixa aberto existente e o fecha
+        caixaRepository.findByStatus(StatusCaixa.ABERTO)
+                .ifPresent(caixaAberto -> {
+                    caixaAberto.setStatus(StatusCaixa.FECHADO);
+                    caixaAberto.setDataHoraFechamento(LocalDateTime.now());
+                    caixaRepository.saveAndFlush(caixaAberto);
+                    entityManager.flush();
+                    entityManager.clear();
+                });
+
         Caixa caixaReal = new Caixa(null, LocalDateTime.now(), null, StatusCaixa.ABERTO, new BigDecimal("500.00"), null, null, null, operador, null);
         caixaRepository.saveAndFlush(caixaReal);
 

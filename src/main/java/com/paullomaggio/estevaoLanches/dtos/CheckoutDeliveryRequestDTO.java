@@ -2,6 +2,7 @@ package com.paullomaggio.estevaoLanches.dtos;
 
 import io.swagger.v3.oas.annotations.media.Schema;
 import jakarta.validation.constraints.NotNull;
+import java.util.List;
 import java.util.UUID;
 
 @Schema(description = "DTO exclusivo para checkout de pedidos via Delivery (com cliente cadastrado)")
@@ -15,5 +16,22 @@ public record CheckoutDeliveryRequestDTO(
         String enderecoEntrega,
 
         @Schema(description = "Observações e pontos de referência para a entrega", example = "Próximo ao metrô")
-        String observacao
-) {}
+        String observacao,
+
+        @Schema(description = "Lista de itens do pedido, usada quando o pedido é originado do PDV e não do carrinho backend")
+        List<CheckoutDeliveryItemRequestDTO> itens
+) {
+    // Construtor retrocompatível para chamadas antigas que não incluem 'itens'
+    public CheckoutDeliveryRequestDTO(
+            UUID clienteId,
+            String enderecoEntrega,
+            String observacao
+    ) {
+        this(
+            clienteId,
+            enderecoEntrega,
+            observacao,
+            null // 'itens' é nulo para manter a retrocompatibilidade
+        );
+    }
+}

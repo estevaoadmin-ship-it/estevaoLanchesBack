@@ -42,11 +42,12 @@ public class GarcomMesaSessaoService {
                 List<PedidoMobileRequestDTO.ItemPedidoPayloadDTO> itensParaLegado = contaSync.novosItens().stream()
                         .map(itemNovo -> new PedidoMobileRequestDTO.ItemPedidoPayloadDTO(
                                 itemNovo.produtoId(),
-                                null,
+                                null, // nome
                                 itemNovo.quantidade(),
-                                null,
+                                null, // precoCalculado
                                 itemNovo.observacao(),
-                                itemNovo.adicionaisIds()
+                                itemNovo.adicionaisIds(),
+                                itemNovo.itensCombo() // Propagando o novo campo
                         )).toList();
 
                 // Organizada a ordem exata dos parâmetros do seu PedidoMobileRequestDTO mestre

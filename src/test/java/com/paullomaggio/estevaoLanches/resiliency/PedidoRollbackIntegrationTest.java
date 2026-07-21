@@ -39,6 +39,7 @@ public class PedidoRollbackIntegrationTest {
 
     @MockitoBean private PedidoRepository pedidoRepository;
     @MockitoBean private CarrinhoRepository carrinhoRepository;
+    @MockitoBean private ClienteRepository clienteRepository;
     @MockitoBean private CaixaRepository caixaRepository;
     @MockitoBean private ProdutoRepository produtoRepository;
     @MockitoBean private AdicionalRepository adicionalRepository;
@@ -106,6 +107,7 @@ public class PedidoRollbackIntegrationTest {
 
         // Stubbing padrão para simular comportamento saudável do sistema
         lenient().when(caixaRepository.existsByStatus(StatusCaixa.ABERTO)).thenReturn(true);
+        lenient().when(clienteRepository.findById(clienteId)).thenReturn(Optional.of(clienteMock));
         lenient().when(carrinhoRepository.findByClienteId(clienteId)).thenReturn(Optional.of(carrinhoMock));
         lenient().when(produtoRepository.findById(produtoId)).thenReturn(Optional.of(produtoMock));
         lenient().when(contaRepository.findByComandaIdAndNumeroConta(comandaId, 1)).thenReturn(Optional.of(contaMock));
@@ -600,7 +602,7 @@ public class PedidoRollbackIntegrationTest {
         }
 
         @Test
-        @DisplayName("RB045 - ValorRecebido nunca fica divergente do Total calculado do pedido")
+        @DisplayName("RB045 - ValorRecebido nunca fica divergente do Total calculated do pedido")
         void rb045() {
             pedidoMock.setTotal(new BigDecimal("100.00"));
             pedidoMock.setValorRecebido(new BigDecimal("100.00"));

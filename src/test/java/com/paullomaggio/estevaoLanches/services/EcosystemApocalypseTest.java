@@ -23,6 +23,9 @@ import java.util.concurrent.atomic.AtomicInteger;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyInt;
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.*;
 
 @ExtendWith(MockitoExtension.class)
@@ -39,12 +42,14 @@ public class EcosystemApocalypseTest {
     @Mock private ClienteRepository clienteRepository;
     @Mock private ComandaRepository comandaRepository;
     @Mock private ContaRepository contaRepository;
-    @Mock private ItemComboRepository itemComboRepository; // Adicionado para a nova feature
-    @Mock private ComboProdutoRepository comboProdutoRepository; // NOVO MOCK: ComboProdutoRepository
-    @Mock private PagamentoService pagamentoService; // NOVO MOCK: PagamentoService
+    @Mock private ItemComboRepository itemComboRepository;
+    @Mock private ComboProdutoRepository comboProdutoRepository;
+    @Mock private PagamentoService pagamentoService;
+    @Mock private AdicionalValidationService adicionalValidationService;
 
-    // Removido @InjectMocks
     private PedidoService pedidoService;
+
+    private Map<UUID, Pedido> pedidosPersistidos;
 
     private UUID prodIdLanche;
     private UUID comandaId;
@@ -58,14 +63,24 @@ public class EcosystemApocalypseTest {
 
     @BeforeEach
     void setUp() {
+        pedidosPersistidos = new ConcurrentHashMap<>();
+
         // Instanciação manual do serviço com os mocks
         pedidoService = new PedidoService(
-                pedidoRepository, carrinhoRepository, caixaRepository,
-                produtoRepository, adicionalRepository, filaImpressaoRepository,
-                comandaRepository, contaRepository, messagingTemplate,
+                pedidoRepository,
+                carrinhoRepository,
+                caixaRepository,
+                produtoRepository,
+                adicionalRepository,
+                filaImpressaoRepository,
+                comandaRepository,
+                contaRepository,
+                messagingTemplate,
                 itemComboRepository,
-                comboProdutoRepository, // Passar o novo mock
-                pagamentoService // Passar o novo mock
+                comboProdutoRepository,
+                pagamentoService,
+                adicionalValidationService,
+                clienteRepository
         );
 
         prodIdLanche = UUID.randomUUID();
@@ -118,6 +133,32 @@ public class EcosystemApocalypseTest {
         lenient().when(contaRepository.findByComandaIdAndNumeroConta(any(), anyInt())).thenReturn(Optional.of(contaMestre));
         lenient().when(contaRepository.save(any(Conta.class))).thenAnswer(i -> i.getArgument(0));
         lenient().when(filaImpressaoRepository.save(any(FilaImpressao.class))).thenAnswer(i -> i.getArgument(0));
+
+        lenient().when(pedidoRepository.saveAndFlush(any(Pedido.class)))
+                .thenAnswer(invocation -> {
+                    Pedido pedido = invocation.getArgument(0);
+                    if (pedido.getId() == null) {
+                        pedido.setId(UUID.randomUUID());
+                    }
+                    pedidosPersistidos.put(pedido.getId(), pedido);
+                    return pedido;
+                });
+
+        lenient().when(pedidoRepository.save(any(Pedido.class)))
+                .thenAnswer(invocation -> {
+                    Pedido pedido = invocation.getArgument(0);
+                    if (pedido.getId() == null) {
+                        pedido.setId(UUID.randomUUID());
+                    }
+                    pedidosPersistidos.put(pedido.getId(), pedido);
+                    return pedido;
+                });
+
+        lenient().when(pedidoRepository.findById(any(UUID.class)))
+                .thenAnswer(invocation -> {
+                    UUID id = invocation.getArgument(0);
+                    return Optional.ofNullable(pedidosPersistidos.get(id));
+                });
     }
 
     private PedidoMobileRequestDTO gerarRequestMobile(UUID comId, int mesa, int conta, int qtd) {
@@ -140,14 +181,8 @@ public class EcosystemApocalypseTest {
         void deveProcessarLoteMassivoSemPerdaDeEntidades() throws InterruptedException {
             int cargaDisparo = 100;
             when(caixaRepository.existsByStatus(StatusCaixa.ABERTO)).thenReturn(true);
-            // REMOVIDO: when(comandaRepository.findById(comandaId)).thenReturn(Optional.of(comandaMestre)); // UnnecessaryStubbing
             when(contaRepository.findByComandaIdAndNumeroConta(eq(comandaId), anyInt())).thenReturn(Optional.of(contaMestre));
             when(produtoRepository.findById(prodIdLanche)).thenReturn(Optional.of(lancheMonstro));
-            when(pedidoRepository.saveAndFlush(any(Pedido.class))).thenAnswer(i -> {
-                Pedido p = i.getArgument(0);
-                if (p.getId() == null) p.setId(UUID.randomUUID());
-                return p;
-            });
 
             ExecutorService executor = Executors.newFixedThreadPool(16);
             CountDownLatch start = new CountDownLatch(1);
@@ -191,9 +226,12 @@ public class EcosystemApocalypseTest {
         }
 
         @Test void ct004_carrinhoIsolado() {
+            UUID clienteId = UUID.randomUUID();
             when(caixaRepository.existsByStatus(StatusCaixa.ABERTO)).thenReturn(true);
-            when(carrinhoRepository.findByClienteId(any())).thenReturn(Optional.empty());
-            CheckoutDeliveryRequestDTO dto = new CheckoutDeliveryRequestDTO(UUID.randomUUID(), "Rua", "Sem cebola");
+            when(clienteRepository.findById(clienteId)).thenReturn(Optional.of(clienteSessao));
+            when(carrinhoRepository.findByClienteId(clienteId)).thenReturn(Optional.empty());
+
+            CheckoutDeliveryRequestDTO dto = new CheckoutDeliveryRequestDTO(clienteId, "Rua", "Sem cebola");
             assertThrows(ResourceNotFoundException.class, () -> pedidoService.finalizarDelivery(dto));
         }
 
@@ -201,7 +239,7 @@ public class EcosystemApocalypseTest {
             when(caixaRepository.existsByStatus(StatusCaixa.ABERTO)).thenReturn(true);
             when(contaRepository.findByComandaIdAndNumeroConta(eq(comandaId), anyInt())).thenReturn(Optional.of(contaMestre));
             when(produtoRepository.findById(prodIdLanche)).thenReturn(Optional.of(lancheMonstro));
-            when(pedidoRepository.saveAndFlush(any())).thenReturn(pedidoCompartilhado);
+
             PedidoResponseDTO res = pedidoService.processarPedidoMobile(gerarRequestMobile(comandaId, 12, 1, 1));
             assertNotNull(res);
         }
@@ -228,7 +266,6 @@ public class EcosystemApocalypseTest {
             when(caixaRepository.existsByStatus(StatusCaixa.ABERTO)).thenReturn(true);
             when(contaRepository.findByComandaIdAndNumeroConta(eq(comandaId), anyInt())).thenReturn(Optional.of(contaMestre));
             when(produtoRepository.findById(any())).thenReturn(Optional.of(lancheMonstro));
-            when(pedidoRepository.saveAndFlush(any())).thenReturn(pedidoCompartilhado);
 
             int threads = 300;
             ExecutorService pool = Executors.newFixedThreadPool(20);
@@ -257,7 +294,6 @@ public class EcosystemApocalypseTest {
             when(caixaRepository.existsByStatus(StatusCaixa.ABERTO)).thenReturn(true);
             when(contaRepository.findByComandaIdAndNumeroConta(any(), anyInt())).thenReturn(Optional.of(contaMestre));
             when(produtoRepository.findById(any())).thenReturn(Optional.of(lancheMonstro));
-            when(pedidoRepository.saveAndFlush(any())).thenReturn(pedidoCompartilhado);
 
             for (int i = 0; i < 10; i++) {
                 PedidoResponseDTO res = pedidoService.processarPedidoMobile(gerarRequestMobile(comandaId, 12, 1, 1));
@@ -289,7 +325,6 @@ public class EcosystemApocalypseTest {
             when(caixaRepository.existsByStatus(StatusCaixa.ABERTO)).thenReturn(true);
             when(contaRepository.findByComandaIdAndNumeroConta(any(), anyInt())).thenReturn(Optional.of(contaMestre));
             when(produtoRepository.findById(any())).thenReturn(Optional.of(lancheMonstro));
-            when(pedidoRepository.saveAndFlush(any())).thenReturn(pedidoCompartilhado);
 
             pedidoService.processarPedidoMobile(gerarRequestMobile(comandaId, 12, 1, 1));
             verify(filaImpressaoRepository, times(1)).save(any(FilaImpressao.class));
@@ -303,7 +338,6 @@ public class EcosystemApocalypseTest {
             when(caixaRepository.existsByStatus(StatusCaixa.ABERTO)).thenReturn(true);
             when(contaRepository.findByComandaIdAndNumeroConta(any(), anyInt())).thenReturn(Optional.of(contaMestre));
             when(produtoRepository.findById(any())).thenReturn(Optional.of(lancheMonstro));
-            when(pedidoRepository.saveAndFlush(any())).thenReturn(pedidoCompartilhado);
 
             pedidoService.processarPedidoMobile(gerarRequestMobile(comandaId, 12, 1, 1));
             verify(messagingTemplate, atLeast(2)).convertAndSend(anyString(), any(Object.class));
@@ -338,11 +372,17 @@ public class EcosystemApocalypseTest {
     class Level17Tests {
         @Test @DisplayName("CT075 ao CT078: Checkout paralelo do mesmo cliente e barreira anti-carrinho vazio")
         void ct075_guerraCarrinhoVazio() {
+            UUID clienteId = UUID.randomUUID();
             when(caixaRepository.existsByStatus(StatusCaixa.ABERTO)).thenReturn(true);
-            Carrinho carrinhoVazio = new Carrinho(); carrinhoVazio.setItens(new ArrayList<>());
-            when(carrinhoRepository.findByClienteId(any())).thenReturn(Optional.of(carrinhoVazio));
+            when(clienteRepository.findById(clienteId)).thenReturn(Optional.of(clienteSessao));
 
-            CheckoutDeliveryRequestDTO dto = new CheckoutDeliveryRequestDTO(UUID.randomUUID(), "Rua", "Sem cebola");
+            Carrinho carrinhoVazio = new Carrinho();
+            carrinhoVazio.setCliente(clienteSessao);
+            carrinhoVazio.setItens(new ArrayList<>());
+
+            when(carrinhoRepository.findByClienteId(clienteId)).thenReturn(Optional.of(carrinhoVazio));
+
+            CheckoutDeliveryRequestDTO dto = new CheckoutDeliveryRequestDTO(clienteId, "Rua", "Sem cebola");
             assertThrows(BusinessRuleException.class, () -> pedidoService.finalizarDelivery(dto));
         }
     }
@@ -353,15 +393,15 @@ public class EcosystemApocalypseTest {
         void ct079_guerraDelivery() {
             UUID cId = UUID.randomUUID();
             when(caixaRepository.existsByStatus(StatusCaixa.ABERTO)).thenReturn(true);
+            when(clienteRepository.findById(cId)).thenReturn(Optional.of(clienteSessao));
+
             Carrinho carrinho = new Carrinho();
             carrinho.setCliente(clienteSessao);
             ItemCarrinho ic = new ItemCarrinho();
             ic.setProduto(lancheMonstro);
             ic.setQuantidade(2);
-            // Correção: Usar ArrayList para uma lista mutável
             carrinho.setItens(new ArrayList<>(List.of(ic)));
             when(carrinhoRepository.findByClienteId(cId)).thenReturn(Optional.of(carrinho));
-            when(pedidoRepository.save(any())).thenReturn(pedidoCompartilhado);
 
             CheckoutDeliveryRequestDTO dto = new CheckoutDeliveryRequestDTO(cId, "Rua", "Sem cebola");
             assertNotNull(pedidoService.finalizarDelivery(dto));
@@ -416,7 +456,6 @@ public class EcosystemApocalypseTest {
             BigDecimal totalItens = new BigDecimal("30.00");
             pedidoCompartilhado.setTotal(totalItens);
 
-            // Reconciliação mecânica à prova de bugs de arredondamento flutuante
             assertEquals(0, pedidoCompartilhado.getTotal().compareTo(totalItens));
         }
     }
@@ -429,7 +468,6 @@ public class EcosystemApocalypseTest {
             when(caixaRepository.existsByStatus(StatusCaixa.ABERTO)).thenReturn(true);
             when(contaRepository.findByComandaIdAndNumeroConta(comandaId, 1)).thenReturn(Optional.of(contaMestre));
             when(produtoRepository.findById(prodIdLanche)).thenReturn(Optional.of(lancheMonstro));
-            when(pedidoRepository.saveAndFlush(any())).thenReturn(pedidoCompartilhado);
 
             // Act: Simulação de batida de ponto e fluxo contínuo do restaurante
             PedidoResponseDTO res = pedidoService.processarPedidoMobile(gerarRequestMobile(comandaId, 12, 1, 5));
