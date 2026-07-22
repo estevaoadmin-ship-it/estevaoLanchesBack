@@ -68,6 +68,13 @@ public class PedidoService {
             ItemPedido itemPedido
     ) {}
 
+    // Record privado e LOCAL ao PedidoService para representar a chave contratual.
+    private record ItemComboOccurrenceKey(
+            UUID comboProdutoId,
+            int indiceOcorrencia
+    ) {
+    }
+
     @Transactional
     public PedidoResponseDTO processarPedidoMobile(PedidoMobileRequestDTO dto) {
         if (!caixaRepository.existsByStatus(StatusCaixa.ABERTO)) {
@@ -146,7 +153,7 @@ public class PedidoService {
         pedido.setTotal(subtotalLote);
         Pedido pedidoSalvo = pedidoRepository.saveAndFlush(pedido);
 
-        Map<UUID, Map<UUID, ItemCombo>> comboSnapshotsCriados = criarSnapshotsDosCombos(pedidoSalvo);
+        Map<UUID, Map<ItemComboOccurrenceKey, ItemCombo>> comboSnapshotsCriados = criarSnapshotsDosCombos(pedidoSalvo);
 
         // Apply customizations using the direct correlation
         for (ItemPedidoCorrelation correlation : correlations) {
@@ -154,7 +161,7 @@ public class PedidoService {
             ItemPedido itemPedido = correlation.itemPedido();
 
             if (itemDto.itensCombo() != null && !itemDto.itensCombo().isEmpty()) {
-                Map<UUID, ItemCombo> itemComboMap = comboSnapshotsCriados.get(itemPedido.getId());
+                Map<ItemComboOccurrenceKey, ItemCombo> itemComboMap = comboSnapshotsCriados.get(itemPedido.getId());
                 if (itemComboMap == null || itemComboMap.isEmpty()) {
                     throw new BusinessRuleException("Snapshots de combo não encontrados para o ItemPedido " + itemPedido.getId());
                 }
@@ -325,7 +332,7 @@ public class PedidoService {
         calcularEPreencherTotal(pedido);
         Pedido pedidoSalvo = salvarPedido(pedido);
 
-        Map<UUID, Map<UUID, ItemCombo>> comboSnapshotsCriados = criarSnapshotsDosCombos(pedidoSalvo);
+        Map<UUID, Map<ItemComboOccurrenceKey, ItemCombo>> comboSnapshotsCriados = criarSnapshotsDosCombos(pedidoSalvo);
 
         // Apply customizations for explicit items (PDV Delivery)
         for (CheckoutDeliveryItemCorrelation correlation : explicitCorrelations) {
@@ -333,7 +340,7 @@ public class PedidoService {
             ItemPedido itemPedido = correlation.itemPedido();
 
             if (itemDto.itensCombo() != null && !itemDto.itensCombo().isEmpty()) {
-                Map<UUID, ItemCombo> itemComboMap = comboSnapshotsCriados.get(itemPedido.getId());
+                Map<ItemComboOccurrenceKey, ItemCombo> itemComboMap = comboSnapshotsCriados.get(itemPedido.getId());
                 if (itemComboMap == null || itemComboMap.isEmpty()) {
                     throw new BusinessRuleException("Snapshots de combo não encontrados para o ItemPedido " + itemPedido.getId());
                 }
@@ -350,7 +357,7 @@ public class PedidoService {
                 itemCarrinho.getCustomizacoesCombo() != null &&
                 !itemCarrinho.getCustomizacoesCombo().isEmpty()) {
 
-                Map<UUID, ItemCombo> itemComboMap = comboSnapshotsCriados.get(itemPedido.getId());
+                Map<ItemComboOccurrenceKey, ItemCombo> itemComboMap = comboSnapshotsCriados.get(itemPedido.getId());
                 if (itemComboMap == null || itemComboMap.isEmpty()) {
                     throw new BusinessRuleException("Snapshots de combo não encontrados para o ItemPedido " + itemPedido.getId());
                 }
@@ -358,6 +365,7 @@ public class PedidoService {
                 List<ItemComboCustomizacaoRequestDTO> customizacoesParaAplicar = itemCarrinho.getCustomizacoesCombo().stream()
                         .map(cartCustom -> new ItemComboCustomizacaoRequestDTO(
                                 cartCustom.getComboProdutoId(),
+                                null, // Adicionado null para indiceOcorrencia
                                 cartCustom.getAdicionais().stream().map(Adicional::getId).collect(Collectors.toList()),
                                 cartCustom.getObservacao() // Passar a observação do carrinho
                         ))
@@ -404,7 +412,7 @@ public class PedidoService {
         calcularEPreencherTotal(pedido);
 
         Pedido pedidoSalvo = salvarPedido(pedido);
-        Map<UUID, Map<UUID, ItemCombo>> comboSnapshotsCriados = criarSnapshotsDosCombos(pedidoSalvo);
+        Map<UUID, Map<ItemComboOccurrenceKey, ItemCombo>> comboSnapshotsCriados = criarSnapshotsDosCombos(pedidoSalvo);
 
         // Apply customizations for cart items
         for (ItemCarrinhoToItemPedidoCorrelation correlation : cartCorrelations) {
@@ -415,7 +423,7 @@ public class PedidoService {
                 itemCarrinho.getCustomizacoesCombo() != null &&
                 !itemCarrinho.getCustomizacoesCombo().isEmpty()) {
 
-                Map<UUID, ItemCombo> itemComboMap = comboSnapshotsCriados.get(itemPedido.getId());
+                Map<ItemComboOccurrenceKey, ItemCombo> itemComboMap = comboSnapshotsCriados.get(itemPedido.getId());
                 if (itemComboMap == null || itemComboMap.isEmpty()) {
                     throw new BusinessRuleException("Snapshots de combo não encontrados para o ItemPedido " + itemPedido.getId());
                 }
@@ -423,6 +431,7 @@ public class PedidoService {
                 List<ItemComboCustomizacaoRequestDTO> customizacoesParaAplicar = itemCarrinho.getCustomizacoesCombo().stream()
                         .map(cartCustom -> new ItemComboCustomizacaoRequestDTO(
                                 cartCustom.getComboProdutoId(),
+                                null, // Adicionado null para indiceOcorrencia
                                 cartCustom.getAdicionais().stream().map(Adicional::getId).collect(Collectors.toList()),
                                 cartCustom.getObservacao() // Passar a observação do carrinho
                         ))
@@ -904,7 +913,7 @@ public class PedidoService {
         return totalAdicionaisCombos;
     }
 
-    private Map<UUID, ItemCombo> criarSnapshotsDoCombo(ItemPedido itemPedido) {
+    private Map<ItemComboOccurrenceKey, ItemCombo> criarSnapshotsDoCombo(ItemPedido itemPedido) {
         if (itemPedido == null
                 || itemPedido.getProduto() == null
                 || itemPedido.getId() == null) {
@@ -917,94 +926,217 @@ public class PedidoService {
 
         List<ItemCombo> existentes = itemComboRepository.findByItemPedidoId(itemPedido.getId());
         if (!existentes.isEmpty()) {
-            // If snapshots already exist, we assume they were created in a previous call
-            // and we don't need to re-create or correlate them for *this* creation flow.
-            // The instruction states "A correlação é necessária apenas durante a criação."
             return new HashMap<>();
         }
 
-        List<ComboProduto> composicao = comboProdutoRepository.findByComboId(itemPedido.getProduto().getId());
+        List<ComboProduto> composicao =
+                comboProdutoRepository.findByComboId(
+                        itemPedido.getProduto().getId()
+                );
 
         if (composicao.isEmpty()) {
             return new HashMap<>();
         }
 
         List<ItemCombo> snapshots = new ArrayList<>();
-        Map<UUID, ItemCombo> comboProdutoIdToItemComboMap = new HashMap<>();
+
+        Map<ItemComboOccurrenceKey, ItemCombo> ocorrencias =
+                new HashMap<>();
 
         for (ComboProduto config : composicao) {
             Produto produtoInterno = config.getProduto();
-            ItemCombo itemCombo = new ItemCombo();
 
-            itemCombo.setItemPedido(itemPedido);
-            itemCombo.setProdutoId(produtoInterno.getId());
-            itemCombo.setNomeProduto(produtoInterno.getNome());
-            itemCombo.setQuantidade(config.getQuantidade());
-            itemCombo.setPrecoUnitario(produtoInterno.getPreco());
-            itemCombo.setAdicionais(new ArrayList<>()); // Initialize empty list for new ItemCombo
-            itemCombo.setObservacao(null); // Initialize with null for new ItemCombo
+            int quantidade =
+                    config.getQuantidade() != null
+                            ? config.getQuantidade()
+                            : 0;
 
-            snapshots.add(itemCombo);
-            comboProdutoIdToItemComboMap.put(config.getId(), itemCombo); // Correlate ComboProduto.id with ItemCombo
+            for (int indiceOcorrencia = 0;
+                 indiceOcorrencia < quantidade;
+                 indiceOcorrencia++) {
+
+                ItemCombo itemCombo = new ItemCombo();
+
+                itemCombo.setItemPedido(itemPedido);
+                itemCombo.setProdutoId(produtoInterno.getId());
+                itemCombo.setNomeProduto(produtoInterno.getNome());
+
+                // Cada ocorrência é um ItemCombo independente.
+                itemCombo.setQuantidade(1);
+
+                itemCombo.setPrecoUnitario(produtoInterno.getPreco());
+                itemCombo.setAdicionais(new ArrayList<>());
+                itemCombo.setObservacao(null);
+
+                snapshots.add(itemCombo);
+
+                ocorrencias.put(
+                        new ItemComboOccurrenceKey(
+                                config.getId(),
+                                indiceOcorrencia
+                        ),
+                        itemCombo
+                );
+            }
         }
 
         itemComboRepository.saveAll(snapshots);
-        return comboProdutoIdToItemComboMap;
+
+        return ocorrencias;
     }
 
-    private Map<UUID, Map<UUID, ItemCombo>> criarSnapshotsDosCombos(Pedido pedido) {
+    private Map<UUID, Map<ItemComboOccurrenceKey, ItemCombo>>
+    criarSnapshotsDosCombos(Pedido pedido) {
+
         if (pedido == null || pedido.getItens() == null) {
             return new HashMap<>();
         }
 
-        Map<UUID, Map<UUID, ItemCombo>> allComboSnapshots = new HashMap<>();
+        Map<UUID, Map<ItemComboOccurrenceKey, ItemCombo>>
+                allComboSnapshots = new HashMap<>();
+
         for (ItemPedido itemPedido : pedido.getItens()) {
-            if (Boolean.TRUE.equals(itemPedido.getProduto().getIsCombo())) {
-                Map<UUID, ItemCombo> comboSnapshots = criarSnapshotsDoCombo(itemPedido);
+
+            if (Boolean.TRUE.equals(
+                    itemPedido.getProduto().getIsCombo()
+            )) {
+
+                Map<ItemComboOccurrenceKey, ItemCombo> comboSnapshots =
+                        criarSnapshotsDoCombo(itemPedido);
+
                 if (!comboSnapshots.isEmpty()) {
-                    allComboSnapshots.put(itemPedido.getId(), comboSnapshots);
+                    allComboSnapshots.put(
+                            itemPedido.getId(),
+                            comboSnapshots
+                    );
                 }
             }
         }
+
         return allComboSnapshots;
     }
 
     private void aplicarCustomizacoesDosItensCombo(
             ItemPedido itemPedidoPai,
-            Map<UUID, ItemCombo> comboProdutoIdToItemComboMap,
+            Map<ItemComboOccurrenceKey, ItemCombo> itemComboPorOcorrencia,
             List<ItemComboCustomizacaoRequestDTO> customizacoes
     ) {
         Produto comboProdutoPrincipal = itemPedidoPai.getProduto();
 
         for (ItemComboCustomizacaoRequestDTO customizacao : customizacoes) {
-            UUID comboProdutoId = customizacao.comboProdutoId();
-            List<UUID> adicionaisIds = customizacao.adicionaisIds();
 
-            // 1. Validar que comboProdutoId pertence ao Combo do ItemPedido
-            ComboProduto comboProdutoConfig = comboProdutoRepository.findById(comboProdutoId)
-                    .orElseThrow(() -> new BusinessRuleException("Configuração de ComboProduto não localizada para o ID: " + comboProdutoId));
+            UUID comboProdutoId =
+                    customizacao.comboProdutoId();
 
-            if (!comboProdutoConfig.getCombo().getId().equals(comboProdutoPrincipal.getId())) {
-                throw new BusinessRuleException("ComboProduto com ID " + comboProdutoId + " não pertence ao combo principal " + comboProdutoPrincipal.getNome());
+            List<UUID> adicionaisIds =
+                    customizacao.adicionaisIds();
+
+            ComboProduto comboProdutoConfig =
+                    comboProdutoRepository.findById(comboProdutoId)
+                            .orElseThrow(() ->
+                                    new BusinessRuleException(
+                                            "Configuração de ComboProduto não localizada para o ID: "
+                                                    + comboProdutoId
+                                    )
+                            );
+
+            if (!comboProdutoConfig
+                    .getCombo()
+                    .getId()
+                    .equals(comboProdutoPrincipal.getId())) {
+
+                throw new BusinessRuleException(
+                        "ComboProduto com ID "
+                                + comboProdutoId
+                                + " não pertence ao combo principal "
+                                + comboProdutoPrincipal.getNome()
+                );
             }
 
-            // 2. O ItemCombo correspondente foi realmente criado
-            ItemCombo itemCombo = comboProdutoIdToItemComboMap.get(comboProdutoId);
-            if (itemCombo == null) {
-                throw new BusinessRuleException("ItemCombo correspondente ao ComboProduto " + comboProdutoId + " não foi encontrado após a criação dos snapshots.");
-            }
+            int quantidadeConfigurada =
+                    comboProdutoConfig.getQuantidade() != null
+                            ? comboProdutoConfig.getQuantidade()
+                            : 0;
 
-            // 3. Validar e aplicar os adicionais
-            if (adicionaisIds != null && !adicionaisIds.isEmpty()) {
-                adicionalValidationService.validarAdicionaisPermitidos(itemCombo.getProdutoId(), adicionaisIds);
-                itemCombo.setAdicionais(adicionalRepository.findAllById(adicionaisIds));
+            Integer indiceRecebido =
+                    customizacao.indiceOcorrencia();
+
+            final int indiceOcorrencia;
+
+            if (indiceRecebido == null) {
+
+                // Compatibilidade exclusivamente para configuração inequívoca.
+                if (quantidadeConfigurada == 1) {
+                    indiceOcorrencia = 0;
+                } else {
+                    throw new BusinessRuleException(
+                            "O índice da ocorrência é obrigatório para o ComboProduto "
+                                    + comboProdutoId
+                                    + " quando a quantidade configurada é maior que 1."
+                    );
+                }
+
             } else {
-                itemCombo.setAdicionais(new ArrayList<>()); // Clear if empty list is sent
-            }
-            // 4. Aplicar a observação
-            itemCombo.setObservacao(customizacao.observacao());
 
-            itemComboRepository.save(itemCombo); // Save the updated ItemCombo
+                if (indiceRecebido < 0
+                        || indiceRecebido >= quantidadeConfigurada) {
+
+                    throw new BusinessRuleException(
+                            "Índice de ocorrência inválido para o ComboProduto "
+                                    + comboProdutoId
+                                    + ": "
+                                    + indiceRecebido
+                    );
+                }
+
+                indiceOcorrencia = indiceRecebido;
+            }
+
+            ItemComboOccurrenceKey chave =
+                    new ItemComboOccurrenceKey(
+                            comboProdutoId,
+                            indiceOcorrencia
+                    );
+
+            ItemCombo itemCombo =
+                    itemComboPorOcorrencia.get(chave);
+
+            if (itemCombo == null) {
+                throw new BusinessRuleException(
+                        "ItemCombo correspondente ao ComboProduto "
+                                + comboProdutoId
+                                + " e à ocorrência "
+                                + indiceOcorrencia
+                                + " não foi encontrado após a criação dos snapshots."
+                );
+            }
+
+            if (adicionaisIds != null
+                    && !adicionaisIds.isEmpty()) {
+
+                adicionalValidationService
+                        .validarAdicionaisPermitidos(
+                                itemCombo.getProdutoId(),
+                                adicionaisIds
+                        );
+
+                itemCombo.setAdicionais(
+                        adicionalRepository.findAllById(
+                                adicionaisIds
+                        )
+                );
+
+            } else {
+                itemCombo.setAdicionais(
+                        new ArrayList<>()
+                );
+            }
+
+            itemCombo.setObservacao(
+                    customizacao.observacao()
+            );
+
+            itemComboRepository.save(itemCombo);
         }
     }
 

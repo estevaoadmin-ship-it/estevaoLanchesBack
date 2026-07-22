@@ -81,16 +81,12 @@ public class Conta {
             return false;
         }
 
-        // Regex para identificar o padrão "MESA X - CONTA Y"
-        Pattern pattern = Pattern.compile("^MESA \\d+ - CONTA \\d+$");
-        Matcher matcher = pattern.matcher(nomeResponsavel);
+        Pattern pattern =
+                Pattern.compile("^MESA \\d+ - CONTA \\d+$");
 
-        // Se o nome for o padrão automático, não é um responsável real
-        if (matcher.matches()) {
-            return false;
-        }
+        Matcher matcher =
+                pattern.matcher(nomeResponsavel);
 
-        // Se o nome não for o padrão e não for vazio, e o telefone também estiver presente, é um responsável real
-        return telefoneResponsavel != null && !telefoneResponsavel.isBlank();
+        return !matcher.matches();
     }
 }
