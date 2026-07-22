@@ -11,9 +11,15 @@ import com.paullomaggio.estevaoLanches.repositories.ClienteRepository;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.util.StringUtils;
 
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
+import java.util.Optional;
 import java.util.UUID;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
 @Service
@@ -47,8 +53,29 @@ public class ClienteService {
     }
 
     @Transactional(readOnly = true)
-    public List<ClienteResponseDTO> buscarPorNome(String nome) {
-        return clienteRepository.findByNomeContainingIgnoreCase(nome).stream()
+    public List<ClienteResponseDTO> buscarPorNome(String termo) {
+        // 1. Termo vazio
+        if (!StringUtils.hasText(termo)) {
+            return List.of();
+        }
+
+        Map<UUID, Cliente> resultadosUnicos = new HashMap<>();
+        String termoNumerico = extrairNumeros(termo);
+
+        // Classificação do termo
+        if (termoNumerico.length() == 10) { // Pode ser telefone (10 dígitos)
+            // 2. CPF ou telefone mascarado / 3. Termo puramente numérico (10 dígitos)
+            clienteRepository.findByNumero(termoNumerico).ifPresent(c -> resultadosUnicos.put(c.getId(), c));
+        } else if (termoNumerico.length() == 11) { // Pode ser CPF ou telefone (11 dígitos)
+            // 2. CPF ou telefone mascarado / 3. Termo puramente numérico (11 dígitos)
+            clienteRepository.findByCpf(termoNumerico).ifPresent(c -> resultadosUnicos.put(c.getId(), c));
+            clienteRepository.findByNumero(termoNumerico).ifPresent(c -> resultadosUnicos.put(c.getId(), c));
+        } else { // 4. Termo textual / 5. Termo alfanumérico (ou numérico que não seja 10/11 dígitos)
+            clienteRepository.findByNomeContainingIgnoreCase(termo)
+                    .forEach(c -> resultadosUnicos.put(c.getId(), c));
+        }
+
+        return resultadosUnicos.values().stream()
                 .map(ClienteResponseDTO::new)
                 .collect(Collectors.toList());
     }
@@ -123,5 +150,20 @@ public class ClienteService {
 
             cliente.getEnderecos().addAll(novosEnderecos);
         }
+    }
+
+    /**
+     * Extrai apenas os dígitos numéricos de uma string.
+     *
+     * @param texto A string de entrada.
+     * @return Uma string contendo apenas os dígitos numéricos.
+     */
+    private String extrairNumeros(String texto) {
+        if (texto == null) {
+            return "";
+        }
+        Pattern pattern = Pattern.compile("\\D"); // Expressão regular para encontrar não-dígitos
+        Matcher matcher = pattern.matcher(texto);
+        return matcher.replaceAll("");
     }
 }
