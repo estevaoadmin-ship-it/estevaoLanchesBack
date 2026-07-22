@@ -52,4 +52,7 @@ public class ItemCombo {
     )
     @JsonIgnoreProperties({"hibernateLazyInitializer", "handler"})
     private List<Adicional> adicionais = new ArrayList<>();
+
+    @Column(name = "observacao", length = 255)
+    private String observacao;
 }

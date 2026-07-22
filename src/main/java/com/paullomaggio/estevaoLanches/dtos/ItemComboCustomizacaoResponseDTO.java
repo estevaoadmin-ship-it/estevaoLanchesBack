@@ -17,5 +17,10 @@ public record ItemComboCustomizacaoResponseDTO(
                 description = "Lista de IDs dos adicionais selecionados para este item de combo customizado",
                 example = "[\"1a2b3c4d-5e6f-7890-1234-567890abcdef\", \"f1e2d3c4-b5a6-9876-5432-10fedcba9876\"]"
         )
-        List<UUID> adicionaisIds
+        List<UUID> adicionaisIds,
+        @Schema(
+                description = "Observação individual para o item de combo customizado",
+                example = "Sem cebola"
+        )
+        String observacao
 ) {}

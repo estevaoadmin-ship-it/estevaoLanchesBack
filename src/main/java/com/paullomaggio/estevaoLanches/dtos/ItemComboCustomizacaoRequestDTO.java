@@ -5,5 +5,6 @@ import java.util.UUID;
 
 public record ItemComboCustomizacaoRequestDTO(
     UUID comboProdutoId,
-    List<UUID> adicionaisIds
+    List<UUID> adicionaisIds,
+    String observacao
 ) {}

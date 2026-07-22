@@ -25,6 +25,7 @@ import java.util.UUID;
 import java.util.Optional;
 import java.util.Set;
 import java.util.stream.Collectors;
+import java.util.Objects;
 
 @Service
 @RequiredArgsConstructor
@@ -174,7 +175,7 @@ public class PedidoService {
             filaImpressaoRepository.save(cupomCozinha);
         }
 
-        PedidoResponseDTO responseDTO = new PedidoResponseDTO(pedidoSalvo);
+        PedidoResponseDTO responseDTO = montarPedidoResponseComItensCombo(pedidoSalvo); // Enriquecido para cozinha
         messagingTemplate.convertAndSend("/topic/caixa", responseDTO);
         messagingTemplate.convertAndSend("/topic/cozinha", responseDTO);
 
@@ -354,11 +355,11 @@ public class PedidoService {
                     throw new BusinessRuleException("Snapshots de combo não encontrados para o ItemPedido " + itemPedido.getId());
                 }
 
-                // Converter ItemCarrinhoComboCustomizacao para ItemComboCustomizacaoRequestDTO
                 List<ItemComboCustomizacaoRequestDTO> customizacoesParaAplicar = itemCarrinho.getCustomizacoesCombo().stream()
                         .map(cartCustom -> new ItemComboCustomizacaoRequestDTO(
                                 cartCustom.getComboProdutoId(),
-                                cartCustom.getAdicionais().stream().map(Adicional::getId).collect(Collectors.toList())
+                                cartCustom.getAdicionais().stream().map(Adicional::getId).collect(Collectors.toList()),
+                                cartCustom.getObservacao() // Passar a observação do carrinho
                         ))
                         .collect(Collectors.toList());
 
@@ -422,7 +423,8 @@ public class PedidoService {
                 List<ItemComboCustomizacaoRequestDTO> customizacoesParaAplicar = itemCarrinho.getCustomizacoesCombo().stream()
                         .map(cartCustom -> new ItemComboCustomizacaoRequestDTO(
                                 cartCustom.getComboProdutoId(),
-                                cartCustom.getAdicionais().stream().map(Adicional::getId).collect(Collectors.toList())
+                                cartCustom.getAdicionais().stream().map(Adicional::getId).collect(Collectors.toList()),
+                                cartCustom.getObservacao() // Passar a observação do carrinho
                         ))
                         .collect(Collectors.toList());
 
@@ -729,7 +731,7 @@ public class PedidoService {
         pedido.setStatus(dto.status());
         Pedido pedidoSalvo = pedidoRepository.save(pedido);
 
-        PedidoResponseDTO response = new PedidoResponseDTO(pedidoSalvo);
+        PedidoResponseDTO response = montarPedidoResponseComItensCombo(pedidoSalvo); // Enriquecido para cozinha
         messagingTemplate.convertAndSend("/topic/caixa", response);
         messagingTemplate.convertAndSend("/topic/cozinha", response);
         return response;
@@ -761,7 +763,7 @@ public class PedidoService {
 
         Pedido pedidoSalvo = pedidoRepository.save(pedido);
 
-        PedidoResponseDTO response = new PedidoResponseDTO(pedidoSalvo);
+        PedidoResponseDTO response = montarPedidoResponseComItensCombo(pedidoSalvo); // Enriquecido para cozinha
 
         messagingTemplate.convertAndSend("/topic/caixa", response);
         messagingTemplate.convertAndSend("/topic/cozinha", response);
@@ -940,6 +942,7 @@ public class PedidoService {
             itemCombo.setQuantidade(config.getQuantidade());
             itemCombo.setPrecoUnitario(produtoInterno.getPreco());
             itemCombo.setAdicionais(new ArrayList<>()); // Initialize empty list for new ItemCombo
+            itemCombo.setObservacao(null); // Initialize with null for new ItemCombo
 
             snapshots.add(itemCombo);
             comboProdutoIdToItemComboMap.put(config.getId(), itemCombo); // Correlate ComboProduto.id with ItemCombo
@@ -993,12 +996,80 @@ public class PedidoService {
 
             // 3. Validar e aplicar os adicionais
             if (adicionaisIds != null && !adicionaisIds.isEmpty()) {
-                List<Adicional> adicionaisValidados = adicionalValidationService.validarAdicionaisPermitidos(itemCombo.getProdutoId(), adicionaisIds);
-                itemCombo.setAdicionais(adicionaisValidados);
+                adicionalValidationService.validarAdicionaisPermitidos(itemCombo.getProdutoId(), adicionaisIds);
+                itemCombo.setAdicionais(adicionalRepository.findAllById(adicionaisIds));
             } else {
                 itemCombo.setAdicionais(new ArrayList<>()); // Clear if empty list is sent
             }
+            // 4. Aplicar a observação
+            itemCombo.setObservacao(customizacao.observacao());
+
             itemComboRepository.save(itemCombo); // Save the updated ItemCombo
         }
+    }
+
+    /**
+     * Monta um PedidoResponseDTO enriquecido com os itens de combo associados a cada ItemPedido.
+     * Realiza uma única consulta em lote para evitar N+1.
+     *
+     * @param pedido O Pedido entity a ser convertido.
+     * @return PedidoResponseDTO com itensCombo preenchidos.
+     */
+    private PedidoResponseDTO montarPedidoResponseComItensCombo(Pedido pedido) {
+        if (pedido == null || pedido.getItens() == null || pedido.getItens().isEmpty()) {
+            return new PedidoResponseDTO(pedido); // Retorna o DTO básico se não houver itens
+        }
+
+        List<UUID> itemPedidoIds = pedido.getItens().stream()
+                .map(ItemPedido::getId)
+                .filter(Objects::nonNull)
+                .collect(Collectors.toList());
+
+        final Map<UUID, List<ItemComboResponseDTO>> itensComboPorItemPedido;
+
+        if (!itemPedidoIds.isEmpty()) {
+            List<ItemCombo> todosItensCombo = itemComboRepository.findByItemPedidoIdIn(itemPedidoIds);
+
+            itensComboPorItemPedido = todosItensCombo.stream()
+                    .collect(Collectors.groupingBy(
+                            itemCombo -> itemCombo.getItemPedido().getId(),
+                            Collectors.mapping(ItemComboResponseDTO::new, Collectors.toList())
+                    ));
+        } else {
+            itensComboPorItemPedido = new HashMap<>();
+        }
+
+        List<ItemPedidoResponseDTO> itensPedidoEnriquecidos = pedido.getItens().stream()
+                .map(itemPedido -> {
+                    List<ItemComboResponseDTO> combosDoItem =
+                            itensComboPorItemPedido.getOrDefault(itemPedido.getId(), List.of());
+
+                    return new ItemPedidoResponseDTO(itemPedido, combosDoItem);
+                })
+                .collect(Collectors.toList());
+
+        return new PedidoResponseDTO(
+                pedido.getId(),
+                pedido.getNumeroPedido(),
+                pedido.getCliente() != null
+                        ? pedido.getCliente().getNome()
+                        : pedido.getNomeClienteBalcao(),
+                pedido.getDataHora(),
+                pedido.getStatus(),
+                pedido.getStatusFinanceiro(),
+                pedido.getFormaPagamento(),
+                pedido.getTipo(),
+                pedido.getTotal(),
+                pedido.getEnderecoEntrega(),
+                pedido.getNumeroMesa(),
+                (pedido.getTipo() == TipoPedido.MESA
+                        && pedido.getConta() != null
+                        && pedido.getConta().getComanda() != null
+                        && pedido.getConta().getComanda().getMesa() != null)
+                        ? pedido.getConta().getComanda().getMesa().getId()
+                        : null,
+                pedido.getObservacaoGeral(),
+                itensPedidoEnriquecidos
+        );
     }
 }

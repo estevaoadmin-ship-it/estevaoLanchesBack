@@ -126,6 +126,7 @@ public class CarrinhoService {
                 customizacao.setItemCarrinho(itemCarrinho);
                 customizacao.setComboProdutoId(customizacaoDto.comboProdutoId());
                 customizacao.getAdicionais().addAll(adicionaisValidados);
+                customizacao.setObservacao(customizacaoDto.observacao()); // Set the observation
                 itemCarrinho.getCustomizacoesCombo().add(customizacao);
             }
         } else if (dto.itensCombo() != null && dto.itensCombo().isEmpty()) {
@@ -226,7 +227,8 @@ public class CarrinhoService {
                         c.getAdicionais().stream()
                                 .map(a -> a.getId().toString())
                                 .sorted()
-                                .collect(Collectors.joining(",")))
+                                .collect(Collectors.joining(",")) + ":" +
+                        normalizarObservacao(c.getObservacao())) // Incluir observação na comparação
                 .collect(Collectors.toSet());
 
         // Converter customizacoesNovas para um formato comparável
@@ -238,7 +240,8 @@ public class CarrinhoService {
                                 : c.adicionaisIds().stream()
                                         .map(UUID::toString)
                                         .sorted()
-                                        .collect(Collectors.joining(","))))
+                                        .collect(Collectors.joining(","))) + ":" +
+                        normalizarObservacao(c.observacao())) // Incluir observação na comparação
                 .collect(Collectors.toSet());
 
         return atuaisSet.equals(novasSet);

@@ -64,7 +64,9 @@ public record ItemPedidoResponseDTO(
             description = "Indica se o item já foi enviado/preparado",
             example = "false"
         )
-        boolean enviado
+        boolean enviado,
+        @Schema(description = "Lista de itens de combo associados a este item de pedido")
+        List<ItemComboResponseDTO> itensCombo
 ) {
 
     @Schema(description = "Informações de um adicional aplicado a um item de pedido")
@@ -87,6 +89,7 @@ public record ItemPedidoResponseDTO(
             BigDecimal preco
     ) {}
 
+    // Construtor tradicional que não inclui itensCombo (para compatibilidade)
     public ItemPedidoResponseDTO(ItemPedido item) {
         this(
                 item.getId(),
@@ -101,7 +104,31 @@ public record ItemPedidoResponseDTO(
                 item.getNumeroConta(),
                 item.getStatusPagamento() != null ? item.getStatusPagamento().name() : "ABERTO",
                 item.getStatusEnvio() != null ? item.getStatusEnvio().name() : "AGUARDANDO_ENVIO",
-                item.getStatusEnvio() == com.paullomaggio.estevaoLanches.enums.StatusEnvioItem.ENVIADO
+                item.getStatusEnvio() == com.paullomaggio.estevaoLanches.enums.StatusEnvioItem.ENVIADO,
+                List.of() // itensCombo vazio por padrão para o construtor tradicional
+        );
+    }
+
+    // Construtor enriquecido que inclui itensCombo
+    public ItemPedidoResponseDTO(
+            ItemPedido item,
+            List<ItemComboResponseDTO> itensCombo
+    ) {
+        this(
+                item.getId(),
+                item.getProduto() != null ? item.getProduto().getId() : null,
+                item.getProduto() != null ? item.getProduto().getNome() : "Produto Indefinido",
+                item.getQuantidade(),
+                item.getPrecoUnitario(),
+                item.getObservacaoItem(),
+                item.getAdicionais() != null ? item.getAdicionais().stream()
+                        .map(a -> new AdicionalInfo(a.getId(), a.getNome(), a.getPreco()))
+                        .collect(Collectors.toList()) : List.of(),
+                item.getNumeroConta(),
+                item.getStatusPagamento() != null ? item.getStatusPagamento().name() : "ABERTO",
+                item.getStatusEnvio() != null ? item.getStatusEnvio().name() : "AGUARDANDO_ENVIO",
+                item.getStatusEnvio() == com.paullomaggio.estevaoLanches.enums.StatusEnvioItem.ENVIADO,
+                itensCombo
         );
     }
 }

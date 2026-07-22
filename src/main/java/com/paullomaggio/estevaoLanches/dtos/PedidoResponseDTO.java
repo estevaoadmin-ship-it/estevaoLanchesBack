@@ -103,6 +103,7 @@ public record PedidoResponseDTO(
         @Schema(description = "Lista de itens do pedido")
         List<ItemPedidoResponseDTO> itens
 ) {
+    // Construtor tradicional que mapeia ItemPedido para ItemPedidoResponseDTO sem itensCombo
     public PedidoResponseDTO(Pedido pedido) {
         this(
                 pedido.getId(),
@@ -122,6 +123,61 @@ public record PedidoResponseDTO(
                         : null,
                 pedido.getObservacaoGeral(),
                 pedido.getItens() != null ? pedido.getItens().stream().map(ItemPedidoResponseDTO::new).collect(Collectors.toList()) : List.of()
+        );
+    }
+
+    // Construtor enriquecido que recebe uma lista de ItemPedidoResponseDTO já processada
+    public PedidoResponseDTO(
+            UUID id,
+            String numeroPedido,
+            String clienteNome,
+            LocalDateTime dataHora,
+            StatusPedido status,
+            StatusFinanceiro statusFinanceiro,
+            FormaPagamento formaPagamento,
+            TipoPedido tipo,
+            BigDecimal total,
+            String enderecoEntrega,
+            Integer numeroMesa,
+            UUID mesaId,
+            String observacaoGeral,
+            List<ItemPedidoResponseDTO> itens
+    ) {
+        this.id = id;
+        this.numeroPedido = numeroPedido;
+        this.clienteNome = clienteNome;
+        this.dataHora = dataHora;
+        this.status = status;
+        this.statusFinanceiro = statusFinanceiro;
+        this.formaPagamento = formaPagamento;
+        this.tipo = tipo;
+        this.total = total;
+        this.enderecoEntrega = enderecoEntrega;
+        this.numeroMesa = numeroMesa;
+        this.mesaId = mesaId;
+        this.observacaoGeral = observacaoGeral;
+        this.itens = itens;
+    }
+
+    // Construtor auxiliar para facilitar a delegação do construtor tradicional
+    public PedidoResponseDTO(Pedido pedido, List<ItemPedidoResponseDTO> itensEnriquecidos) {
+        this(
+                pedido.getId(),
+                pedido.getNumeroPedido(),
+                pedido.getCliente() != null ? pedido.getCliente().getNome() : pedido.getNomeClienteBalcao(),
+                pedido.getDataHora(),
+                pedido.getStatus(),
+                pedido.getStatusFinanceiro(),
+                pedido.getFormaPagamento(),
+                pedido.getTipo(),
+                pedido.getTotal(),
+                pedido.getEnderecoEntrega(),
+                pedido.getNumeroMesa(),
+                (pedido.getTipo() == TipoPedido.MESA && pedido.getConta() != null && pedido.getConta().getComanda() != null && pedido.getConta().getComanda().getMesa() != null)
+                        ? pedido.getConta().getComanda().getMesa().getId()
+                        : null,
+                pedido.getObservacaoGeral(),
+                itensEnriquecidos
         );
     }
 }

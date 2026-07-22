@@ -57,7 +57,8 @@ public record ItemCarrinhoResponseDTO(
             item.getCustomizacoesCombo().stream()
                 .map(custom -> new ItemComboCustomizacaoResponseDTO(
                     custom.getComboProdutoId(),
-                    custom.getAdicionais().stream().map(ad -> ad.getId()).collect(Collectors.toList())
+                    custom.getAdicionais().stream().map(ad -> ad.getId()).collect(Collectors.toList()),
+                    custom.getObservacao()
                 ))
                 .collect(Collectors.toList())
         );

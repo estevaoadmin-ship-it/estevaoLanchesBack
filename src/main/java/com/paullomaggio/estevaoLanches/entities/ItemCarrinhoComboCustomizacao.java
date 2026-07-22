@@ -36,4 +36,7 @@ public class ItemCarrinhoComboCustomizacao {
     )
     @ToString.Exclude
     private Set<Adicional> adicionais = new HashSet<>();
+
+    @Column(name = "observacao", length = 255)
+    private String observacao;
 }

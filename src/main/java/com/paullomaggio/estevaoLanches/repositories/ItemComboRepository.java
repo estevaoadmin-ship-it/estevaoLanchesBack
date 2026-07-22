@@ -10,4 +10,6 @@ import java.util.UUID;
 public interface ItemComboRepository extends JpaRepository<ItemCombo, UUID> {
 
     List<ItemCombo> findByItemPedidoId(UUID itemPedidoId);
+
+    List<ItemCombo> findByItemPedidoIdIn(List<UUID> itemPedidoIds);
 }

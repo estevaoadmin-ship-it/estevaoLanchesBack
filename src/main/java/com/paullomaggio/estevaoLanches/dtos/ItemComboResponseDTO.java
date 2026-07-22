@@ -45,7 +45,12 @@ public record ItemComboResponseDTO(
         )
         BigDecimal precoUnitario,
         @Schema(description = "Lista de adicionais aplicados a este item de combo")
-        List<AdicionalInfo> adicionais
+        List<AdicionalInfo> adicionais,
+        @Schema(
+            description = "Observação individual para o item de combo",
+            example = "Sem cebola"
+        )
+        String observacao
 ) {
     public ItemComboResponseDTO(ItemCombo entity) {
         this(
@@ -57,7 +62,8 @@ public record ItemComboResponseDTO(
                 entity.getPrecoUnitario(),
                 entity.getAdicionais() != null ? entity.getAdicionais().stream()
                         .map(a -> new AdicionalInfo(a.getId(), a.getNome(), a.getPreco()))
-                        .collect(Collectors.toList()) : List.of()
+                        .collect(Collectors.toList()) : List.of(),
+                entity.getObservacao()
         );
     }
 }
