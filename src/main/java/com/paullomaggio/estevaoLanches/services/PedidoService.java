@@ -258,6 +258,12 @@ public class PedidoService {
             pedido.setValorRecebido(dto.valorRecebido());
 
             Pedido pedidoSalvo = pedidoRepository.save(pedido);
+
+            // NEW: Production trigger for BALCAO orders
+            if (pedidoSalvo.getTipo() == TipoPedido.BALCAO && pedidoSalvo.getStatusFinanceiro() == StatusFinanceiro.PAGO) {
+                gerarFilaImpressao(pedidoSalvo);
+            }
+
             PedidoResponseDTO response = new PedidoResponseDTO(pedidoSalvo);
             messagingTemplate.convertAndSend("/topic/caixa", response);
             return response;
@@ -529,22 +535,7 @@ public class PedidoService {
 
         Pedido pedidoSalvo = salvarPedido(pedido);
 
-        PagamentoRequestDTO pagamentoDto = new PagamentoRequestDTO(
-                dto.formaPagamento(),
-                dto.valorRecebido()
-        );
-        pagamentoService.registrarPagamentoPedido(
-                pedidoSalvo.getId(), // Passa o ID do pedido
-                pagamentoDto
-        );
-
-        pedidoSalvo.setStatusFinanceiro(StatusFinanceiro.PAGO);
-        pedidoSalvo.setFormaPagamento(dto.formaPagamento());
-        pedidoSalvo.setValorRecebido(dto.valorRecebido());
-        pedidoRepository.save(pedidoSalvo);
-
         criarSnapshotsDosCombos(pedidoSalvo);
-        gerarFilaImpressao(pedidoSalvo);
 
         return new PedidoResponseDTO(pedidoSalvo);
     }
@@ -1038,7 +1029,7 @@ public class PedidoService {
                                             "Configuração de ComboProduto não localizada para o ID: "
                                                     + comboProdutoId
                                     )
-                            );
+                                );
 
             if (!comboProdutoConfig
                     .getCombo()

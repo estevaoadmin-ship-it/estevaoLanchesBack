@@ -13,14 +13,6 @@ public record CheckoutBalcaoRequestDTO(
         @Schema(description = "Nome do consumidor imediato no balcão", example = "Mariana")
         String nomeConsumidor,
 
-        @Schema(description = "Forma de pagamento selecionada", requiredMode = Schema.RequiredMode.REQUIRED)
-        @NotNull(message = "A forma de pagamento é obrigatória")
-        FormaPagamento formaPagamento,
-
-        @Schema(description = "Valor recebido do cliente", requiredMode = Schema.RequiredMode.REQUIRED)
-        @NotNull(message = "O valor recebido é obrigatório")
-        BigDecimal valorRecebido,
-
         @Schema(description = "Observações gerais sobre a preparação do pedido", example = "Sem maionese")
         String observacao,
 
