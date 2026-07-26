@@ -49,6 +49,7 @@ public class PedidoIntegridadeComercialTest {
     @Mock private ComboProdutoRepository comboProdutoRepository;
     @Mock private PagamentoService pagamentoService;
     @Mock private AdicionalValidationService adicionalValidationService;
+    @Mock private ContaService contaService; // NEW - Adicionado conforme instrução
 
     private PedidoService pedidoService;
 
@@ -80,7 +81,8 @@ public class PedidoIntegridadeComercialTest {
                 comboProdutoRepository,
                 pagamentoService,
                 adicionalValidationService,
-                clienteRepository
+                clienteRepository,
+                contaService // NEW - Adicionado conforme instrução
         );
 
         prodIdLanche = UUID.randomUUID();

@@ -49,6 +49,7 @@ public class PedidoService {
     private final PagamentoService pagamentoService;
     private final AdicionalValidationService adicionalValidationService;
     private final ClienteRepository clienteRepository;
+    private final ContaService contaService; // Adicionado ContaService
 
     // Record temporário para correlacionar o DTO de entrada com o ItemPedido criado (PedidoMobile)
     private record ItemPedidoCorrelation(
@@ -536,6 +537,7 @@ public class PedidoService {
         Pedido pedidoSalvo = salvarPedido(pedido);
 
         criarSnapshotsDosCombos(pedidoSalvo);
+        recalcularTotalPedido(pedidoSalvo.getId()); // Call official recalculation method
 
         return new PedidoResponseDTO(pedidoSalvo);
     }
@@ -659,10 +661,13 @@ public class PedidoService {
         novoItem.setStatusPagamento(StatusPagamento.ABERTO);
 
         pedido.getItens().add(novoItem);
-        pedido.setTotal(pedido.getTotal().add(produto.getPreco().multiply(BigDecimal.valueOf(dto.quantidade()))));
+        // Remove manual total update
+        // pedido.setTotal(pedido.getTotal().add(produto.getPreco().multiply(BigDecimal.valueOf(dto.quantidade()))));
 
-        Pedido pedidoSalvo = pedidoRepository.save(pedido);
+        Pedido pedidoSalvo = pedidoRepository.save(pedido); // Save structural changes
         criarSnapshotsDosCombos(pedidoSalvo);
+        recalcularTotalPedido(pedidoSalvo.getId()); // Call official recalculation method
+
         PedidoResponseDTO response = new PedidoResponseDTO(pedidoSalvo);
         messagingTemplate.convertAndSend("/topic/caixa", response);
         return response;
@@ -682,8 +687,9 @@ public class PedidoService {
                 .findFirst()
                 .orElseThrow(() -> new ResourceNotFoundException("Item não localizado no lote de pedidos."));
 
-        BigDecimal valorDeduzir = itemRemover.getPrecoUnitario().multiply(BigDecimal.valueOf(itemRemover.getQuantidade()));
-        pedido.setTotal(pedido.getTotal().subtract(valorDeduzir));
+        // Remove manual total update
+        // BigDecimal valorDeduzir = itemRemover.getPrecoUnitario().multiply(BigDecimal.valueOf(itemRemover.getQuantidade()));
+        // pedido.setTotal(pedido.getTotal().subtract(valorDeduzir));
 
         List<ItemCombo> itensCombo =
                 itemComboRepository.findByItemPedidoId(
@@ -697,7 +703,9 @@ public class PedidoService {
 
         pedido.getItens().remove(itemRemover);
 
-        Pedido pedidoSalvo = pedidoRepository.save(pedido);
+        Pedido pedidoSalvo = pedidoRepository.save(pedido); // Save structural changes
+        recalcularTotalPedido(pedidoSalvo.getId()); // Call official recalculation method
+
         PedidoResponseDTO response = new PedidoResponseDTO(pedidoSalvo);
         messagingTemplate.convertAndSend("/topic/caixa", response);
         return response;
@@ -877,6 +885,11 @@ public class PedidoService {
 
         pedido.setTotal(novoTotalPedido);
         Pedido pedidoSalvo = pedidoRepository.save(pedido);
+
+        // Sincronizar Conta.valorTotal após o save do Pedido
+        if (pedidoSalvo.getConta() != null) {
+            contaService.sincronizarValorTotal(pedidoSalvo.getConta().getId());
+        }
 
         PedidoResponseDTO response = new PedidoResponseDTO(pedidoSalvo);
         messagingTemplate.convertAndSend("/topic/caixa", response);

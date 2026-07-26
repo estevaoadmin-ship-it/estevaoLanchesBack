@@ -112,6 +112,7 @@ public class PedidoRollbackIntegrationTest {
         lenient().when(produtoRepository.findById(produtoId)).thenReturn(Optional.of(produtoMock));
         lenient().when(contaRepository.findByComandaIdAndNumeroConta(comandaId, 1)).thenReturn(Optional.of(contaMock));
         lenient().when(comandaRepository.findById(comandaId)).thenReturn(Optional.of(comandaMock));
+        lenient().when(contaRepository.findById(contaMock.getId())).thenReturn(Optional.of(contaMock)); // Adicionado para simular busca de Conta por ID
         lenient().when(pedidoRepository.save(any(Pedido.class))).thenReturn(pedidoMock);
         lenient().when(pedidoRepository.saveAndFlush(any(Pedido.class))).thenReturn(pedidoMock);
         lenient().when(pedidoRepository.findById(pedidoId)).thenReturn(Optional.of(pedidoMock));

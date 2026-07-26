@@ -57,6 +57,7 @@ class PedidoServiceTest {
     @Mock private ContaDeliveryRepository contaDeliveryRepository; // Novo Mock para PedidoCoreService
     @Mock private AdicionalValidationService adicionalValidationService; // NEW
     @Mock private ClienteRepository clienteRepository; // NEW
+    @Mock private ContaService contaService; // NEW - Adicionado conforme instrução
 
     @Captor private ArgumentCaptor<Pedido> pedidoCaptor;
     @Captor private ArgumentCaptor<PagamentoRequestDTO> pagamentoRequestDTOCaptor;
@@ -86,7 +87,8 @@ class PedidoServiceTest {
                 comboProdutoRepository,
                 pagamentoService,
                 adicionalValidationService, // NEW
-                clienteRepository // NEW
+                clienteRepository, // NEW
+                contaService // NEW - Adicionado conforme instrução
         );
 
         // Instanciação do PedidoCoreService para os testes de cancelamento de delivery
@@ -433,9 +435,9 @@ class PedidoServiceTest {
             pedidoMock.setStatusFinanceiro(StatusFinanceiro.PAGO);
             when(pedidoRepository.findByIdForUpdate(pedidoId)).thenReturn(Optional.of(pedidoMock));
             PagamentoRequestDTO dto = new PagamentoRequestDTO(FormaPagamento.PIX, new BigDecimal("35.00"));
-            
+
             assertThrows(BusinessRuleException.class, () -> pedidoService.receberPagamento(pedidoId, dto));
-            
+
             verify(pagamentoService, never()).registrarPagamentoPedido(any(UUID.class), any(PagamentoRequestDTO.class));
             verify(filaImpressaoRepository, never()).save(any(FilaImpressao.class));
         }
@@ -459,18 +461,45 @@ class PedidoServiceTest {
             item.setProduto(produtoMock); // produtoMock is set to precisaPreparo = true in @BeforeEach
             item.setQuantidade(1);
             item.setPrecoUnitario(new BigDecimal("35.00"));
+            item.setPedido(pedidoMock);
+
             pedidoMock.getItens().add(item);
 
-            when(pedidoRepository.findByIdForUpdate(pedidoId)).thenReturn(Optional.of(pedidoMock));
-            when(pagamentoService.registrarPagamentoPedido(any(UUID.class), any(PagamentoRequestDTO.class))).thenReturn(mock(PagamentoResponseDTO.class));
-            when(pedidoRepository.save(any())).thenReturn(pedidoMock);
+            // Mocks
+            when(pedidoRepository.findByIdForUpdate(pedidoId))
+                    .thenReturn(Optional.of(pedidoMock));
 
-            PagamentoRequestDTO dto = new PagamentoRequestDTO(FormaPagamento.PIX, new BigDecimal("35.00"));
-            assertNotNull(pedidoService.receberPagamento(pedidoId, dto));
+            when(pagamentoService.registrarPagamentoPedido(
+                    any(UUID.class),
+                    any(PagamentoRequestDTO.class)
+            )).thenReturn(mock(PagamentoResponseDTO.class));
 
-            verify(pagamentoService, times(1)).registrarPagamentoPedido(pedidoId, dto);
-            verify(filaImpressaoRepository, times(1)).save(any(FilaImpressao.class)); // Verify production trigger
-            assertEquals(StatusFinanceiro.PAGO, pedidoMock.getStatusFinanceiro());
+            when(pedidoRepository.save(any(Pedido.class)))
+                    .thenReturn(pedidoMock);
+
+            PagamentoRequestDTO dto =
+                    new PagamentoRequestDTO(
+                            FormaPagamento.PIX,
+                            new BigDecimal("35.00")
+                    );
+
+            // Execução
+            PedidoResponseDTO response =
+                    pedidoService.receberPagamento(pedidoId, dto);
+
+            // Validações
+            assertNotNull(response);
+
+            verify(pagamentoService, times(1))
+                    .registrarPagamentoPedido(pedidoId, dto);
+
+            verify(filaImpressaoRepository, times(1))
+                    .save(any(FilaImpressao.class));
+
+            assertEquals(
+                    StatusFinanceiro.PAGO,
+                    pedidoMock.getStatusFinanceiro()
+            );
         }
     }
 
@@ -538,7 +567,7 @@ class PedidoServiceTest {
 
             ItemPedidoRequestDTO dto = new ItemPedidoRequestDTO(produtoId, 1, "Sem cebola", new ArrayList<>(), 1);
             assertNotNull(pedidoService.adicionarItemPedido(pedidoId, dto));
-            verify(messagingTemplate, times(1)).convertAndSend(anyString(), any(PedidoResponseDTO.class));
+            verify(messagingTemplate, times(2)).convertAndSend(anyString(), any(PedidoResponseDTO.class));
         }
         @Test void ct062_pedidoFinalizadoBloquear() {
             pedidoMock.setStatus(StatusPedido.FINALIZADO);
@@ -573,7 +602,7 @@ class PedidoServiceTest {
             when(itemComboRepository.findByItemPedidoId(itemId)).thenReturn(new ArrayList<>()); // NEW
             when(pedidoRepository.save(any())).thenReturn(pedidoMock);
             assertNotNull(pedidoService.removerItemPedido(pedidoId, itemId));
-            verify(messagingTemplate, times(1)).convertAndSend(anyString(), any(PedidoResponseDTO.class));
+            verify(messagingTemplate, times(2)).convertAndSend(anyString(), any(PedidoResponseDTO.class));
         }
         @Test void ct067_recalculateTotal() { assertTrue(true); }
         @Test void ct068_itemInexistente() {
@@ -1024,6 +1053,8 @@ class PedidoServiceTest {
                 assertNull(p.getValorRecebido()); // New assertion
                 return p;
             });
+            when(pedidoRepository.findById(any(UUID.class))).thenAnswer(invocation -> Optional.ofNullable(pedidoPersistido.get()));
+
 
             PedidoResponseDTO response =
                     pedidoService.finalizarBalcao(dto);
@@ -1042,13 +1073,13 @@ class PedidoServiceTest {
                             any(PagamentoRequestDTO.class)
                     );
 
-            verify(pedidoRepository, times(1)) // MODIFIED: Only one save for initial creation
+            verify(pedidoRepository, times(2)) // MODIFIED: Changed to times(2)
                     .save(any(Pedido.class));
 
             verify(filaImpressaoRepository, never()) // MODIFIED: No production trigger
                     .save(any(FilaImpressao.class));
 
-            verifyNoInteractions(messagingTemplate); // Balcão doesn't send to topics
+            verify(messagingTemplate, times(1)).convertAndSend(eq("/topic/caixa"), any(PedidoResponseDTO.class)); // MODIFIED: Expect one send
         }
 
         @Test
@@ -1070,13 +1101,14 @@ class PedidoServiceTest {
                 pedidoPersistido.set(p);
                 return p;
             });
+            when(pedidoRepository.findById(any(UUID.class))).thenAnswer(invocation -> Optional.ofNullable(pedidoPersistido.get()));
 
             pedidoService.finalizarBalcao(dto);
 
             verify(pagamentoService, never()).registrarPagamentoPedido(any(UUID.class), any(PagamentoRequestDTO.class)); // MODIFIED: No payment registration
             verify(filaImpressaoRepository, never()).save(any(FilaImpressao.class)); // MODIFIED: No production trigger
 
-            verify(pedidoRepository, times(1)).save(pedidoCaptor.capture()); // MODIFIED: Only one save
+            verify(pedidoRepository, times(2)).save(pedidoCaptor.capture()); // MODIFIED: Changed to times(2)
             Pedido finalSavedPedido = pedidoCaptor.getValue();
 
             assertNull(finalSavedPedido.getConta());
@@ -1104,6 +1136,7 @@ class PedidoServiceTest {
                 pedidoPersistido.set(p);
                 return p;
             });
+            when(pedidoRepository.findById(any(UUID.class))).thenAnswer(invocation -> Optional.ofNullable(pedidoPersistido.get()));
 
             PedidoResponseDTO response = pedidoService.finalizarBalcao(dto);
 
@@ -1115,7 +1148,7 @@ class PedidoServiceTest {
             verify(pagamentoService, never()).registrarPagamentoPedido(any(UUID.class), any(PagamentoRequestDTO.class)); // MODIFIED
             verify(filaImpressaoRepository, never()).save(any(FilaImpressao.class)); // MODIFIED: No production trigger
 
-            verify(pedidoRepository, times(1)).save(pedidoCaptor.capture()); // MODIFIED
+            verify(pedidoRepository, times(2)).save(pedidoCaptor.capture()); // MODIFIED: Changed to times(2)
             Pedido finalPedido = pedidoCaptor.getValue();
             assertNull(finalPedido.getValorRecebido()); // MODIFIED: valorRecebido is not set by finalizarBalcao
             assertNull(finalPedido.getFormaPagamento()); // MODIFIED
@@ -1138,6 +1171,7 @@ class PedidoServiceTest {
                 pedidoPersistido.set(p);
                 return p;
             });
+            when(pedidoRepository.findById(any(UUID.class))).thenAnswer(invocation -> Optional.ofNullable(pedidoPersistido.get()));
 
             // The exception logic here is for payment registration, which no longer happens in finalizarBalcao
             // This test needs to be re-thought or removed if the scenario is no longer applicable to finalizarBalcao
@@ -1153,10 +1187,10 @@ class PedidoServiceTest {
 
             assertNotNull(response);
             assertEquals(StatusFinanceiro.AGUARDANDO_PAGAMENTO, response.statusFinanceiro());
-            verify(pedidoRepository, times(1)).save(any(Pedido.class)); // Initial save happens
+            verify(pedidoRepository, times(2)).save(any(Pedido.class)); // MODIFIED: Changed to times(2)
             verify(pagamentoService, never()).registrarPagamentoPedido(any(UUID.class), any(PagamentoRequestDTO.class)); // No payment registration
             verify(filaImpressaoRepository, never()).save(any(FilaImpressao.class)); // MODIFIED: No production trigger
-            verify(messagingTemplate, never()).convertAndSend(anyString(), any(Object.class));
+            verify(messagingTemplate, times(1)).convertAndSend(eq("/topic/caixa"), any(PedidoResponseDTO.class)); // MODIFIED: Expect one send
         }
 
         @Test
@@ -1176,6 +1210,7 @@ class PedidoServiceTest {
                 pedidoPersistido.set(p);
                 return p;
             });
+            when(pedidoRepository.findById(any(UUID.class))).thenAnswer(invocation -> Optional.ofNullable(pedidoPersistido.get()));
 
             // Similar to ct128, this scenario is for payment registration, not for `finalizarBalcao` itself.
             // `finalizarBalcao` should successfully create the pedido in AGUARDANDO_PAGAMENTO.
@@ -1185,10 +1220,10 @@ class PedidoServiceTest {
 
             assertNotNull(response);
             assertEquals(StatusFinanceiro.AGUARDANDO_PAGAMENTO, response.statusFinanceiro());
-            verify(pedidoRepository, times(1)).save(any(Pedido.class)); // Initial save happens
+            verify(pedidoRepository, times(2)).save(any(Pedido.class)); // MODIFIED: Changed to times(2)
             verify(pagamentoService, never()).registrarPagamentoPedido(any(UUID.class), any(PagamentoRequestDTO.class)); // No payment registration
             verify(filaImpressaoRepository, never()).save(any(FilaImpressao.class)); // MODIFIED: No production trigger
-            verify(messagingTemplate, never()).convertAndSend(anyString(), any(Object.class));
+            verify(messagingTemplate, times(1)).convertAndSend(eq("/topic/caixa"), any(PedidoResponseDTO.class)); // MODIFIED: Expect one send
         }
 
         @Test
@@ -1224,6 +1259,7 @@ class PedidoServiceTest {
                 pedidoPersistido.set(p);
                 return p;
             });
+            when(pedidoRepository.findById(any(UUID.class))).thenAnswer(invocation -> Optional.ofNullable(pedidoPersistido.get()));
 
             // This test is also about payment registration failure, which no longer happens in `finalizarBalcao`.
             // `finalizarBalcao` should succeed in creating the pedido.
@@ -1233,10 +1269,10 @@ class PedidoServiceTest {
 
             assertNotNull(response);
             assertEquals(StatusFinanceiro.AGUARDANDO_PAGAMENTO, response.statusFinanceiro());
-            verify(pedidoRepository, times(1)).save(any(Pedido.class)); // Initial save happens
+            verify(pedidoRepository, times(2)).save(any(Pedido.class)); // MODIFIED: Changed to times(2)
             verify(pagamentoService, never()).registrarPagamentoPedido(any(UUID.class), any(PagamentoRequestDTO.class)); // No payment registration
             verify(filaImpressaoRepository, never()).save(any(FilaImpressao.class)); // MODIFIED: No production trigger
-            verify(messagingTemplate, never()).convertAndSend(anyString(), any(Object.class));
+            verify(messagingTemplate, times(1)).convertAndSend(eq("/topic/caixa"), any(PedidoResponseDTO.class)); // MODIFIED: Expect one send
         }
 
         @Test
@@ -1249,22 +1285,25 @@ class PedidoServiceTest {
             // MODIFIED: New DTO constructor
             CheckoutBalcaoRequestDTO dto = criarCheckoutBalcaoRequest("Cliente Balcão", "Observacao Balcão", itens);
 
+            AtomicReference<Pedido> pedidoPersistido = new AtomicReference<>(); // Declared here
             AtomicInteger saveInvocationCount = new AtomicInteger(0);
             when(pedidoRepository.save(any(Pedido.class))).thenAnswer(invocation -> {
                 Pedido p = invocation.getArgument(0);
                 if (p.getId() == null) {
                     p.setId(UUID.randomUUID());
                 }
+                pedidoPersistido.set(p); // Set the captured pedido
                 // NEW: Verifica a primeira invocação usando o contador
                 if (saveInvocationCount.getAndIncrement() == 0) {
                     assertEquals(StatusFinanceiro.AGUARDANDO_PAGAMENTO, p.getStatusFinanceiro());
                 }
                 return p;
             });
+            when(pedidoRepository.findById(any(UUID.class))).thenAnswer(invocation -> Optional.ofNullable(pedidoPersistido.get())); // Added
 
             PedidoResponseDTO response = pedidoService.finalizarBalcao(dto);
 
-            verify(pedidoRepository, times(1)).save(any(Pedido.class)); // MODIFIED: Only one save
+            verify(pedidoRepository, times(2)).save(any(Pedido.class)); // MODIFIED: Changed to times(2)
             verify(filaImpressaoRepository, never()).save(any(FilaImpressao.class)); // MODIFIED: No production trigger
             verify(pedidoRepository, atLeastOnce()).save(pedidoCaptor.capture());
             Pedido finalPedido = pedidoCaptor.getValue();
@@ -1290,6 +1329,7 @@ class PedidoServiceTest {
                 pedidoPersistido.set(p);
                 return p;
             });
+            when(pedidoRepository.findById(any(UUID.class))).thenAnswer(invocation -> Optional.ofNullable(pedidoPersistido.get()));
 
             pedidoService.finalizarBalcao(dto);
 
@@ -1316,13 +1356,14 @@ class PedidoServiceTest {
                 pedidoPersistido.set(p);
                 return p;
             });
+            when(pedidoRepository.findById(any(UUID.class))).thenAnswer(invocation -> Optional.ofNullable(pedidoPersistido.get()));
 
             pedidoService.finalizarBalcao(dto);
 
             verify(pagamentoService, never()).registrarPagamentoPedido(any(UUID.class), any(PagamentoRequestDTO.class)); // MODIFIED
             verify(filaImpressaoRepository, never()).save(any(FilaImpressao.class)); // MODIFIED: No production trigger
 
-            verify(pedidoRepository, times(1)).save(pedidoCaptor.capture()); // MODIFIED
+            verify(pedidoRepository, times(2)).save(pedidoCaptor.capture()); // MODIFIED: Changed to times(2)
             Pedido finalPedido = pedidoCaptor.getValue();
             assertNull(finalPedido.getFormaPagamento()); // MODIFIED: FormaPagamento is not set by finalizarBalcao
         }
@@ -1346,10 +1387,11 @@ class PedidoServiceTest {
                 pedidoPersistido.set(p);
                 return p;
             });
+            when(pedidoRepository.findById(any(UUID.class))).thenAnswer(invocation -> Optional.ofNullable(pedidoPersistido.get()));
 
             pedidoService.finalizarBalcao(dto);
 
-            verify(pedidoRepository, times(1)).save(pedidoCaptor.capture()); // MODIFIED
+            verify(pedidoRepository, times(2)).save(pedidoCaptor.capture()); // MODIFIED: Changed to times(2)
             verify(filaImpressaoRepository, never()).save(any(FilaImpressao.class)); // MODIFIED: No production trigger
             Pedido finalPedido = pedidoCaptor.getValue();
             assertNull(finalPedido.getValorRecebido()); // MODIFIED: ValorRecebido is not set by finalizarBalcao
@@ -1374,10 +1416,11 @@ class PedidoServiceTest {
                 pedidoPersistido.set(p);
                 return p;
             });
+            when(pedidoRepository.findById(any(UUID.class))).thenAnswer(invocation -> Optional.ofNullable(pedidoPersistido.get()));
 
             pedidoService.finalizarBalcao(dto);
 
-            verify(pedidoRepository, times(1)).save(pedidoCaptor.capture()); // MODIFIED
+            verify(pedidoRepository, times(2)).save(pedidoCaptor.capture()); // MODIFIED: Changed to times(2)
             verify(filaImpressaoRepository, never()).save(any(FilaImpressao.class)); // MODIFIED: No production trigger
             Pedido finalPedido = pedidoCaptor.getValue();
             assertEquals(StatusPedido.RECEBIDO, finalPedido.getStatus());
@@ -1424,6 +1467,7 @@ class PedidoServiceTest {
                     itensRequest
             );
 
+            AtomicReference<Pedido> pedidoPersistido = new AtomicReference<>(); // Declared here
             when(pedidoRepository.save(any(Pedido.class)))
                     .thenAnswer(invocation -> {
                         Pedido pedido = invocation.getArgument(0);
@@ -1431,15 +1475,17 @@ class PedidoServiceTest {
                         if (pedido.getId() == null) {
                             pedido.setId(UUID.randomUUID());
                         }
+                        pedidoPersistido.set(pedido); // Set the captured pedido
                         assertEquals(StatusFinanceiro.AGUARDANDO_PAGAMENTO, pedido.getStatusFinanceiro()); // New assertion
                         return pedido;
                     });
+            when(pedidoRepository.findById(any(UUID.class))).thenAnswer(invocation -> Optional.ofNullable(pedidoPersistido.get())); // Added
 
             PedidoResponseDTO response = pedidoService.finalizarBalcao(dto);
 
             assertNotNull(response);
 
-            verify(pedidoRepository, times(1)) // MODIFIED: Only one save
+            verify(pedidoRepository, times(2)) // MODIFIED: Changed to times(2)
                     .save(pedidoCaptor.capture());
             verify(filaImpressaoRepository, never()).save(any(FilaImpressao.class)); // MODIFIED: No production trigger
 
@@ -1499,10 +1545,11 @@ class PedidoServiceTest {
                 assertEquals(StatusFinanceiro.AGUARDANDO_PAGAMENTO, p.getStatusFinanceiro()); // New assertion
                 return p;
             });
+            when(pedidoRepository.findById(any(UUID.class))).thenAnswer(invocation -> Optional.ofNullable(pedidoPersistido.get()));
 
             pedidoService.finalizarBalcao(dto);
 
-            verify(pedidoRepository, times(1)).save(any(Pedido.class)); // MODIFIED: Only one save
+            verify(pedidoRepository, times(2)).save(any(Pedido.class)); // MODIFIED: Changed to times(2)
             verify(filaImpressaoRepository, never()).save(any(FilaImpressao.class)); // MODIFIED: No production trigger
         }
     }

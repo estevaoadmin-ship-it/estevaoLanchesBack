@@ -11,6 +11,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
 import java.util.List;
+import java.util.Objects;
 import java.util.UUID;
 import java.util.stream.Collectors;
 
@@ -74,5 +75,27 @@ public class ContaService {
             throw new BusinessRuleException("Não é possível excluir uma conta com saldo devedor pendente.");
         }
         contaRepository.delete(conta);
+    }
+
+    /**
+     * Sincroniza o valor total da Conta com a soma dos valores de todos os Pedidos associados a ela.
+     * Esta rotina recalcula o valor total da conta do zero, garantindo a integridade dos dados.
+     *
+     * @param contaId O ID da Conta a ser sincronizada.
+     * @throws ResourceNotFoundException se a Conta não for encontrada.
+     */
+    @Transactional
+    public void sincronizarValorTotal(UUID contaId) {
+        Conta conta = contaRepository.findById(contaId)
+                .orElseThrow(() -> new ResourceNotFoundException("Conta não encontrada com o ID informado para sincronização."));
+
+        // Utiliza a coleção de pedidos já existente na entidade Conta
+        BigDecimal total = conta.getPedidos().stream()
+                .map(Pedido::getTotal)
+                .filter(Objects::nonNull)
+                .reduce(BigDecimal.ZERO, BigDecimal::add);
+
+        conta.setValorTotal(total);
+        contaRepository.save(conta);
     }
 }
