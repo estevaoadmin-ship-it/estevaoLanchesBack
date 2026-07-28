@@ -7,6 +7,7 @@ import com.paullomaggio.estevaoLanches.enums.StatusMesa;
 import com.paullomaggio.estevaoLanches.exceptions.BusinessRuleException;
 import com.paullomaggio.estevaoLanches.exceptions.ResourceNotFoundException;
 import com.paullomaggio.estevaoLanches.repositories.*;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -18,6 +19,7 @@ import java.util.UUID;
 import java.util.stream.Collectors;
 
 @Service
+@Slf4j
 public class ComandaService {
 
     private final ComandaRepository comandaRepository;
@@ -74,10 +76,49 @@ public class ComandaService {
         Conta contaPai = new Conta();
         contaPai.setComanda(comandaSalva);
         contaPai.setNumeroConta(1);
+        log.info("[FORENSE-SUBCONTA] Classe: {}, Método: {}, Ação: setPago, conta: {}, numeroConta: {}, comandaId: {}, valorTotal: {}, pagoAnterior: {}, pagoNovo: {}, thread: {}, transactionAtiva: {}, stacktrace: {}",
+                getClass().getSimpleName(),
+                "abrirPorNumeroMesa",
+                contaPai.getId(),
+                contaPai.getNumeroConta(),
+                comandaSalva.getId(),
+                BigDecimal.ZERO,
+                null,
+                false,
+                Thread.currentThread().getName(),
+                org.springframework.transaction.support.TransactionSynchronizationManager.isActualTransactionActive(),
+                java.util.Arrays.stream(Thread.currentThread().getStackTrace()).skip(3).limit(8).map(StackTraceElement::toString).collect(java.util.stream.Collectors.joining(" | ")));
         contaPai.setPago(false);
+        log.info("[FORENSE-SUBCONTA] Classe: {}, Método: {}, Ação: setValorTotal, conta: {}, numeroConta: {}, comandaId: {}, valorAnterior: {}, valorNovo: {}, pago: {}, hashCode: {}, identityHashCode: {}, thread: {}, transactionAtiva: {}, stacktrace: {}",
+                getClass().getSimpleName(),
+                "abrirPorNumeroMesa",
+                contaPai.getId(),
+                contaPai.getNumeroConta(),
+                comandaSalva.getId(),
+                null,
+                BigDecimal.ZERO,
+                contaPai.getPago(),
+                contaPai.hashCode(),
+                System.identityHashCode(contaPai),
+                Thread.currentThread().getName(),
+                org.springframework.transaction.support.TransactionSynchronizationManager.isActualTransactionActive(),
+                java.util.Arrays.stream(Thread.currentThread().getStackTrace()).skip(3).limit(8).map(StackTraceElement::toString).collect(java.util.stream.Collectors.joining(" | ")));
         contaPai.setValorTotal(BigDecimal.ZERO);
 
         contaRepository.save(contaPai);
+
+        log.info("[FORENSE-SUBCONTA] Classe: {}, Método: {}, Ação: pós-save criação da conta, conta: {}, numeroConta: {}, comandaId: {}, valorTotal: {}, pago: {}, hashCode: {}, identityHashCode: {}, thread: {}, transactionAtiva: {}",
+                getClass().getSimpleName(),
+                "abrirPorNumeroMesa",
+                contaPai.getId(),
+                contaPai.getNumeroConta(),
+                comandaSalva.getId(),
+                contaPai.getValorTotal(),
+                contaPai.getPago(),
+                contaPai.hashCode(),
+                System.identityHashCode(contaPai),
+                Thread.currentThread().getName(),
+                org.springframework.transaction.support.TransactionSynchronizationManager.isActualTransactionActive());
 
         return new ComandaResponseDTO(comandaSalva, false);
     }

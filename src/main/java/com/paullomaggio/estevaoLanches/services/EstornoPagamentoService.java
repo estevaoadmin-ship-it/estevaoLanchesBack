@@ -14,6 +14,7 @@ import com.paullomaggio.estevaoLanches.repositories.CaixaRepository;
 import com.paullomaggio.estevaoLanches.repositories.ContaRepository;
 import com.paullomaggio.estevaoLanches.repositories.EstornoPagamentoRepository;
 import com.paullomaggio.estevaoLanches.repositories.PagamentoRepository;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.stereotype.Service;
@@ -21,10 +22,12 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
+import java.util.Arrays;
 import java.util.List;
 import java.util.UUID;
 import java.util.stream.Collectors;
 
+@Slf4j
 @Service
 public class EstornoPagamentoService {
 
@@ -110,6 +113,18 @@ public class EstornoPagamentoService {
         if (pagamento.getPedido() != null) {
             if (saldoLiquidoPagamento.compareTo(BigDecimal.ZERO) == 0) {
                 // Estorno total
+                log.info("[FORENSE-SUBCONTA] Classe: {}, Método: {}, Ação: setStatusFinanceiro, Pedido: {}, Conta: {}, statusAnterior: {}, statusNovo: {}, valorEstornado: {}, saldoLiquidoPagamento: {}, thread: {}, transactionAtiva: {}, stacktrace: {}",
+                        getClass().getSimpleName(),
+                        "estornar",
+                        pagamento.getPedido().getId(),
+                        pagamento.getConta() != null ? pagamento.getConta().getId() : null,
+                        pagamento.getPedido().getStatusFinanceiro(),
+                        StatusFinanceiro.ESTORNADO,
+                        dto.valorEstornado(),
+                        saldoLiquidoPagamento,
+                        Thread.currentThread().getName(),
+                        org.springframework.transaction.support.TransactionSynchronizationManager.isActualTransactionActive(),
+                        stacktraceResumido());
                 pagamento.getPedido().setStatusFinanceiro(StatusFinanceiro.ESTORNADO);
                 // Não alterar Pedido.status, Pedido.formaPagamento, Pedido.valorRecebido
             }
@@ -127,11 +142,51 @@ public class EstornoPagamentoService {
             BigDecimal totalLiquido = totalBrutoPagamentosConta.subtract(totalEstornosDosPagamentosDaConta);
 
             if (totalLiquido.compareTo(conta.getValorTotal()) >= 0) {
+                log.info("[FORENSE-SUBCONTA] Classe: {}, Método: {}, Ação: setPago, Conta: {}, pedido: {}, valorAnterior: {}, valorNovo: {}, totalLiquido: {}, thread: {}, transactionAtiva: {}, stacktrace: {}",
+                        getClass().getSimpleName(),
+                        "estornar",
+                        conta.getId(),
+                        pagamento.getPedido() != null ? pagamento.getPedido().getId() : null,
+                        conta.getPago(),
+                        true,
+                        totalLiquido,
+                        Thread.currentThread().getName(),
+                        org.springframework.transaction.support.TransactionSynchronizationManager.isActualTransactionActive(),
+                        stacktraceResumido());
                 conta.setPago(true);
             } else {
+                log.info("[FORENSE-SUBCONTA] Classe: {}, Método: {}, Ação: setPago, Conta: {}, pedido: {}, valorAnterior: {}, valorNovo: {}, totalLiquido: {}, thread: {}, transactionAtiva: {}, stacktrace: {}",
+                        getClass().getSimpleName(),
+                        "estornar",
+                        conta.getId(),
+                        pagamento.getPedido() != null ? pagamento.getPedido().getId() : null,
+                        conta.getPago(),
+                        false,
+                        totalLiquido,
+                        Thread.currentThread().getName(),
+                        org.springframework.transaction.support.TransactionSynchronizationManager.isActualTransactionActive(),
+                        stacktraceResumido());
                 conta.setPago(false);
             }
+            log.info("[FORENSE-SUBCONTA] Classe: {}, Método: {}, Ação: pré-save conta, Conta: {}, numeroConta: {}, valorTotal: {}, pago: {}, thread: {}, transactionAtiva: {}",
+                    getClass().getSimpleName(),
+                    "estornar",
+                    conta.getId(),
+                    conta.getNumeroConta(),
+                    conta.getValorTotal(),
+                    conta.getPago(),
+                    Thread.currentThread().getName(),
+                    org.springframework.transaction.support.TransactionSynchronizationManager.isActualTransactionActive());
             contaRepository.save(conta); // Persistir a alteração no status da conta
+            log.info("[FORENSE-SUBCONTA] Classe: {}, Método: {}, Ação: pós-save conta, Conta: {}, numeroConta: {}, valorTotal: {}, pago: {}, thread: {}, transactionAtiva: {}",
+                    getClass().getSimpleName(),
+                    "estornar",
+                    conta.getId(),
+                    conta.getNumeroConta(),
+                    conta.getValorTotal(),
+                    conta.getPago(),
+                    Thread.currentThread().getName(),
+                    org.springframework.transaction.support.TransactionSynchronizationManager.isActualTransactionActive());
         }
 
         return new EstornoPagamentoResponseDTO(estorno);
@@ -163,5 +218,13 @@ public class EstornoPagamentoService {
             return authentication.getName();
         }
         return "SISTEMA";
+    }
+
+    private String stacktraceResumido() {
+        return Arrays.stream(Thread.currentThread().getStackTrace())
+                .skip(3)
+                .limit(8)
+                .map(StackTraceElement::toString)
+                .collect(Collectors.joining(" | "));
     }
 }

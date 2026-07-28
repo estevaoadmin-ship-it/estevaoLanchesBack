@@ -6,15 +6,19 @@ import com.paullomaggio.estevaoLanches.entities.*;
 import com.paullomaggio.estevaoLanches.exceptions.BusinessRuleException;
 import com.paullomaggio.estevaoLanches.exceptions.ResourceNotFoundException;
 import com.paullomaggio.estevaoLanches.repositories.*;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
+import java.util.Arrays;
 import java.util.List;
 import java.util.Objects;
 import java.util.UUID;
 import java.util.stream.Collectors;
+import java.util.stream.Collectors;
 
+@Slf4j
 @Service
 public class ContaService {
 
@@ -43,10 +47,48 @@ public class ContaService {
         Conta conta = new Conta();
         conta.setNumeroConta(dto.numeroConta());
         conta.setComanda(comanda);
+        log.info("[FORENSE-SUBCONTA] Classe: {}, Método: {}, Ação: setPago, Conta: {}, numeroConta: {}, comandaId: {}, valorTotal: {}, pagoAnterior: {}, pagoNovo: {}, thread: {}, transactionAtiva: {}",
+                getClass().getSimpleName(),
+                "criar",
+                conta.getId(),
+                conta.getNumeroConta(),
+                comanda.getId(),
+                BigDecimal.ZERO,
+                null,
+                false,
+                Thread.currentThread().getName(),
+                org.springframework.transaction.support.TransactionSynchronizationManager.isActualTransactionActive());
         conta.setPago(false);
+        log.info("[FORENSE-SUBCONTA] Classe: {}, Método: {}, Ação: pré-save criação da conta, Conta: {}, numeroConta: {}, comandaId: {}, valorTotal: {}, pago: {}, hashCode: {}, identityHashCode: {}, thread: {}, transactionAtiva: {}",
+                getClass().getSimpleName(),
+                "criar",
+                conta.getId(),
+                conta.getNumeroConta(),
+                comanda.getId(),
+                BigDecimal.ZERO,
+                conta.getPago(),
+                conta.hashCode(),
+                System.identityHashCode(conta),
+                Thread.currentThread().getName(),
+                org.springframework.transaction.support.TransactionSynchronizationManager.isActualTransactionActive());
         conta.setValorTotal(BigDecimal.ZERO);
 
-        return new ContaResponseDTO(contaRepository.save(conta));
+        Conta contaSalva = contaRepository.save(conta);
+
+        log.info("[FORENSE-SUBCONTA] Classe: {}, Método: {}, Ação: pós-save criação da conta, Conta: {}, numeroConta: {}, comandaId: {}, valorTotal: {}, pago: {}, hashCode: {}, identityHashCode: {}, thread: {}, transactionAtiva: {}",
+                getClass().getSimpleName(),
+                "criar",
+                contaSalva.getId(),
+                contaSalva.getNumeroConta(),
+                comanda.getId(),
+                contaSalva.getValorTotal(),
+                contaSalva.getPago(),
+                contaSalva.hashCode(),
+                System.identityHashCode(contaSalva),
+                Thread.currentThread().getName(),
+                org.springframework.transaction.support.TransactionSynchronizationManager.isActualTransactionActive());
+
+        return new ContaResponseDTO(contaSalva);
     }
 
     @Transactional(readOnly = true)
@@ -95,7 +137,48 @@ public class ContaService {
                 .filter(Objects::nonNull)
                 .reduce(BigDecimal.ZERO, BigDecimal::add);
 
+        log.info("[FORENSE-SUBCONTA] Classe: {}, Método: {}, Ação: setValorTotal, Conta: {}, numeroConta: {}, valorAnterior: {}, valorNovo: {}, pedidosCount: {}, thread: {}, transactionAtiva: {}, stacktrace: {}",
+                getClass().getSimpleName(),
+                "sincronizarValorTotal",
+                conta.getId(),
+                conta.getNumeroConta(),
+                conta.getValorTotal(),
+                total,
+                conta.getPedidos() != null ? conta.getPedidos().size() : 0,
+                Thread.currentThread().getName(),
+                org.springframework.transaction.support.TransactionSynchronizationManager.isActualTransactionActive(),
+                stacktraceResumido());
+
         conta.setValorTotal(total);
+
+        log.info("[FORENSE-SUBCONTA] Classe: {}, Método: {}, Ação: pré-save sincronização, Conta: {}, numeroConta: {}, valorTotal: {}, pago: {}, thread: {}, transactionAtiva: {}",
+                getClass().getSimpleName(),
+                "sincronizarValorTotal",
+                conta.getId(),
+                conta.getNumeroConta(),
+                conta.getValorTotal(),
+                conta.getPago(),
+                Thread.currentThread().getName(),
+                org.springframework.transaction.support.TransactionSynchronizationManager.isActualTransactionActive());
+
         contaRepository.save(conta);
+
+        log.info("[FORENSE-SUBCONTA] Classe: {}, Método: {}, Ação: pós-save sincronização, Conta: {}, numeroConta: {}, valorTotal: {}, pago: {}, thread: {}, transactionAtiva: {}",
+                getClass().getSimpleName(),
+                "sincronizarValorTotal",
+                conta.getId(),
+                conta.getNumeroConta(),
+                conta.getValorTotal(),
+                conta.getPago(),
+                Thread.currentThread().getName(),
+                org.springframework.transaction.support.TransactionSynchronizationManager.isActualTransactionActive());
+    }
+
+    private String stacktraceResumido() {
+        return Arrays.stream(Thread.currentThread().getStackTrace())
+                .skip(3)
+                .limit(8)
+                .map(StackTraceElement::toString)
+                .collect(Collectors.joining(" | "));
     }
 }

@@ -105,4 +105,11 @@ public interface PedidoRepository extends JpaRepository<Pedido, UUID> {
      */
     @Query("SELECT p FROM Pedido p LEFT JOIN FETCH p.conta c LEFT JOIN FETCH c.comanda cm LEFT JOIN FETCH cm.mesa")
     List<Pedido> findAllWithMesaDetails();
+
+    /**
+     * Método específico para testes E2E que carrega a árvore completa de Pedido, ItemPedido, Produto e Adicionais.
+     * Utiliza JOIN FETCH para evitar LazyInitializationException.
+     */
+    @Query("SELECT p FROM Pedido p LEFT JOIN FETCH p.itens ip LEFT JOIN FETCH ip.produto LEFT JOIN FETCH ip.adicionais WHERE p.conta.id IN :contaIds")
+    List<Pedido> findByContaIdInWithDetails(@Param("contaIds") Collection<UUID> contaIds);
 }

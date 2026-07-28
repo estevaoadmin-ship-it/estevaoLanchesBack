@@ -11,6 +11,8 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import jakarta.persistence.EntityManager;
+import jakarta.persistence.PersistenceContext;
 import java.math.BigDecimal;
 import java.util.List;
 import java.util.UUID;
@@ -24,6 +26,9 @@ public class GarcomMesaSessaoService {
     private final ComandaRepository comandaRepository;
     private final ContaRepository contaRepository;
     private final PedidoRepository pedidoRepository;
+
+    @PersistenceContext
+    private EntityManager entityManager;
 
     /**
      * 📥 ESCRITA (SYNC): Recebe os itens novos (verdes) do Mobile e persiste no banco.
@@ -63,6 +68,9 @@ public class GarcomMesaSessaoService {
                 coreService.processarPedidoMobile(loteRequest);
             }
         }
+
+        entityManager.flush();
+        entityManager.clear();
 
         // 3. Retorna a foto atualizada do banco para limpar os itens verdes no Mobile
         return obterSessao(mesaId);

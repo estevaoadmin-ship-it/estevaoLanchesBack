@@ -7,6 +7,7 @@ import com.paullomaggio.estevaoLanches.exceptions.ResourceNotFoundException;
 import com.paullomaggio.estevaoLanches.repositories.ComandaRepository;
 import com.paullomaggio.estevaoLanches.repositories.MesaRepository;
 import com.paullomaggio.estevaoLanches.services.core.PedidoCoreService;
+import jakarta.persistence.EntityManager; // Adicionado
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -16,6 +17,7 @@ import org.mockito.Captor;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.test.util.ReflectionTestUtils; // Adicionado
 
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
@@ -32,13 +34,16 @@ import static org.mockito.Mockito.*;
 class GarcomMesaSessaoServiceTest {
 
     @Mock
-    private PedidoCoreService pedidoCoreService; // Alterado de PedidoMesaService para PedidoCoreService
+    private PedidoCoreService pedidoCoreService;
 
     @Mock
     private MesaRepository mesaRepository;
 
     @Mock
     private ComandaRepository comandaRepository;
+
+    @Mock // Adicionado
+    private EntityManager entityManager; // Adicionado
 
     @InjectMocks
     private GarcomMesaSessaoService garcomMesaSessaoService;
@@ -53,6 +58,9 @@ class GarcomMesaSessaoServiceTest {
 
     @BeforeEach
     void setUp() {
+        // MockitoAnnotations.openMocks(this); // Removido: @ExtendWith(MockitoExtension.class) já faz isso
+        ReflectionTestUtils.setField(garcomMesaSessaoService, "entityManager", entityManager); // Injeta o mock do EntityManager
+
         mesaId = UUID.randomUUID();
         comandaId = UUID.randomUUID();
 
@@ -63,7 +71,7 @@ class GarcomMesaSessaoServiceTest {
 
         comanda = new Comanda();
         comanda.setId(comandaId);
-        comanda.setMesa(mesa); // 🎯 FIX: Ajustado para o nome correto mapeado na Entidade
+        comanda.setMesa(mesa);
         comanda.setStatus(StatusComanda.ABERTA);
         comanda.setAbertaEm(LocalDateTime.now());
         comanda.setContas(new ArrayList<>());
@@ -81,7 +89,7 @@ class GarcomMesaSessaoServiceTest {
         GarcomMesaSessaoRequestDTO request = new GarcomMesaSessaoRequestDTO(comandaId, null, List.of());
 
         assertThrows(ResourceNotFoundException.class, () -> garcomMesaSessaoService.sincronizarSessao(mesaId, request));
-        verify(pedidoCoreService, never()).processarPedidoMobile(any()); // Alterado para pedidoCoreService
+        verify(pedidoCoreService, never()).processarPedidoMobile(any());
     }
 
     @Test
@@ -94,7 +102,7 @@ class GarcomMesaSessaoServiceTest {
         GarcomMesaSessaoResponseDTO response = garcomMesaSessaoService.sincronizarSessao(mesaId, request);
 
         assertNotNull(response);
-        verify(pedidoCoreService, never()).processarPedidoMobile(any()); // Alterado para pedidoCoreService
+        verify(pedidoCoreService, never()).processarPedidoMobile(any());
     }
 
     @Test
@@ -109,7 +117,7 @@ class GarcomMesaSessaoServiceTest {
 
         garcomMesaSessaoService.sincronizarSessao(mesaId, request);
 
-        verify(pedidoCoreService, never()).processarPedidoMobile(any()); // Alterado para pedidoCoreService
+        verify(pedidoCoreService, never()).processarPedidoMobile(any());
     }
 
     @Test
@@ -126,7 +134,7 @@ class GarcomMesaSessaoServiceTest {
 
         garcomMesaSessaoService.sincronizarSessao(mesaId, request);
 
-        verify(pedidoCoreService, times(1)).processarPedidoMobile(any(PedidoMobileRequestDTO.class)); // Alterado para pedidoCoreService
+        verify(pedidoCoreService, times(1)).processarPedidoMobile(any(PedidoMobileRequestDTO.class));
     }
 
     @Test
@@ -143,7 +151,7 @@ class GarcomMesaSessaoServiceTest {
 
         garcomMesaSessaoService.sincronizarSessao(mesaId, request);
 
-        verify(pedidoCoreService).processarPedidoMobile(pedidoCaptor.capture()); // Alterado para pedidoCoreService
+        verify(pedidoCoreService).processarPedidoMobile(pedidoCaptor.capture());
         PedidoMobileRequestDTO payloadEnviado = pedidoCaptor.getValue();
 
         assertEquals(comandaId, payloadEnviado.comandaId());
@@ -170,7 +178,7 @@ class GarcomMesaSessaoServiceTest {
         GarcomMesaSessaoRequestDTO request = new GarcomMesaSessaoRequestDTO(comandaId, null, List.of(contaComItens, contaSemItens));
         garcomMesaSessaoService.sincronizarSessao(mesaId, request);
 
-        verify(pedidoCoreService, times(1)).processarPedidoMobile(any()); // Alterado para pedidoCoreService
+        verify(pedidoCoreService, times(1)).processarPedidoMobile(any());
     }
 
     @Test
@@ -185,7 +193,7 @@ class GarcomMesaSessaoServiceTest {
         GarcomMesaSessaoRequestDTO request = new GarcomMesaSessaoRequestDTO(comandaId, null, List.of(conta1, conta2));
         garcomMesaSessaoService.sincronizarSessao(mesaId, request);
 
-        verify(pedidoCoreService, times(2)).processarPedidoMobile(any()); // Alterado para pedidoCoreService
+        verify(pedidoCoreService, times(2)).processarPedidoMobile(any());
     }
 
     // ===================================================================================
@@ -312,7 +320,7 @@ class GarcomMesaSessaoServiceTest {
         ItemPedido hamburguer = mockItem(BigDecimal.valueOf(20), 2, false);
         ItemPedido batata = mockItem(BigDecimal.valueOf(10), 1, false);
 
-        Pedido pedido = new Pedido(); pedido.setStatus(StatusPedido.EM_PREPARO); // 🎯 FIX: Ajustado enum ENTREGUE -> EM_PREPARO
+        Pedido pedido = new Pedido(); pedido.setStatus(StatusPedido.EM_PREPARO);
         pedido.setItens(List.of(hamburguer, batata));
         Conta conta = new Conta(); conta.setId(UUID.randomUUID()); conta.setPedidos(List.of(pedido));
         comanda.setContas(List.of(conta));
@@ -328,7 +336,7 @@ class GarcomMesaSessaoServiceTest {
     @DisplayName("Teste 017: valor unitário do item deve vir da tabela do Produto")
     void valorUnitarioDeveVirDoProduto() {
         ItemPedido item = mockItem(BigDecimal.valueOf(25.5), 1, false);
-        Pedido pedido = new Pedido(); pedido.setStatus(StatusPedido.EM_PREPARO); // 🎯 FIX: Ajustado enum
+        Pedido pedido = new Pedido(); pedido.setStatus(StatusPedido.EM_PREPARO);
         pedido.setItens(List.of(item));
         Conta conta = new Conta(); conta.setId(UUID.randomUUID()); conta.setPedidos(List.of(pedido));
         comanda.setContas(List.of(conta));
@@ -358,7 +366,7 @@ class GarcomMesaSessaoServiceTest {
     @Test
     @DisplayName("Teste 019: deve mapear os adicionais do item")
     void mapearAdicionais() {
-        ItemPedido item = mockItem(BigDecimal.TEN, 1, true); // Retorna 2 adicionais configurados no helper
+        ItemPedido item = mockItem(BigDecimal.TEN, 1, true);
         Pedido pedido = new Pedido(); pedido.setStatus(StatusPedido.EM_PREPARO); pedido.setItens(List.of(item));
         Conta conta = new Conta(); conta.setId(UUID.randomUUID()); conta.setPedidos(List.of(pedido));
         comanda.setContas(List.of(conta));
@@ -454,7 +462,7 @@ class GarcomMesaSessaoServiceTest {
     @Test
     @DisplayName("Teste 025: Conta sem pedidos mapeia para lista de itens vazia []")
     void contaSemPedidosTemItensVazios() {
-        Conta conta = new Conta(); conta.setId(UUID.randomUUID()); conta.setPedidos(null); // Simulando null safelly via helper interno ou lista vazia
+        Conta conta = new Conta(); conta.setId(UUID.randomUUID()); conta.setPedidos(null);
         conta.setPedidos(List.of());
         comanda.setContas(List.of(conta));
 
@@ -532,13 +540,13 @@ class GarcomMesaSessaoServiceTest {
     @Test
     @DisplayName("Teste 030: Somatório de valor total consolidando vários pedidos da mesma conta")
     void somatorioConsolidadoVariosPedidosNaConta() {
-        ItemPedido i1 = mockItem(BigDecimal.valueOf(10), 1, false); // Total 10
+        ItemPedido i1 = mockItem(BigDecimal.valueOf(10), 1, false);
         Pedido p1 = new Pedido(); p1.setStatus(StatusPedido.EM_PREPARO); p1.setItens(List.of(i1));
 
-        ItemPedido i2 = mockItem(BigDecimal.valueOf(20), 2, false); // Total 40
+        ItemPedido i2 = mockItem(BigDecimal.valueOf(20), 2, false);
         Pedido p2 = new Pedido(); p2.setStatus(StatusPedido.EM_PREPARO); p2.setItens(List.of(i2));
 
-        ItemPedido i3 = mockItem(BigDecimal.valueOf(50), 1, false); // Total 50
+        ItemPedido i3 = mockItem(BigDecimal.valueOf(50), 1, false);
         Pedido p3 = new Pedido(); p3.setStatus(StatusPedido.EM_PREPARO); p3.setItens(List.of(i3));
 
         Conta conta = new Conta(); conta.setId(UUID.randomUUID()); conta.setPedidos(List.of(p1, p2, p3));
@@ -568,7 +576,7 @@ class GarcomMesaSessaoServiceTest {
         item.setId(UUID.randomUUID());
         item.setProduto(produto);
         item.setQuantidade(quantidade);
-        item.setPrecoUnitario(precoUnitarioBase); // O PDV Service já consolidaria os adicionais neste campo
+        item.setPrecoUnitario(precoUnitarioBase);
         item.setObservacaoItem("");
 
         if (comAdicionais) {

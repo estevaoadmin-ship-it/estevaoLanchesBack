@@ -13,6 +13,7 @@ import com.paullomaggio.estevaoLanches.repositories.PedidoRepository;
 import com.paullomaggio.estevaoLanches.services.PagamentoService; // Import PagamentoService
 import com.paullomaggio.estevaoLanches.services.PedidoService;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.security.access.AccessDeniedException;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.context.SecurityContextHolder;
@@ -24,6 +25,7 @@ import java.math.BigDecimal; // Import BigDecimal
 import java.util.List;
 import java.util.UUID;
 
+@Slf4j
 @Service
 @RequiredArgsConstructor
 public class PedidoCoreService {
@@ -81,15 +83,54 @@ public class PedidoCoreService {
         StatusFinanceiro statusFinanceiroAnterior = pedido.getStatusFinanceiro();
 
         if (statusFinanceiroAnterior == StatusFinanceiro.AGUARDANDO_PAGAMENTO) {
+            log.info("[FORENSE-SUBCONTA] Classe: {}, Método: {}, Ação: setStatusFinanceiro, Pedido: {}, Conta: {}, statusAnterior: {}, statusNovo: {}, pedidoTotal: {}, thread: {}, transactionAtiva: {}",
+                    getClass().getSimpleName(),
+                    "cancelarPedidoDeliveryDoClienteAutenticado",
+                    pedido.getId(),
+                    pedido.getConta() != null ? pedido.getConta().getId() : null,
+                    statusFinanceiroAnterior,
+                    StatusFinanceiro.CANCELADO,
+                    pedido.getTotal(),
+                    Thread.currentThread().getName(),
+                    org.springframework.transaction.support.TransactionSynchronizationManager.isActualTransactionActive());
             pedido.setStatusFinanceiro(StatusFinanceiro.CANCELADO);
         } else if (statusFinanceiroAnterior == StatusFinanceiro.ESTORNADO) {
+            log.info("[FORENSE-SUBCONTA] Classe: {}, Método: {}, Ação: setStatusFinanceiro, Pedido: {}, Conta: {}, statusAnterior: {}, statusNovo: {}, pedidoTotal: {}, thread: {}, transactionAtiva: {}",
+                    getClass().getSimpleName(),
+                    "cancelarPedidoDeliveryDoClienteAutenticado",
+                    pedido.getId(),
+                    pedido.getConta() != null ? pedido.getConta().getId() : null,
+                    statusFinanceiroAnterior,
+                    StatusFinanceiro.ESTORNADO,
+                    pedido.getTotal(),
+                    Thread.currentThread().getName(),
+                    org.springframework.transaction.support.TransactionSynchronizationManager.isActualTransactionActive());
             pedido.setStatusFinanceiro(StatusFinanceiro.ESTORNADO);
         } else if (statusFinanceiroAnterior == StatusFinanceiro.PAGO) {
             // A validação de saldoLiquido já garante que, se chegou aqui com PAGO,
             // o saldo líquido é zero, indicando estorno integral.
+            log.info("[FORENSE-SUBCONTA] Classe: {}, Método: {}, Ação: setStatusFinanceiro, Pedido: {}, Conta: {}, statusAnterior: {}, statusNovo: {}, pedidoTotal: {}, thread: {}, transactionAtiva: {}",
+                    getClass().getSimpleName(),
+                    "cancelarPedidoDeliveryDoClienteAutenticado",
+                    pedido.getId(),
+                    pedido.getConta() != null ? pedido.getConta().getId() : null,
+                    statusFinanceiroAnterior,
+                    StatusFinanceiro.ESTORNADO,
+                    pedido.getTotal(),
+                    Thread.currentThread().getName(),
+                    org.springframework.transaction.support.TransactionSynchronizationManager.isActualTransactionActive());
             pedido.setStatusFinanceiro(StatusFinanceiro.ESTORNADO);
         }
 
+        log.info("[FORENSE-SUBCONTA] Classe: {}, Método: {}, Ação: pré-save pedido, Pedido: {}, Conta: {}, statusFinanceiro: {}, pedidoTotal: {}, thread: {}, transactionAtiva: {}",
+                getClass().getSimpleName(),
+                "cancelarPedidoDeliveryDoClienteAutenticado",
+                pedido.getId(),
+                pedido.getConta() != null ? pedido.getConta().getId() : null,
+                pedido.getStatusFinanceiro(),
+                pedido.getTotal(),
+                Thread.currentThread().getName(),
+                org.springframework.transaction.support.TransactionSynchronizationManager.isActualTransactionActive());
         return new PedidoResponseDTO(
                 pedidoRepository.save(pedido)
         );

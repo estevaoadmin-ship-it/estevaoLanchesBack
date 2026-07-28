@@ -6,6 +6,7 @@ import com.paullomaggio.estevaoLanches.enums.*;
 import com.paullomaggio.estevaoLanches.exceptions.BusinessRuleException;
 import com.paullomaggio.estevaoLanches.exceptions.ResourceNotFoundException;
 import com.paullomaggio.estevaoLanches.repositories.*;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -16,6 +17,7 @@ import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 
+@Slf4j
 @Service
 public class CaixaService {
 
@@ -163,6 +165,22 @@ public class CaixaService {
 
         BigDecimal totalLiquido = totalBrutoPago.subtract(totalEstornado);
         BigDecimal saldo = conta.getValorTotal().subtract(totalLiquido);
+
+        log.info("[FORENSE-SUBCONTA] Classe: {}, Método: {}, pedidoId: {}, pedidoContaId: {}, pedidoContaNumero: {}, contaId: {}, contaNumero: {}, contaValorTotalPersistido: {}, totalBrutoPago: {}, totalEstornado: {}, totalLiquido: {}, saldoCalculado: {}, thread: {}, transactionAtiva: {}",
+                getClass().getSimpleName(),
+                "calcularSaldoDevedorDaConta",
+                pedidoId,
+                pedido.getConta() != null ? pedido.getConta().getId() : null,
+                pedido.getConta() != null ? pedido.getConta().getNumeroConta() : null,
+                conta.getId(),
+                conta.getNumeroConta(),
+                conta.getValorTotal(),
+                totalBrutoPago,
+                totalEstornado,
+                totalLiquido,
+                saldo,
+                Thread.currentThread().getName(),
+                org.springframework.transaction.support.TransactionSynchronizationManager.isActualTransactionActive());
 
         return saldo.max(BigDecimal.ZERO); // Saldo nunca deve ser negativo
         // --- END RESÍDUO 5 FIX ---

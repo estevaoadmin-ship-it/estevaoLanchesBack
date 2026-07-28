@@ -25,9 +25,11 @@ public class GarcomSessionMesaController {
 
     private static final Logger log = LoggerFactory.getLogger(GarcomSessionMesaController.class);
     private final GarcomMesaSessaoService garcomMesaSessaoService;
+    private final ObjectMapper objectMapper; // Injetar ObjectMapper
 
-    public GarcomSessionMesaController(GarcomMesaSessaoService garcomMesaSessaoService) {
+    public GarcomSessionMesaController(GarcomMesaSessaoService garcomMesaSessaoService, ObjectMapper objectMapper) {
         this.garcomMesaSessaoService = garcomMesaSessaoService;
+        this.objectMapper = objectMapper; // Atribuir o ObjectMapper injetado
     }
 
     @Operation(
@@ -43,16 +45,15 @@ public class GarcomSessionMesaController {
         log.info("AUDITORIA 5 e 6 - GarcomSessionMesaController.obterSessaoMesa");
         log.info("=============================");
         try {
-            ObjectMapper mapper = new ObjectMapper();
-            mapper.enable(SerializationFeature.INDENT_OUTPUT);
-            String jsonFromService = mapper.writeValueAsString(response);
+            // Usar o ObjectMapper injetado
+            String jsonFromService = objectMapper.writeValueAsString(response);
             log.info("DTO do Service (obterSessaoMesa):\n{}", jsonFromService);
 
             // Simular a serialização que o Spring faria
             // Note: Spring's default ObjectMapper might have different configurations.
             // For a precise comparison, one might need to inject the actual ObjectMapper used by Spring.
             // For this audit, we'll use a default one for consistency with previous audits.
-            String jsonSentByController = mapper.writeValueAsString(response);
+            String jsonSentByController = objectMapper.writeValueAsString(response);
             log.info("JSON enviado pelo Controller (obterSessaoMesa):\n{}", jsonSentByController);
 
             if (!jsonFromService.equals(jsonSentByController)) {
@@ -86,12 +87,11 @@ public class GarcomSessionMesaController {
         log.info("AUDITORIA 5 e 6 - GarcomSessionMesaController.sincronizarSessao");
         log.info("=============================");
         try {
-            ObjectMapper mapper = new ObjectMapper();
-            mapper.enable(SerializationFeature.INDENT_OUTPUT);
-            String jsonFromService = mapper.writeValueAsString(response);
+            // Usar o ObjectMapper injetado
+            String jsonFromService = objectMapper.writeValueAsString(response);
             log.info("DTO do Service (sincronizarSessao):\n{}", jsonFromService);
 
-            String jsonSentByController = mapper.writeValueAsString(response);
+            String jsonSentByController = objectMapper.writeValueAsString(response);
             log.info("JSON enviado pelo Controller (sincronizarSessao):\n{}", jsonSentByController);
 
             if (!jsonFromService.equals(jsonSentByController)) {

@@ -16,6 +16,7 @@ import com.paullomaggio.estevaoLanches.repositories.ContaRepository;
 import com.paullomaggio.estevaoLanches.repositories.EstornoPagamentoRepository;
 import com.paullomaggio.estevaoLanches.repositories.PagamentoRepository;
 import com.paullomaggio.estevaoLanches.repositories.PedidoRepository;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.stereotype.Service;
@@ -23,10 +24,12 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
+import java.util.Arrays;
 import java.util.List;
 import java.util.UUID;
 import java.util.stream.Collectors;
 
+@Slf4j
 @Service
 public class PagamentoService {
 
@@ -49,6 +52,27 @@ public class PagamentoService {
         Conta conta = contaRepository.findByIdForUpdate(contaId)
                 .orElseThrow(() -> new ResourceNotFoundException("Conta de destino não localizada. ID: " + contaId));
 
+        BigDecimal totalBrutoPago = pagamentoRepository.sumPagamentosPorConta(contaId);
+        if (totalBrutoPago == null) totalBrutoPago = BigDecimal.ZERO;
+
+        BigDecimal totalEstornado = estornoPagamentoRepository.somarValorEstornadoPorContaId(contaId);
+        if (totalEstornado == null) totalEstornado = BigDecimal.ZERO;
+
+        BigDecimal totalLiquidoPago = totalBrutoPago.subtract(totalEstornado);
+        BigDecimal saldoDevedor = conta.getValorTotal().subtract(totalLiquidoPago);
+
+        log.info("[FORENSE-SUBCONTA] Classe: {}, Método: {}, Ação: entrada pagamento, Conta: {}, valorTotal: {}, saldoCalculado: {}, totalBrutoPago: {}, totalEstornado: {}, contaPagoAntes: {}, thread: {}, transactionAtiva: {}",
+                getClass().getSimpleName(),
+                "registrarPagamento",
+                conta.getId(),
+                conta.getValorTotal(),
+                saldoDevedor,
+                totalBrutoPago,
+                totalEstornado,
+                conta.getPago(),
+                Thread.currentThread().getName(),
+                org.springframework.transaction.support.TransactionSynchronizationManager.isActualTransactionActive());
+
         if (Boolean.TRUE.equals(conta.getPago())) {
             throw new BusinessRuleException("Operação negada! Esta conta já se encontra totalmente quitada.");
         }
@@ -63,15 +87,6 @@ public class PagamentoService {
                 .orElseThrow(() -> new BusinessRuleException(
                         "Operação bloqueada! O caixa geral está fechado no momento."
                 ));
-
-        BigDecimal totalBrutoPago = pagamentoRepository.sumPagamentosPorConta(contaId);
-        if (totalBrutoPago == null) totalBrutoPago = BigDecimal.ZERO;
-
-        BigDecimal totalEstornado = estornoPagamentoRepository.somarValorEstornadoPorContaId(contaId);
-        if (totalEstornado == null) totalEstornado = BigDecimal.ZERO;
-
-        BigDecimal totalLiquidoPago = totalBrutoPago.subtract(totalEstornado);
-        BigDecimal saldoDevedor = conta.getValorTotal().subtract(totalLiquidoPago);
 
         if (saldoDevedor.compareTo(BigDecimal.ZERO) <= 0) {
             throw new BusinessRuleException("Operação negada! O saldo devedor atual é zero ou negativo.");
@@ -100,12 +115,55 @@ public class PagamentoService {
 
         BigDecimal novoTotalLiquidoPago = totalLiquidoPago.add(valorEfetivamentePago);
         if (novoTotalLiquidoPago.compareTo(conta.getValorTotal()) >= 0) {
+            log.info("[FORENSE-SUBCONTA] Classe: {}, Método: {}, Ação: setPago, Conta: {}, valorTotal: {}, pagoAnterior: {}, pagoNovo: {}, saldoCalculado: {}, stacktrace: {}",
+                    getClass().getSimpleName(),
+                    "registrarPagamento",
+                    conta.getId(),
+                    conta.getValorTotal(),
+                    conta.getPago(),
+                    true,
+                    saldoDevedor,
+                    stacktraceResumido());
             conta.setPago(true);
+            log.info("[FORENSE-SUBCONTA] Classe: {}, Método: {}, Ação: pré-save conta, Conta: {}, valorTotal: {}, pago: {}, thread: {}, transactionAtiva: {}",
+                    getClass().getSimpleName(),
+                    "registrarPagamento",
+                    conta.getId(),
+                    conta.getValorTotal(),
+                    conta.getPago(),
+                    Thread.currentThread().getName(),
+                    org.springframework.transaction.support.TransactionSynchronizationManager.isActualTransactionActive());
             contaRepository.save(conta);
         } else {
+            log.info("[FORENSE-SUBCONTA] Classe: {}, Método: {}, Ação: setPago, Conta: {}, valorTotal: {}, pagoAnterior: {}, pagoNovo: {}, saldoCalculado: {}, stacktrace: {}",
+                    getClass().getSimpleName(),
+                    "registrarPagamento",
+                    conta.getId(),
+                    conta.getValorTotal(),
+                    conta.getPago(),
+                    false,
+                    saldoDevedor,
+                    stacktraceResumido());
             conta.setPago(false);
+            log.info("[FORENSE-SUBCONTA] Classe: {}, Método: {}, Ação: pré-save conta, Conta: {}, valorTotal: {}, pago: {}, thread: {}, transactionAtiva: {}",
+                    getClass().getSimpleName(),
+                    "registrarPagamento",
+                    conta.getId(),
+                    conta.getValorTotal(),
+                    conta.getPago(),
+                    Thread.currentThread().getName(),
+                    org.springframework.transaction.support.TransactionSynchronizationManager.isActualTransactionActive());
             contaRepository.save(conta);
         }
+
+        log.info("[FORENSE-SUBCONTA] Classe: {}, Método: {}, Ação: pós-save conta, Conta: {}, valorTotal: {}, pago: {}, thread: {}, transactionAtiva: {}",
+                getClass().getSimpleName(),
+                "registrarPagamento",
+                conta.getId(),
+                conta.getValorTotal(),
+                conta.getPago(),
+                Thread.currentThread().getName(),
+                org.springframework.transaction.support.TransactionSynchronizationManager.isActualTransactionActive());
 
         return new PagamentoResponseDTO(pagamentoSalvo);
     }
@@ -187,7 +245,27 @@ public class PagamentoService {
         Pagamento pagamentoSalvo = pagamentoRepository.save(pagamento);
 
         // 3. Atualiza o StatusFinanceiro do Pedido para PAGO
+        log.info("[FORENSE-SUBCONTA] Classe: {}, Método: {}, Ação: setStatusFinanceiro, Pedido: {}, Conta: {}, statusAnterior: {}, statusNovo: {}, pedidoTotal: {}, thread: {}, transactionAtiva: {}, stacktrace: {}",
+                getClass().getSimpleName(),
+                "registrarPagamentoPedido",
+                pedido.getId(),
+                pedido.getConta() != null ? pedido.getConta().getId() : null,
+                pedido.getStatusFinanceiro(),
+                StatusFinanceiro.PAGO,
+                pedido.getTotal(),
+                Thread.currentThread().getName(),
+                org.springframework.transaction.support.TransactionSynchronizationManager.isActualTransactionActive(),
+                stacktraceResumido());
         pedido.setStatusFinanceiro(StatusFinanceiro.PAGO);
+        log.info("[FORENSE-SUBCONTA] Classe: {}, Método: {}, Ação: pré-save pedido pagamento, Pedido: {}, Conta: {}, statusFinanceiro: {}, pedidoTotal: {}, thread: {}, transactionAtiva: {}",
+                getClass().getSimpleName(),
+                "registrarPagamentoPedido",
+                pedido.getId(),
+                pedido.getConta() != null ? pedido.getConta().getId() : null,
+                pedido.getStatusFinanceiro(),
+                pedido.getTotal(),
+                Thread.currentThread().getName(),
+                org.springframework.transaction.support.TransactionSynchronizationManager.isActualTransactionActive());
         pedidoRepository.save(pedido); // Salva o pedido com o novo status financeiro
 
         return new PagamentoResponseDTO(pagamentoSalvo);
@@ -233,5 +311,13 @@ public class PagamentoService {
             return authentication.getName();
         }
         return "SISTEMA";
+    }
+
+    private String stacktraceResumido() {
+        return Arrays.stream(Thread.currentThread().getStackTrace())
+                .skip(3)
+                .limit(8)
+                .map(StackTraceElement::toString)
+                .collect(Collectors.joining(" | "));
     }
 }
