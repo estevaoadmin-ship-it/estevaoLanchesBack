@@ -50,7 +50,7 @@ public class PedidoService {
     private final PagamentoService pagamentoService;
     private final AdicionalValidationService adicionalValidationService;
     private final ClienteRepository clienteRepository;
-    private final ContaService contaService; // Adicionado ContaService
+    private final ContaService contaService;
 
     // Record temporário para correlacionar o DTO de entrada com o ItemPedido criado (PedidoMobile)
     private record ItemPedidoCorrelation(
@@ -98,19 +98,10 @@ public class PedidoService {
         }
 
         Pedido pedido = new Pedido();
-        log.info("[FORENSE-SUBCONTA] Classe: {}, Método: {}, Ação: setConta, Pedido: {}, Conta: {}, numeroConta: {}, pedidoTotalAntes: {}, pedidoTotalDepois: {}, itensQuantidade: {}, thread: {}, transactionAtiva: {}, stacktrace: {}",
-                getClass().getSimpleName(),
-                "processarPedidoMobile",
-                pedido.getId(),
-                conta.getId(),
-                conta.getNumeroConta(),
-                pedido.getTotal(),
-                pedido.getTotal(),
-                pedido.getItens() != null ? pedido.getItens().size() : 0,
-                Thread.currentThread().getName(),
-                org.springframework.transaction.support.TransactionSynchronizationManager.isActualTransactionActive(),
-                stacktraceResumido());
         pedido.setConta(conta);
+        if (!conta.getPedidos().contains(pedido)) {
+            conta.getPedidos().add(pedido);
+        }
         pedido.setStatus(StatusPedido.RECEBIDO);
         pedido.setTipo(TipoPedido.MESA);
         pedido.setNumeroMesa(dto.numeroMesa());
@@ -127,7 +118,7 @@ public class PedidoService {
 
         BigDecimal subtotalLote = BigDecimal.ZERO;
         boolean necessitaPreparoCozinha = false;
-        List<ItemPedidoCorrelation> correlations = new ArrayList<>(); // Lista para correlação
+        List<ItemPedidoCorrelation> correlations = new ArrayList<>();
 
         for (PedidoMobileRequestDTO.ItemPedidoPayloadDTO itemDto : dto.itens()) {
             Produto produto = produtoRepository.findById(itemDto.produtoId())
@@ -161,30 +152,11 @@ public class PedidoService {
             if (produto.getPrecisaPreparo()) {
                 necessitaPreparoCozinha = true;
             }
-            correlations.add(new ItemPedidoCorrelation(itemDto, item)); // Adiciona a correlação
+            correlations.add(new ItemPedidoCorrelation(itemDto, item));
         }
 
         pedido.setTotal(subtotalLote);
-        log.info("[FORENSE-SUBCONTA] Classe: {}, Método: {}, Ação: pré-save pedido, Pedido: {}, Conta: {}, pedidoTotal: {}, itensQuantidade: {}, thread: {}, transactionAtiva: {}, stacktrace: {}",
-                getClass().getSimpleName(),
-                "processarPedidoMobile",
-                pedido.getId(),
-                conta.getId(),
-                pedido.getTotal(),
-                pedido.getItens() != null ? pedido.getItens().size() : 0,
-                Thread.currentThread().getName(),
-                org.springframework.transaction.support.TransactionSynchronizationManager.isActualTransactionActive(),
-                stacktraceResumido());
         Pedido pedidoSalvo = pedidoRepository.saveAndFlush(pedido);
-        log.info("[FORENSE-SUBCONTA] Classe: {}, Método: {}, Ação: pós-save pedido, Pedido: {}, Conta: {}, pedidoTotal: {}, itensQuantidade: {}, thread: {}, transactionAtiva: {}",
-                getClass().getSimpleName(),
-                "processarPedidoMobile",
-                pedidoSalvo.getId(),
-                pedidoSalvo.getConta() != null ? pedidoSalvo.getConta().getId() : null,
-                pedidoSalvo.getTotal(),
-                pedidoSalvo.getItens() != null ? pedidoSalvo.getItens().size() : 0,
-                Thread.currentThread().getName(),
-                org.springframework.transaction.support.TransactionSynchronizationManager.isActualTransactionActive());
 
         Map<UUID, Map<ItemComboOccurrenceKey, ItemCombo>> comboSnapshotsCriados = criarSnapshotsDosCombos(pedidoSalvo);
 
@@ -206,7 +178,6 @@ public class PedidoService {
         // Recalculate total after applying combo customizations
         recalcularTotalPedido(pedidoSalvo.getId());
 
-
         if (necessitaPreparoCozinha) {
             FilaImpressao cupomCozinha = new FilaImpressao();
             cupomCozinha.setPedido(pedidoSalvo);
@@ -215,7 +186,7 @@ public class PedidoService {
             filaImpressaoRepository.save(cupomCozinha);
         }
 
-        PedidoResponseDTO responseDTO = montarPedidoResponseComItensCombo(pedidoSalvo); // Enriquecido para cozinha
+        PedidoResponseDTO responseDTO = montarPedidoResponseComItensCombo(pedidoSalvo);
         messagingTemplate.convertAndSend("/topic/caixa", responseDTO);
         messagingTemplate.convertAndSend("/topic/cozinha", responseDTO);
 
@@ -229,66 +200,22 @@ public class PedidoService {
         Conta novaConta = new Conta();
         novaConta.setComanda(comandaMestre);
         novaConta.setNumeroConta(numeroConta);
-        log.info("[FORENSE-SUBCONTA] Classe: {}, Método: {}, Ação: setPago, Conta: {}, numeroConta: {}, comandaId: {}, valorTotal: {}, pagoAnterior: {}, pagoNovo: {}, thread: {}, transactionAtiva: {}, stacktrace: {}",
-                getClass().getSimpleName(),
-                "getOrCreateAccountWithConcurrencyProtection",
-                novaConta.getId(),
-                novaConta.getNumeroConta(),
-                comandaId,
-                BigDecimal.ZERO,
-                null,
-                false,
-                Thread.currentThread().getName(),
-                org.springframework.transaction.support.TransactionSynchronizationManager.isActualTransactionActive(),
-                stacktraceResumido());
         novaConta.setPago(false);
 
         try {
-            log.info("[FORENSE-SUBCONTA] Classe: {}, Método: {}, Ação: pré-save conta, Conta: {}, numeroConta: {}, comandaId: {}, valorTotal: {}, pago: {}, thread: {}, transactionAtiva: {}, stacktrace: {}",
-                    getClass().getSimpleName(),
-                    "getOrCreateAccountWithConcurrencyProtection",
-                    novaConta.getId(),
-                    novaConta.getNumeroConta(),
-                    comandaId,
-                    BigDecimal.ZERO,
-                    novaConta.getPago(),
-                    Thread.currentThread().getName(),
-                    org.springframework.transaction.support.TransactionSynchronizationManager.isActualTransactionActive(),
-                    stacktraceResumido());
             novaConta.setValorTotal(BigDecimal.ZERO);
             Conta contaSalva = contaRepository.saveAndFlush(novaConta);
-            log.info("[FORENSE-SUBCONTA] Classe: {}, Método: {}, Ação: pós-save conta, Conta: {}, numeroConta: {}, comandaId: {}, valorTotal: {}, pago: {}, thread: {}, transactionAtiva: {}",
-                    getClass().getSimpleName(),
-                    "getOrCreateAccountWithConcurrencyProtection",
-                    contaSalva.getId(),
-                    contaSalva.getNumeroConta(),
-                    comandaId,
-                    contaSalva.getValorTotal(),
-                    contaSalva.getPago(),
-                    Thread.currentThread().getName(),
-                    org.springframework.transaction.support.TransactionSynchronizationManager.isActualTransactionActive());
             return contaSalva;
         } catch (DataIntegrityViolationException e) {
             if (isUniqueConstraintViolation(e, UNIQUE_CONSTRAINT_CONTA_NUMERO)) {
-            log.warn("[FORENSE-SUBCONTA] Thread {} - Conflito detectado ({}). Re-buscando Conta existente. Comanda ID: {}, Numero Conta: {}. Erro: {}",
-                        Thread.currentThread().getName(), UNIQUE_CONSTRAINT_CONTA_NUMERO, comandaId, numeroConta, e.getMessage());
-
                 Conta contaRecuperada = contaRepository.findByComandaIdAndNumeroConta(comandaId, numeroConta)
-                        .orElseThrow(() -> {
-                            log.error("[FORENSE-SUBCONTA] Thread {} - Erro grave: Conta não encontrada após conflito de concorrência esperado. Comanda ID: {}, Numero Conta: {}", Thread.currentThread().getName(), comandaId, numeroConta);
-                            return new BusinessRuleException("Erro de concorrência: Conta deveria existir, mas não foi encontrada após conflito. Comanda ID: " + comandaId + ", Numero Conta: " + numeroConta);
-                        });
+                        .orElseThrow(() -> new BusinessRuleException("Erro de concorrência: Conta deveria existir, mas não foi encontrada após conflito. Comanda ID: " + comandaId + ", Numero Conta: " + numeroConta));
 
                 if (!contaRecuperada.getNumeroConta().equals(numeroConta) || !contaRecuperada.getComanda().getId().equals(comandaId)) {
-                    log.error("[FORENSE-SUBCONTA] Thread {} - Erro grave: Conta recuperada após conflito não corresponde aos dados esperados. Esperado Comanda ID: {}, Numero Conta: {}. Encontrado Comanda ID: {}, Numero Conta: {}",
-                            Thread.currentThread().getName(), comandaId, numeroConta, contaRecuperada.getComanda().getId(), contaRecuperada.getNumeroConta());
                     throw new BusinessRuleException("Erro de concorrência: Conta recuperada após conflito não corresponde aos dados esperados. Comanda ID: " + comandaId + ", Numero Conta: " + numeroConta);
                 }
-                log.info("[FORENSE-SUBCONTA] Thread {} - Conta {} para Comanda {} recuperada com sucesso após conflito.", Thread.currentThread().getName(), contaRecuperada.getNumeroConta(), contaRecuperada.getComanda().getId());
                 return contaRecuperada;
             } else {
-                log.error("[FORENSE-SUBCONTA] Thread {} - DataIntegrityViolationException inesperada ao criar Conta {} para Comanda {}. Relançando. Causa: {}",
-                        Thread.currentThread().getName(), numeroConta, comandaId, e.getMostSpecificCause() != null ? e.getMostSpecificCause().getMessage() : e.getMessage());
                 throw e;
             }
         }
@@ -316,42 +243,13 @@ public class PedidoService {
                 throw new BusinessRuleException("Operação negada: Este lote de pedidos já foi liquidado no caixa.");
             }
 
-            pagamentoService.registrarPagamentoPedido(id, dto); // Passa o ID do pedido
+            pagamentoService.registrarPagamentoPedido(id, dto);
 
-            log.info("[FORENSE-SUBCONTA] Classe: {}, Método: {}, Ação: setStatusFinanceiro, Pedido: {}, Conta: {}, statusAnterior: {}, statusNovo: {}, pedidoTotal: {}, thread: {}, transactionAtiva: {}, stacktrace: {}",
-                    getClass().getSimpleName(),
-                    "receberPagamento",
-                    pedido.getId(),
-                    pedido.getConta() != null ? pedido.getConta().getId() : null,
-                    pedido.getStatusFinanceiro(),
-                    StatusFinanceiro.PAGO,
-                    pedido.getTotal(),
-                    Thread.currentThread().getName(),
-                    org.springframework.transaction.support.TransactionSynchronizationManager.isActualTransactionActive(),
-                    stacktraceResumido());
             pedido.setStatusFinanceiro(StatusFinanceiro.PAGO);
             pedido.setFormaPagamento(dto.formaPagamento());
             pedido.setValorRecebido(dto.valorRecebido());
 
-            log.info("[FORENSE-SUBCONTA] Classe: {}, Método: {}, Ação: pré-save pedido, Pedido: {}, Conta: {}, statusFinanceiro: {}, pedidoTotal: {}, thread: {}, transactionAtiva: {}",
-                    getClass().getSimpleName(),
-                    "receberPagamento",
-                    pedido.getId(),
-                    pedido.getConta() != null ? pedido.getConta().getId() : null,
-                    pedido.getStatusFinanceiro(),
-                    pedido.getTotal(),
-                    Thread.currentThread().getName(),
-                    org.springframework.transaction.support.TransactionSynchronizationManager.isActualTransactionActive());
             Pedido pedidoSalvo = pedidoRepository.save(pedido);
-            log.info("[FORENSE-SUBCONTA] Classe: {}, Método: {}, Ação: pós-save pedido, Pedido: {}, Conta: {}, statusFinanceiro: {}, pedidoTotal: {}, thread: {}, transactionAtiva: {}",
-                    getClass().getSimpleName(),
-                    "receberPagamento",
-                    pedidoSalvo.getId(),
-                    pedidoSalvo.getConta() != null ? pedidoSalvo.getConta().getId() : null,
-                    pedidoSalvo.getStatusFinanceiro(),
-                    pedidoSalvo.getTotal(),
-                    Thread.currentThread().getName(),
-                    org.springframework.transaction.support.TransactionSynchronizationManager.isActualTransactionActive());
 
             // NEW: Production trigger for BALCAO orders
             if (pedidoSalvo.getTipo() == TipoPedido.BALCAO && pedidoSalvo.getStatusFinanceiro() == StatusFinanceiro.PAGO) {
@@ -376,17 +274,6 @@ public class PedidoService {
         pedido.setTipo(TipoPedido.DELIVERY);
         pedido.setEnderecoEntrega(dto.enderecoEntrega());
         pedido.setStatus(StatusPedido.RECEBIDO);
-        log.info("[FORENSE-SUBCONTA] Classe: {}, Método: {}, Ação: setStatusFinanceiro, Pedido: {}, Conta: {}, statusAnterior: {}, statusNovo: {}, pedidoTotal: {}, thread: {}, transactionAtiva: {}, stacktrace: {}",
-                getClass().getSimpleName(),
-                "finalizarDelivery",
-                pedido.getId(),
-                pedido.getConta() != null ? pedido.getConta().getId() : null,
-                pedido.getStatusFinanceiro(),
-                StatusFinanceiro.AGUARDANDO_PAGAMENTO,
-                pedido.getTotal(),
-                Thread.currentThread().getName(),
-                org.springframework.transaction.support.TransactionSynchronizationManager.isActualTransactionActive(),
-                stacktraceResumido());
         pedido.setStatusFinanceiro(StatusFinanceiro.AGUARDANDO_PAGAMENTO);
         pedido.setFormaPagamento(null);
         pedido.setValorRecebido(null);
@@ -434,7 +321,7 @@ public class PedidoService {
             // Fluxo legado Delivery pelo Carrinho backend
             Carrinho carrinho = localizarCarrinho(dto.clienteId());
             validarCarrinhoNaoVazio(carrinho);
-            cartCorrelations = copiarItensDoCarrinho(carrinho, pedido); // Agora retorna as correlações
+            cartCorrelations = copiarItensDoCarrinho(carrinho, pedido);
             // Determine if prep is needed for legacy flow
             necessitaPreparoCozinha = pedido.getItens().stream()
                     .anyMatch(item -> Boolean.TRUE.equals(item.getProduto().getPrecisaPreparo()));
@@ -476,16 +363,15 @@ public class PedidoService {
                 List<ItemComboCustomizacaoRequestDTO> customizacoesParaAplicar = itemCarrinho.getCustomizacoesCombo().stream()
                         .map(cartCustom -> new ItemComboCustomizacaoRequestDTO(
                                 cartCustom.getComboProdutoId(),
-                                null, // Adicionado null para indiceOcorrencia
+                                null,
                                 cartCustom.getAdicionais().stream().map(Adicional::getId).collect(Collectors.toList()),
-                                cartCustom.getObservacao() // Passar a observação do carrinho
+                                cartCustom.getObservacao()
                         ))
                         .collect(Collectors.toList());
 
                 aplicarCustomizacoesDosItensCombo(itemPedido, itemComboMap, customizacoesParaAplicar);
             }
         }
-
 
         // Recalculate total after applying combo customizations (if any)
         recalcularTotalPedido(pedidoSalvo.getId());
@@ -513,24 +399,13 @@ public class PedidoService {
         pedido.setCliente(carrinho.getCliente());
         pedido.setTipo(TipoPedido.RETIRADA);
         pedido.setStatus(StatusPedido.RECEBIDO);
-        log.info("[FORENSE-SUBCONTA] Classe: {}, Método: {}, Ação: setStatusFinanceiro, Pedido: {}, Conta: {}, statusAnterior: {}, statusNovo: {}, pedidoTotal: {}, thread: {}, transactionAtiva: {}, stacktrace: {}",
-                getClass().getSimpleName(),
-                "finalizarRetirada",
-                pedido.getId(),
-                pedido.getConta() != null ? pedido.getConta().getId() : null,
-                pedido.getStatusFinanceiro(),
-                StatusFinanceiro.AGUARDANDO_PAGAMENTO,
-                pedido.getTotal(),
-                Thread.currentThread().getName(),
-                org.springframework.transaction.support.TransactionSynchronizationManager.isActualTransactionActive(),
-                stacktraceResumido());
         pedido.setStatusFinanceiro(StatusFinanceiro.AGUARDANDO_PAGAMENTO);
         pedido.setFormaPagamento(null);
         pedido.setValorRecebido(null);
         pedido.setObservacaoGeral(dto.observacao());
         pedido.setItens(new ArrayList<>());
 
-        List<ItemCarrinhoToItemPedidoCorrelation> cartCorrelations = copiarItensDoCarrinho(carrinho, pedido); // Retorna as correlações
+        List<ItemCarrinhoToItemPedidoCorrelation> cartCorrelations = copiarItensDoCarrinho(carrinho, pedido);
         calcularEPreencherTotal(pedido);
 
         Pedido pedidoSalvo = salvarPedido(pedido);
@@ -553,16 +428,16 @@ public class PedidoService {
                 List<ItemComboCustomizacaoRequestDTO> customizacoesParaAplicar = itemCarrinho.getCustomizacoesCombo().stream()
                         .map(cartCustom -> new ItemComboCustomizacaoRequestDTO(
                                 cartCustom.getComboProdutoId(),
-                                null, // Adicionado null para indiceOcorrencia
+                                null,
                                 cartCustom.getAdicionais().stream().map(Adicional::getId).collect(Collectors.toList()),
-                                cartCustom.getObservacao() // Passar a observação do carrinho
+                                cartCustom.getObservacao()
                         ))
                         .collect(Collectors.toList());
 
                 aplicarCustomizacoesDosItensCombo(itemPedido, itemComboMap, customizacoesParaAplicar);
             }
         }
-        recalcularTotalPedido(pedidoSalvo.getId()); // Recalcular após aplicar customizações
+        recalcularTotalPedido(pedidoSalvo.getId());
 
         gerarFilaImpressao(pedidoSalvo);
         limparCarrinho(carrinho);
@@ -593,41 +468,10 @@ public class PedidoService {
             conta.setTelefoneResponsavel(dto.telefoneResponsavel().trim());
         }
 
-        BigDecimal totalConta = conta.getPedidos().stream()
-                .filter(p -> p.getStatus() != StatusPedido.CANCELADO)
-                .map(Pedido::getTotal)
-                .reduce(BigDecimal.ZERO, BigDecimal::add);
-        log.info("[FORENSE-SUBCONTA] Classe: {}, Método: {}, Ação: setValorTotal, Conta: {}, numeroConta: {}, valorAnterior: {}, valorNovo: {}, pedidosCount: {}, thread: {}, transactionAtiva: {}, stacktrace: {}",
-                getClass().getSimpleName(),
-                "finalizarMesa",
-                conta.getId(),
-                conta.getNumeroConta(),
-                conta.getValorTotal(),
-                totalConta,
-                conta.getPedidos() != null ? conta.getPedidos().size() : 0,
-                Thread.currentThread().getName(),
-                org.springframework.transaction.support.TransactionSynchronizationManager.isActualTransactionActive(),
-                stacktraceResumido());
-        conta.setValorTotal(totalConta);
-        log.info("[FORENSE-SUBCONTA] Classe: {}, Método: {}, Ação: pré-save conta, Conta: {}, numeroConta: {}, valorTotal: {}, pago: {}, thread: {}, transactionAtiva: {}",
-                getClass().getSimpleName(),
-                "finalizarMesa",
-                conta.getId(),
-                conta.getNumeroConta(),
-                conta.getValorTotal(),
-                conta.getPago(),
-                Thread.currentThread().getName(),
-                org.springframework.transaction.support.TransactionSynchronizationManager.isActualTransactionActive());
         contaRepository.saveAndFlush(conta);
-        log.info("[FORENSE-SUBCONTA] Classe: {}, Método: {}, Ação: pós-save conta, Conta: {}, numeroConta: {}, valorTotal: {}, pago: {}, thread: {}, transactionAtiva: {}",
-                getClass().getSimpleName(),
-                "finalizarMesa",
-                conta.getId(),
-                conta.getNumeroConta(),
-                conta.getValorTotal(),
-                conta.getPago(),
-                Thread.currentThread().getName(),
-                org.springframework.transaction.support.TransactionSynchronizationManager.isActualTransactionActive());
+
+        // ADDED: Call to official synchronizer
+        contaService.sincronizarValorTotal(conta.getId());
 
         PagamentoRequestDTO pagamentoRequestDTO = new PagamentoRequestDTO(
                 dto.formaPagamento(),
@@ -670,17 +514,6 @@ public class PedidoService {
         Pedido pedido = new Pedido();
         pedido.setTipo(TipoPedido.BALCAO);
         pedido.setStatus(StatusPedido.RECEBIDO);
-        log.info("[FORENSE-SUBCONTA] Classe: {}, Método: {}, Ação: setStatusFinanceiro, Pedido: {}, Conta: {}, statusAnterior: {}, statusNovo: {}, pedidoTotal: {}, thread: {}, transactionAtiva: {}, stacktrace: {}",
-                getClass().getSimpleName(),
-                "finalizarBalcao",
-                pedido.getId(),
-                pedido.getConta() != null ? pedido.getConta().getId() : null,
-                pedido.getStatusFinanceiro(),
-                StatusFinanceiro.AGUARDANDO_PAGAMENTO,
-                pedido.getTotal(),
-                Thread.currentThread().getName(),
-                org.springframework.transaction.support.TransactionSynchronizationManager.isActualTransactionActive(),
-                stacktraceResumido());
         pedido.setStatusFinanceiro(StatusFinanceiro.AGUARDANDO_PAGAMENTO);
         pedido.setObservacaoGeral(dto.observacao());
         pedido.setNomeClienteBalcao(dto.nomeConsumidor() != null ? dto.nomeConsumidor().toUpperCase().trim() : "CONSUMIDOR PADRÃO");
@@ -692,7 +525,7 @@ public class PedidoService {
         Pedido pedidoSalvo = salvarPedido(pedido);
 
         criarSnapshotsDosCombos(pedidoSalvo);
-        recalcularTotalPedido(pedidoSalvo.getId()); // Call official recalculation method
+        recalcularTotalPedido(pedidoSalvo.getId());
 
         return new PedidoResponseDTO(pedidoSalvo);
     }
@@ -779,29 +612,7 @@ public class PedidoService {
     }
 
     private Pedido salvarPedido(Pedido pedido) {
-        log.info("[FORENSE-SUBCONTA] Classe: {}, Método: {}, Ação: pré-save pedido, Pedido: {}, Conta: {}, status: {}, statusFinanceiro: {}, total: {}, thread: {}, transactionAtiva: {}, stacktrace: {}",
-                getClass().getSimpleName(),
-                "salvarPedido",
-                pedido.getId(),
-                pedido.getConta() != null ? pedido.getConta().getId() : null,
-                pedido.getStatus(),
-                pedido.getStatusFinanceiro(),
-                pedido.getTotal(),
-                Thread.currentThread().getName(),
-                org.springframework.transaction.support.TransactionSynchronizationManager.isActualTransactionActive(),
-                stacktraceResumido());
-        Pedido pedidoSalvo = pedidoRepository.save(pedido);
-        log.info("[FORENSE-SUBCONTA] Classe: {}, Método: {}, Ação: pós-save pedido, Pedido: {}, Conta: {}, status: {}, statusFinanceiro: {}, total: {}, thread: {}, transactionAtiva: {}",
-                getClass().getSimpleName(),
-                "salvarPedido",
-                pedidoSalvo.getId(),
-                pedidoSalvo.getConta() != null ? pedidoSalvo.getConta().getId() : null,
-                pedidoSalvo.getStatus(),
-                pedidoSalvo.getStatusFinanceiro(),
-                pedidoSalvo.getTotal(),
-                Thread.currentThread().getName(),
-                org.springframework.transaction.support.TransactionSynchronizationManager.isActualTransactionActive());
-        return pedidoSalvo;
+        return pedidoRepository.save(pedido);
     }
 
     private void gerarFilaImpressao(Pedido pedido) {
@@ -815,14 +626,6 @@ public class PedidoService {
     private void limparCarrinho(Carrinho carrinho) {
         carrinho.getItens().clear();
         carrinhoRepository.save(carrinho);
-    }
-
-    private String stacktraceResumido() {
-        return Arrays.stream(Thread.currentThread().getStackTrace())
-                .skip(3)
-                .limit(8)
-                .map(StackTraceElement::toString)
-                .collect(Collectors.joining(" | "));
     }
 
     @Transactional
@@ -847,9 +650,9 @@ public class PedidoService {
 
         pedido.getItens().add(novoItem);
 
-        Pedido pedidoSalvo = pedidoRepository.save(pedido); // Save structural changes
+        Pedido pedidoSalvo = pedidoRepository.save(pedido);
         criarSnapshotsDosCombos(pedidoSalvo);
-        recalcularTotalPedido(pedidoSalvo.getId()); // Call official recalculation method
+        recalcularTotalPedido(pedidoSalvo.getId());
 
         PedidoResponseDTO response = new PedidoResponseDTO(pedidoSalvo);
         messagingTemplate.convertAndSend("/topic/caixa", response);
@@ -882,8 +685,8 @@ public class PedidoService {
 
         pedido.getItens().remove(itemRemover);
 
-        Pedido pedidoSalvo = pedidoRepository.save(pedido); // Save structural changes
-        recalcularTotalPedido(pedidoSalvo.getId()); // Call official recalculation method
+        Pedido pedidoSalvo = pedidoRepository.save(pedido);
+        recalcularTotalPedido(pedidoSalvo.getId());
 
         PedidoResponseDTO response = new PedidoResponseDTO(pedidoSalvo);
         messagingTemplate.convertAndSend("/topic/caixa", response);
@@ -918,7 +721,7 @@ public class PedidoService {
         pedido.setStatus(dto.status());
         Pedido pedidoSalvo = pedidoRepository.save(pedido);
 
-        PedidoResponseDTO response = montarPedidoResponseComItensCombo(pedidoSalvo); // Enriquecido para cozinha
+        PedidoResponseDTO response = montarPedidoResponseComItensCombo(pedidoSalvo);
         messagingTemplate.convertAndSend("/topic/caixa", response);
         messagingTemplate.convertAndSend("/topic/cozinha", response);
         return response;
@@ -940,67 +743,21 @@ public class PedidoService {
         pedido.setStatus(StatusPedido.CANCELADO);
 
         if (pedido.getStatusFinanceiro() == StatusFinanceiro.AGUARDANDO_PAGAMENTO) {
-            log.info("[FORENSE-SUBCONTA] Classe: {}, Método: {}, Ação: setStatusFinanceiro, Pedido: {}, Conta: {}, statusAnterior: {}, statusNovo: {}, pedidoTotal: {}, thread: {}, transactionAtiva: {}, stacktrace: {}",
-                    getClass().getSimpleName(),
-                    "cancelarPedido",
-                    pedido.getId(),
-                    pedido.getConta() != null ? pedido.getConta().getId() : null,
-                    pedido.getStatusFinanceiro(),
-                    StatusFinanceiro.CANCELADO,
-                    pedido.getTotal(),
-                    Thread.currentThread().getName(),
-                    org.springframework.transaction.support.TransactionSynchronizationManager.isActualTransactionActive(),
-                    stacktraceResumido());
             pedido.setStatusFinanceiro(StatusFinanceiro.CANCELADO);
         } else if (pedido.getStatusFinanceiro() == StatusFinanceiro.PAGO) {
-            log.info("[FORENSE-SUBCONTA] Classe: {}, Método: {}, Ação: setStatusFinanceiro, Pedido: {}, Conta: {}, statusAnterior: {}, statusNovo: {}, pedidoTotal: {}, thread: {}, transactionAtiva: {}, stacktrace: {}",
-                    getClass().getSimpleName(),
-                    "cancelarPedido",
-                    pedido.getId(),
-                    pedido.getConta() != null ? pedido.getConta().getId() : null,
-                    pedido.getStatusFinanceiro(),
-                    StatusFinanceiro.ESTORNADO,
-                    pedido.getTotal(),
-                    Thread.currentThread().getName(),
-                    org.springframework.transaction.support.TransactionSynchronizationManager.isActualTransactionActive(),
-                    stacktraceResumido());
             pedido.setStatusFinanceiro(StatusFinanceiro.ESTORNADO);
-        } else if (pedido.getStatusFinanceiro() == StatusFinanceiro.ESTORNADO) { // Explicitly keep ESTORNADO
-            log.info("[FORENSE-SUBCONTA] Classe: {}, Método: {}, Ação: setStatusFinanceiro, Pedido: {}, Conta: {}, statusAnterior: {}, statusNovo: {}, pedidoTotal: {}, thread: {}, transactionAtiva: {}, stacktrace: {}",
-                    getClass().getSimpleName(),
-                    "cancelarPedido",
-                    pedido.getId(),
-                    pedido.getConta() != null ? pedido.getConta().getId() : null,
-                    pedido.getStatusFinanceiro(),
-                    StatusFinanceiro.ESTORNADO,
-                    pedido.getTotal(),
-                    Thread.currentThread().getName(),
-                    org.springframework.transaction.support.TransactionSynchronizationManager.isActualTransactionActive(),
-                    stacktraceResumido());
+        } else if (pedido.getStatusFinanceiro() == StatusFinanceiro.ESTORNADO) {
             pedido.setStatusFinanceiro(StatusFinanceiro.ESTORNADO);
         }
 
-        log.info("[FORENSE-SUBCONTA] Classe: {}, Método: {}, Ação: pré-save pedido, Pedido: {}, Conta: {}, statusFinanceiro: {}, pedidoTotal: {}, thread: {}, transactionAtiva: {}",
-                getClass().getSimpleName(),
-                "cancelarPedido",
-                pedido.getId(),
-                pedido.getConta() != null ? pedido.getConta().getId() : null,
-                pedido.getStatusFinanceiro(),
-                pedido.getTotal(),
-                Thread.currentThread().getName(),
-                org.springframework.transaction.support.TransactionSynchronizationManager.isActualTransactionActive());
         Pedido pedidoSalvo = pedidoRepository.save(pedido);
-        log.info("[FORENSE-SUBCONTA] Classe: {}, Método: {}, Ação: pós-save pedido, Pedido: {}, Conta: {}, statusFinanceiro: {}, pedidoTotal: {}, thread: {}, transactionAtiva: {}",
-                getClass().getSimpleName(),
-                "cancelarPedido",
-                pedidoSalvo.getId(),
-                pedidoSalvo.getConta() != null ? pedidoSalvo.getConta().getId() : null,
-                pedidoSalvo.getStatusFinanceiro(),
-                pedidoSalvo.getTotal(),
-                Thread.currentThread().getName(),
-                org.springframework.transaction.support.TransactionSynchronizationManager.isActualTransactionActive());
 
-        PedidoResponseDTO response = montarPedidoResponseComItensCombo(pedidoSalvo); // Enriquecido para cozinha
+        // ADDED: Call to official synchronizer if the pedido has an associated account
+        if (pedidoSalvo.getConta() != null) {
+            contaService.sincronizarValorTotal(pedidoSalvo.getConta().getId());
+        }
+
+        PedidoResponseDTO response = montarPedidoResponseComItensCombo(pedidoSalvo);
 
         messagingTemplate.convertAndSend("/topic/caixa", response);
         messagingTemplate.convertAndSend("/topic/cozinha", response);
@@ -1090,10 +847,6 @@ public class PedidoService {
             );
         }
         pedido.setNomeClienteBalcao(clienteNome);
-        log.info("[FORENSE-SUBCONTA] Mesa: {}, Conta: {}, Cliente propagado: {}",
-                conta.getComanda().getMesa().getNumero(),
-                conta.getNumeroConta(),
-                clienteNome);
     }
 
     @Transactional
@@ -1112,79 +865,11 @@ public class PedidoService {
 
         BigDecimal novoTotalPedido = totalItensPedido.add(totalAdicionaisItemCombo);
 
-        log.info("[FORENSE-SUBCONTA] Classe: {}, Método: {}, Ação: setTotal, Pedido: {}, Conta: {}, totalAnterior: {}, totalNovo: {}, itensQuantidade: {}, thread: {}, transactionAtiva: {}, stacktrace: {}",
-                getClass().getSimpleName(),
-                "recalcularTotalPedido",
-                pedido.getId(),
-                pedido.getConta() != null ? pedido.getConta().getId() : null,
-                pedido.getTotal(),
-                novoTotalPedido,
-                pedido.getItens() != null ? pedido.getItens().size() : 0,
-                Thread.currentThread().getName(),
-                org.springframework.transaction.support.TransactionSynchronizationManager.isActualTransactionActive(),
-                stacktraceResumido());
         pedido.setTotal(novoTotalPedido);
-        log.info("[FORENSE-SUBCONTA] Classe: {}, Método: {}, Ação: pré-save pedido, Pedido: {}, Conta: {}, total: {}, thread: {}, transactionAtiva: {}",
-                getClass().getSimpleName(),
-                "recalcularTotalPedido",
-                pedido.getId(),
-                pedido.getConta() != null ? pedido.getConta().getId() : null,
-                pedido.getTotal(),
-                Thread.currentThread().getName(),
-                org.springframework.transaction.support.TransactionSynchronizationManager.isActualTransactionActive());
         Pedido pedidoSalvo = pedidoRepository.save(pedido);
-
-        UUID logContaId1 = pedidoSalvo.getConta() != null ? pedidoSalvo.getConta().getId() : null;
-        Integer logNumeroConta1 = pedidoSalvo.getConta() != null ? pedidoSalvo.getConta().getNumeroConta() : null;
-        int logQtdPedidos1 = (pedidoSalvo.getConta() != null && pedidoSalvo.getConta().getPedidos() != null) ? pedidoSalvo.getConta().getPedidos().size() : 0;
-        String logPedidosDetalhes1 = (pedidoSalvo.getConta() != null && pedidoSalvo.getConta().getPedidos() != null)
-                ? pedidoSalvo.getConta().getPedidos().stream().map(p -> String.format("[id=%s, total=%s]", p.getId(), p.getTotal())).toList().toString()
-                : "[]";
-
-        log.info("[FORENSE-SUBCONTA] Classe: {}, Método: {}, Ação: pós-save pedido, pedidoIdParam: {}, pedidoSalvoId: {}, contaId: {}, numeroConta: {}, pedidoSalvoTotal: {}, pedidosCount: {}, pedidosDetalhes: {}",
-                getClass().getSimpleName(),
-                "recalcularTotalPedido",
-                pedidoId,
-                pedidoSalvo.getId(),
-                logContaId1,
-                logNumeroConta1,
-                pedidoSalvo.getTotal(),
-                logQtdPedidos1,
-                logPedidosDetalhes1);
 
         // Sincronizar Conta.valorTotal após o save do Pedido
         if (pedidoSalvo.getConta() != null) {
-            UUID logContaId2 = pedidoSalvo.getConta().getId();
-            Integer logNumeroConta2 = pedidoSalvo.getConta().getNumeroConta();
-            int logQtdPedidos2 = pedidoSalvo.getConta().getPedidos() != null ? pedidoSalvo.getConta().getPedidos().size() : 0;
-            String logPedidosDetalhes2 = pedidoSalvo.getConta().getPedidos() != null
-                    ? pedidoSalvo.getConta().getPedidos().stream().map(p -> String.format("[id=%s, total=%s]", p.getId(), p.getTotal())).toList().toString()
-                    : "[]";
-
-            log.info("[FORENSE-SUBCONTA] Classe: {}, Método: {}, Ação: pré-sincronização, pedidoIdParam: {}, pedidoSalvoId: {}, contaId: {}, numeroConta: {}, pedidoSalvoTotal: {}, pedidosCount: {}, pedidosDetalhes: {}",
-                    getClass().getSimpleName(),
-                    "recalcularTotalPedido",
-                    pedidoId,
-                    pedidoSalvo.getId(),
-                    logContaId2,
-                    logNumeroConta2,
-                    pedidoSalvo.getTotal(),
-                    logQtdPedidos2,
-                    logPedidosDetalhes2);
-
-            log.info("[FORENSE-SUBCONTA] Classe: {}, Método: {}, Ação: contexto JPA, pedidoSalvoContaIdentity: {}, pedidoContaIdentity: {}, mesmaInstancia: {}, pedidoSalvoContaId: {}, pedidoContaId: {}, pedidoSalvoPedidosCount: {}, pedidoPedidosCount: {}, pedidoSalvoPedidos: {}, pedidoPedidos: {}",
-                    getClass().getSimpleName(),
-                    "recalcularTotalPedido",
-                    System.identityHashCode(pedidoSalvo.getConta()),
-                    System.identityHashCode(pedido.getConta()),
-                    (pedidoSalvo.getConta() == pedido.getConta()),
-                    pedidoSalvo.getConta() != null ? pedidoSalvo.getConta().getId() : null,
-                    pedido.getConta() != null ? pedido.getConta().getId() : null,
-                    (pedidoSalvo.getConta() != null && pedidoSalvo.getConta().getPedidos() != null) ? pedidoSalvo.getConta().getPedidos().size() : null,
-                    (pedido.getConta() != null && pedido.getConta().getPedidos() != null) ? pedido.getConta().getPedidos().size() : null,
-                    (pedidoSalvo.getConta() != null && pedidoSalvo.getConta().getPedidos() != null) ? pedidoSalvo.getConta().getPedidos() : null,
-                    (pedido.getConta() != null && pedido.getConta().getPedidos() != null) ? pedido.getConta().getPedidos() : null);
-
             contaService.sincronizarValorTotal(pedidoSalvo.getConta().getId());
         }
 
@@ -1450,7 +1135,7 @@ public class PedidoService {
      */
     private PedidoResponseDTO montarPedidoResponseComItensCombo(Pedido pedido) {
         if (pedido == null || pedido.getItens() == null || pedido.getItens().isEmpty()) {
-            return new PedidoResponseDTO(pedido); // Retorna o DTO básico se não houver itens
+            return new PedidoResponseDTO(pedido);
         }
 
         List<UUID> itemPedidoIds = pedido.getItens().stream()

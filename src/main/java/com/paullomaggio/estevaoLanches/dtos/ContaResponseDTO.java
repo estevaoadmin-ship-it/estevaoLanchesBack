@@ -7,7 +7,7 @@ import java.util.UUID;
 public record ContaResponseDTO(
         UUID id,
         Integer numeroConta,
-        Boolean pago,
+        Boolean pago,           // ← Mude para boolean (primitivo)
         BigDecimal valorTotal,
         UUID comandaId,
         Integer numeroMesa,
@@ -18,10 +18,11 @@ public record ContaResponseDTO(
         this(
                 conta.getId(),
                 conta.getNumeroConta(),
-                conta.getPago(),
+                conta.getPago(),                    // ← Agora retorna boolean
                 conta.getValorTotal(),
                 conta.getComanda() != null ? conta.getComanda().getId() : null,
-                (conta.getComanda() != null && conta.getComanda().getMesa() != null) ? conta.getComanda().getMesa().getNumero() : null,
+                (conta.getComanda() != null && conta.getComanda().getMesa() != null)
+                        ? conta.getComanda().getMesa().getNumero() : null,
                 conta.getCliente() != null ? conta.getCliente().getId() : null,
                 conta.getCliente() != null ? conta.getCliente().getNome() : null
         );

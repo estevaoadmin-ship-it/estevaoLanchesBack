@@ -132,27 +132,56 @@ public class EcosystemApocalypseTest {
         pedidoCompartilhado.setStatus(StatusPedido.RECEBIDO);
         pedidoCompartilhado.setStatusFinanceiro(StatusFinanceiro.AGUARDANDO_PAGAMENTO);
 
-        lenient().when(contaRepository.findByComandaIdAndNumeroConta(any(), anyInt())).thenReturn(Optional.of(contaMestre));
-        lenient().when(contaRepository.save(any(Conta.class))).thenAnswer(i -> i.getArgument(0));
-        lenient().when(filaImpressaoRepository.save(any(FilaImpressao.class))).thenAnswer(i -> i.getArgument(0));
+        lenient().when(contaRepository.findByComandaIdAndNumeroConta(any(), anyInt()))
+                .thenAnswer(invocation -> {
+                    Conta conta = new Conta();
+                    conta.setId(contaId);
+                    conta.setNumeroConta(1);
+                    conta.setPago(false);
+                    conta.setValorTotal(BigDecimal.ZERO);
+                    conta.setComanda(comandaMestre);
+                    conta.setCliente(clienteSessao);
+                    conta.setPedidos(new ArrayList<>());
+
+                    if (comandaMestre.getContas() == null) {
+                        comandaMestre.setContas(new ArrayList<>());
+                    }
+
+                    comandaMestre.getContas().removeIf(c -> contaId.equals(c.getId()));
+                    comandaMestre.getContas().add(conta);
+
+                    return Optional.of(conta);
+                });
+
+        lenient().when(contaRepository.save(any(Conta.class)))
+                .thenAnswer(i -> i.getArgument(0));
+
+        lenient().when(filaImpressaoRepository.save(any(FilaImpressao.class)))
+                .thenAnswer(i -> i.getArgument(0));
 
         lenient().when(pedidoRepository.saveAndFlush(any(Pedido.class)))
                 .thenAnswer(invocation -> {
                     Pedido pedido = invocation.getArgument(0);
+
                     if (pedido.getId() == null) {
                         pedido.setId(UUID.randomUUID());
                     }
+
                     pedidosPersistidos.put(pedido.getId(), pedido);
+
                     return pedido;
                 });
 
         lenient().when(pedidoRepository.save(any(Pedido.class)))
                 .thenAnswer(invocation -> {
                     Pedido pedido = invocation.getArgument(0);
+
                     if (pedido.getId() == null) {
                         pedido.setId(UUID.randomUUID());
                     }
+
                     pedidosPersistidos.put(pedido.getId(), pedido);
+
                     return pedido;
                 });
 
@@ -182,24 +211,60 @@ public class EcosystemApocalypseTest {
         @DisplayName("CT001 & CT002: Disparo simultâneo de 100 pedidos concorrentes")
         void deveProcessarLoteMassivoSemPerdaDeEntidades() throws InterruptedException {
             int cargaDisparo = 100;
+
             when(caixaRepository.existsByStatus(StatusCaixa.ABERTO)).thenReturn(true);
-            when(contaRepository.findByComandaIdAndNumeroConta(eq(comandaId), anyInt())).thenReturn(Optional.of(contaMestre));
-            when(produtoRepository.findById(prodIdLanche)).thenReturn(Optional.of(lancheMonstro));
+
+            when(contaRepository.findByComandaIdAndNumeroConta(eq(comandaId), anyInt()))
+                    .thenAnswer(invocation -> {
+                        Conta conta = new Conta();
+                        conta.setId(contaId);
+                        conta.setNumeroConta(1);
+                        conta.setPago(false);
+                        conta.setValorTotal(BigDecimal.ZERO);
+                        conta.setComanda(comandaMestre);
+                        conta.setCliente(clienteSessao);
+                        conta.setPedidos(new ArrayList<>());
+
+                        return Optional.of(conta);
+                    });
+
+            when(produtoRepository.findById(prodIdLanche))
+                    .thenReturn(Optional.of(lancheMonstro));
 
             ExecutorService executor = Executors.newFixedThreadPool(16);
             CountDownLatch start = new CountDownLatch(1);
             CountDownLatch end = new CountDownLatch(cargaDisparo);
+
             ConcurrentLinkedQueue<PedidoResponseDTO> pipeline = new ConcurrentLinkedQueue<>();
+            ConcurrentLinkedQueue<Throwable> falhas = new ConcurrentLinkedQueue<>();
 
             PedidoMobileRequestDTO dto = gerarRequestMobile(comandaId, 12, 1, 1);
 
             for (int i = 0; i < cargaDisparo; i++) {
                 executor.execute(() -> {
-                    try { start.await(); pipeline.add(pedidoService.processarPedidoMobile(dto)); } catch (Exception ignored) {} finally { end.countDown(); }
+                    try {
+                        start.await();
+                        pipeline.add(pedidoService.processarPedidoMobile(dto));
+                    } catch (Throwable t) {
+                        falhas.add(t);
+                    } finally {
+                        end.countDown();
+                    }
                 });
             }
-            start.countDown(); end.await(); executor.shutdown();
+
+            start.countDown();
+            end.await();
+            executor.shutdown();
+
+            if (!falhas.isEmpty()) {
+                falhas.forEach(Throwable::printStackTrace);
+                fail("Ocorreram " + falhas.size() + " exceções durante o processamento concorrente.");
+            }
+
             assertThat(pipeline).hasSize(cargaDisparo);
+
+            verify(pedidoRepository, times(cargaDisparo)).saveAndFlush(any(Pedido.class));
         }
 
         @Test
