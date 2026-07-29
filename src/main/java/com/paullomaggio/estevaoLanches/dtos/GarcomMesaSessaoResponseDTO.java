@@ -26,7 +26,8 @@ public record GarcomMesaSessaoResponseDTO(
             BigDecimal valorTotal,
             Boolean isSelecionada,
             ClienteSessaoDTO cliente,
-            List<ItemSessaoDTO> itens
+            List<ItemSessaoDTO> itens,
+            List<PagamentoSessaoDTO> pagamentos // Adicionado o histórico de pagamentos
     ) {}
 
     public record ClienteSessaoDTO(

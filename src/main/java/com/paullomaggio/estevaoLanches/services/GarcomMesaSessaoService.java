@@ -150,6 +150,15 @@ public class GarcomMesaSessaoService {
                     boolean isSelecionada = conta.getId().equals(contaSelecionadaId);
                     StatusPagamento statusConta = conta.getPago() ? StatusPagamento.PAGO : StatusPagamento.ABERTO;
 
+                    List<PagamentoSessaoDTO> pagamentos = conta.getPagamentos().stream()
+                            .map(p -> new PagamentoSessaoDTO(
+                                    p.getId(),
+                                    p.getFormaPagamento(),
+                                    p.getValorPago(),
+                                    p.getDataHora(),
+                                    p.getUsuarioResponsavel() // CORREÇÃO APLICADA AQUI
+                            )).toList();
+
                     return new GarcomMesaSessaoResponseDTO.ContaSessaoDTO(
                             conta.getId(),
                             conta.getNumeroConta(),
@@ -157,7 +166,8 @@ public class GarcomMesaSessaoService {
                             valorTotalConta,
                             isSelecionada,
                             clienteDTO,
-                            itensDTO
+                            itensDTO,
+                            pagamentos
                     );
                 }).toList();
 

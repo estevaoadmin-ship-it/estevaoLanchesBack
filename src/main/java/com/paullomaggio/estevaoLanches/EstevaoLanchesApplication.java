@@ -10,7 +10,6 @@ import java.nio.file.Paths;
 public class EstevaoLanchesApplication {
 
 	public static void main(String[] args) {
-		// MÁGICA NATIVA: Lê o arquivo .env e injeta no sistema antes do Spring subir
 		try {
 			var path = Paths.get(".env");
 			if (Files.exists(path)) {
