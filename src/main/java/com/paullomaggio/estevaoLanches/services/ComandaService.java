@@ -149,9 +149,7 @@ public class ComandaService {
         }
 
         boolean possuiContaPendente = contas.stream()
-                .anyMatch(conta ->
-                        !Boolean.TRUE.equals(conta.getPago())
-                );
+                .anyMatch(this::contaImpedeFechamento);
 
         if (possuiContaPendente) {
             throw new BusinessRuleException(
@@ -169,6 +167,29 @@ public class ComandaService {
         }
 
         return new ComandaResponseDTO(comandaRepository.save(comanda), true);
+    }
+
+    private boolean contaImpedeFechamento(Conta conta) {
+        if (conta == null) {
+            return false;
+        }
+
+        /*
+         * Conta sem qualquer valor financeiro
+         * nunca exigiu quitação.
+         */
+        if (conta.getValorTotal() == null
+                || conta.getValorTotal().compareTo(BigDecimal.ZERO) == 0) {
+
+            return false;
+        }
+
+        /*
+         * Contas com valor financeiro
+         * continuam obedecendo exatamente
+         * a regra já existente.
+         */
+        return !Boolean.TRUE.equals(conta.getPago());
     }
 
     @Transactional(readOnly = true)

@@ -148,7 +148,12 @@ public class GarcomMesaSessaoService {
 
                     // Define os status visuais e de estado para o aplicativo
                     boolean isSelecionada = conta.getId().equals(contaSelecionadaId);
-                    StatusPagamento statusConta = conta.getPago() ? StatusPagamento.PAGO : StatusPagamento.ABERTO;
+                    StatusPagamento statusConta;
+                    if (valorTotalConta.compareTo(BigDecimal.ZERO) == 0) {
+                        statusConta = StatusPagamento.PAGO;
+                    } else {
+                        statusConta = conta.getPago() ? StatusPagamento.PAGO : StatusPagamento.ABERTO;
+                    }
 
                     List<PagamentoSessaoDTO> pagamentos = conta.getPagamentos().stream()
                             .map(p -> new PagamentoSessaoDTO(

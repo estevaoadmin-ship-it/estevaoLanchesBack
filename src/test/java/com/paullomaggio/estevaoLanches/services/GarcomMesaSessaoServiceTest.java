@@ -413,16 +413,43 @@ class GarcomMesaSessaoServiceTest {
     @Test
     @DisplayName("Teste 022: status da conta (Paga -> PAGO, Aberta -> ABERTO)")
     void statusDaContaMapeadoPeloEnum() {
-        Conta conta1 = new Conta(); conta1.setId(UUID.randomUUID()); conta1.setPago(true); conta1.setPedidos(List.of());
-        Conta conta2 = new Conta(); conta2.setId(UUID.randomUUID()); conta2.setPago(false); conta2.setPedidos(List.of());
-        comanda.setContas(List.of(conta1, conta2));
 
-        when(mesaRepository.findById(mesaId)).thenReturn(Optional.of(mesa));
-        when(comandaRepository.findByMesaNumeroAndStatus(mesa.getNumero(), StatusComanda.ABERTA)).thenReturn(Optional.of(comanda));
+        // Conta quitada (sem saldo operacional)
+        Conta contaPaga = new Conta();
+        contaPaga.setId(UUID.randomUUID());
+        contaPaga.setPago(true);
+        contaPaga.setPedidos(List.of());
 
-        GarcomMesaSessaoResponseDTO response = garcomMesaSessaoService.obterSessao(mesaId);
-        assertEquals(StatusPagamento.PAGO, response.contas().get(0).statusConta());
-        assertEquals(StatusPagamento.ABERTO, response.contas().get(1).statusConta());
+        // Conta aberta (possui saldo operacional)
+        ItemPedido item = mockItem(BigDecimal.TEN, 1, false);
+
+        Pedido pedido = new Pedido();
+        pedido.setStatus(StatusPedido.EM_PREPARO);
+        pedido.setItens(List.of(item));
+
+        Conta contaAberta = new Conta();
+        contaAberta.setId(UUID.randomUUID());
+        contaAberta.setPago(false);
+        contaAberta.setPedidos(List.of(pedido));
+
+        comanda.setContas(List.of(contaPaga, contaAberta));
+
+        when(mesaRepository.findById(mesaId))
+                .thenReturn(Optional.of(mesa));
+
+        when(comandaRepository.findByMesaNumeroAndStatus(
+                mesa.getNumero(),
+                StatusComanda.ABERTA))
+                .thenReturn(Optional.of(comanda));
+
+        GarcomMesaSessaoResponseDTO response =
+                garcomMesaSessaoService.obterSessao(mesaId);
+
+        assertEquals(StatusPagamento.PAGO,
+                response.contas().get(0).statusConta());
+
+        assertEquals(StatusPagamento.ABERTO,
+                response.contas().get(1).statusConta());
     }
 
     @Test
