@@ -89,6 +89,20 @@ public class GarcomMesaSessaoService {
         Comanda comanda = comandaRepository.findByMesaNumeroAndStatus(mesa.getNumero(), StatusComanda.ABERTA)
                 .orElseThrow(() -> new ResourceNotFoundException("Nenhuma comanda aberta localizada para a mesa número " + mesa.getNumero()));
 
+        return montarSessao(mesa, comanda);
+    }
+
+    /**
+     * 📤 LEITURA EM LOTE: Retorna as sessões de todas as comandas abertas.
+     */
+    @Transactional(readOnly = true)
+    public List<GarcomMesaSessaoResponseDTO> obterSessoesAtivas() {
+        return comandaRepository.findByStatus(StatusComanda.ABERTA).stream()
+                .map(comanda -> montarSessao(comanda.getMesa(), comanda))
+                .toList();
+    }
+
+    private GarcomMesaSessaoResponseDTO montarSessao(Mesa mesa, Comanda comanda) {
         // 3. Define a subconta pré-selecionada na UI (Regra: A primeira subconta aberta/não paga)
         UUID contaSelecionadaId = comanda.getContas().stream()
                 .filter(c -> !c.getPago())

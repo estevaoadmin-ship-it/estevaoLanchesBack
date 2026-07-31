@@ -15,6 +15,7 @@ import org.slf4j.LoggerFactory;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
+import java.util.List;
 import java.util.UUID;
 
 @RestController
@@ -69,6 +70,15 @@ public class GarcomSessionMesaController {
         log.info("=============================");
 
         return ResponseEntity.ok(response);
+    }
+
+    @Operation(
+            summary = "Lista todas as sessões ativas",
+            description = "Retorna a lista de sessões de atendimento de todas as comandas abertas, reutilizando a mesma montagem do endpoint individual."
+    )
+    @GetMapping("/ativas")
+    public ResponseEntity<List<GarcomMesaSessaoResponseDTO>> obterSessoesAtivas() {
+        return ResponseEntity.ok(garcomMesaSessaoService.obterSessoesAtivas());
     }
 
     @Operation(

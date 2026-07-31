@@ -24,7 +24,7 @@ public class ComandaController {
     private ComandaService comandaService;
 
     @Operation(summary = "Abre uma nova comanda para uma mesa",
-               description = "Cria e abre uma nova comanda associada a um número de mesa específico.")
+            description = "Cria e abre uma nova comanda associada a um número de mesa específico.")
     @ApiResponses(value = {
             @ApiResponse(responseCode = "200", description = "Comanda aberta com sucesso"),
             @ApiResponse(responseCode = "400", description = "Mesa já possui comanda ativa ou número de mesa inválido"),
@@ -37,7 +37,7 @@ public class ComandaController {
     }
 
     @Operation(summary = "Busca uma comanda pelo ID",
-               description = "Retorna os detalhes de uma comanda específica com base no seu ID.")
+            description = "Retorna os detalhes de uma comanda específica com base no seu ID.")
     @ApiResponses(value = {
             @ApiResponse(responseCode = "200", description = "Comanda encontrada com sucesso"),
             @ApiResponse(responseCode = "404", description = "Comanda não encontrada"),
@@ -50,7 +50,7 @@ public class ComandaController {
     }
 
     @Operation(summary = "Lista todas as comandas ativas",
-               description = "Retorna uma lista de todas as comandas que estão atualmente abertas ou em uso.")
+            description = "Retorna uma lista de todas as comandas que estão atualmente abertas ou em uso.")
     @ApiResponses(value = {
             @ApiResponse(responseCode = "200", description = "Lista de comandas ativas retornada com sucesso"),
             @ApiResponse(responseCode = "401", description = "Não autenticado"),
@@ -62,7 +62,7 @@ public class ComandaController {
     }
 
     @Operation(summary = "Altera o status de uma comanda",
-               description = "Atualiza o status de uma comanda para um novo estado (ex: 'FECHADA', 'CANCELADA').")
+            description = "Atualiza o status de uma comanda para um novo estado (ex: 'FECHADA', 'CANCELADA').")
     @ApiResponses(value = {
             @ApiResponse(responseCode = "200", description = "Status da comanda alterado com sucesso"),
             @ApiResponse(responseCode = "400", description = "Status inválido ou transição não permitida"),
@@ -76,7 +76,7 @@ public class ComandaController {
     }
 
     @Operation(summary = "Fecha uma comanda",
-               description = "Altera o status de uma comanda para 'FECHADA'.")
+            description = "Altera o status de uma comanda para 'FECHADA'.")
     @ApiResponses(value = {
             @ApiResponse(responseCode = "200", description = "Comanda fechada com sucesso"),
             @ApiResponse(responseCode = "404", description = "Comanda não encontrada"),

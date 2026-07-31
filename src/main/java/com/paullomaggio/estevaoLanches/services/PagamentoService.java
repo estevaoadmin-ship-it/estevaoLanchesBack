@@ -9,6 +9,7 @@ import com.paullomaggio.estevaoLanches.entities.Pedido;
 import com.paullomaggio.estevaoLanches.enums.FormaPagamento;
 import com.paullomaggio.estevaoLanches.enums.StatusCaixa;
 import com.paullomaggio.estevaoLanches.enums.StatusFinanceiro;
+import com.paullomaggio.estevaoLanches.enums.StatusPedido;
 import com.paullomaggio.estevaoLanches.exceptions.BusinessRuleException;
 import com.paullomaggio.estevaoLanches.exceptions.ResourceNotFoundException;
 import com.paullomaggio.estevaoLanches.repositories.CaixaRepository;
@@ -134,6 +135,14 @@ public class PagamentoService {
                     Thread.currentThread().getName(),
                     org.springframework.transaction.support.TransactionSynchronizationManager.isActualTransactionActive());
             contaRepository.save(conta);
+
+            // Sincronizar Pedido.statusFinanceiro para PAGO
+            for (Pedido pedido : conta.getPedidos()) {
+                if (pedido.getStatus() != StatusPedido.CANCELADO) {
+                    pedido.setStatusFinanceiro(StatusFinanceiro.PAGO);
+                    pedidoRepository.save(pedido);
+                }
+            }
         } else {
             log.info("[FORENSE-SUBCONTA] Classe: {}, Método: {}, Ação: setPago, Conta: {}, valorTotal: {}, pagoAnterior: {}, pagoNovo: {}, saldoCalculado: {}, stacktrace: {}",
                     getClass().getSimpleName(),
