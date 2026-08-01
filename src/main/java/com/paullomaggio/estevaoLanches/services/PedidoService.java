@@ -490,16 +490,6 @@ public class PedidoService {
                 }
             }
 
-            if (comanda != null) {
-                List<Conta> todasContas = contaRepository.findByComandaId(comanda.getId());
-                boolean todasPagas = todasContas.stream()
-                        .allMatch(c -> Boolean.TRUE.equals(c.getPago()));
-                if (todasPagas) {
-                    comanda.setStatus(StatusComanda.FECHADA);
-                    comanda.setFechadaEm(LocalDateTime.now());
-                    comandaRepository.save(comanda);
-                }
-            }
         } else {
             log.info("Pagamento parcial para Conta {}. Pedidos e Comanda permanecem abertos operacionalmente.", conta.getId());
         }
