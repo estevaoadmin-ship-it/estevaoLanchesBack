@@ -614,6 +614,16 @@ class GarcomMesaSessaoServiceTest {
             item.setAdicionais(List.of());
         }
 
+        // 🎯 FIX: Associar um Pedido mínimo para atender o novo contrato da sessão
+        Pedido pedido = new Pedido();
+        pedido.setId(UUID.randomUUID());
+        pedido.setNumeroPedido("TST01");
+        pedido.setStatus(StatusPedido.EM_PREPARO);
+        pedido.setStatusFinanceiro(StatusFinanceiro.AGUARDANDO_PAGAMENTO);
+        pedido.setTipo(TipoPedido.MESA);
+        pedido.setItens(List.of(item));
+        item.setPedido(pedido);
+
         return item;
     }
 }

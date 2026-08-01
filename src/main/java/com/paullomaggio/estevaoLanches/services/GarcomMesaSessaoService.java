@@ -132,6 +132,11 @@ public class GarcomMesaSessaoService {
 
                                 return new GarcomMesaSessaoResponseDTO.ItemSessaoDTO(
                                         item.getId(),
+                                        item.getPedido().getId(),
+                                        item.getPedido().getNumeroPedido(),
+                                        item.getPedido().getStatus(),
+                                        item.getPedido().getStatusFinanceiro(),
+                                        item.getPedido().getTipo(),
                                         item.getProduto().getId(),
                                         item.getProduto().getNome(),
                                         item.getQuantidade(),

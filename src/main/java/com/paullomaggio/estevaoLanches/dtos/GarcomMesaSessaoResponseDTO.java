@@ -1,8 +1,6 @@
 package com.paullomaggio.estevaoLanches.dtos;
 
-import com.paullomaggio.estevaoLanches.enums.StatusComanda;
-import com.paullomaggio.estevaoLanches.enums.StatusPagamento;
-import com.paullomaggio.estevaoLanches.enums.StatusMesa;
+import com.paullomaggio.estevaoLanches.enums.*;
 
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
@@ -22,12 +20,12 @@ public record GarcomMesaSessaoResponseDTO(
     public record ContaSessaoDTO(
             UUID id,
             Integer numeroConta,
-            StatusPagamento statusConta, // 🎯 FIX: Usando seu Enum StatusPagamento oficial
+            StatusPagamento statusConta,
             BigDecimal valorTotal,
             Boolean isSelecionada,
             ClienteSessaoDTO cliente,
             List<ItemSessaoDTO> itens,
-            List<PagamentoSessaoDTO> pagamentos // Adicionado o histórico de pagamentos
+            List<PagamentoSessaoDTO> pagamentos
     ) {}
 
     public record ClienteSessaoDTO(
@@ -38,6 +36,11 @@ public record GarcomMesaSessaoResponseDTO(
 
     public record ItemSessaoDTO(
             UUID id,
+            UUID pedidoId,
+            String numeroPedido,
+            StatusPedido statusPedido,
+            StatusFinanceiro statusFinanceiro,
+            TipoPedido tipoPedido,
             UUID produtoId,
             String nomeProduto,
             Integer quantidade,
