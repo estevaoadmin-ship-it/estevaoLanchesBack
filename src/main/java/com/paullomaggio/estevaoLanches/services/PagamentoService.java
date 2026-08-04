@@ -1,5 +1,7 @@
 package com.paullomaggio.estevaoLanches.services;
 
+import com.paullomaggio.estevaoLanches.dtos.PagamentoPesquisaDTO;
+import com.paullomaggio.estevaoLanches.dtos.PagamentoPesquisaRequestDTO;
 import com.paullomaggio.estevaoLanches.dtos.PagamentoRequestDTO;
 import com.paullomaggio.estevaoLanches.dtos.PagamentoResponseDTO;
 import com.paullomaggio.estevaoLanches.entities.Caixa;
@@ -9,6 +11,7 @@ import com.paullomaggio.estevaoLanches.entities.Pedido;
 import com.paullomaggio.estevaoLanches.enums.FormaPagamento;
 import com.paullomaggio.estevaoLanches.enums.StatusCaixa;
 import com.paullomaggio.estevaoLanches.enums.StatusFinanceiro;
+import com.paullomaggio.estevaoLanches.enums.StatusPagamento;
 import com.paullomaggio.estevaoLanches.enums.StatusPedido;
 import com.paullomaggio.estevaoLanches.exceptions.BusinessRuleException;
 import com.paullomaggio.estevaoLanches.exceptions.ResourceNotFoundException;
@@ -312,6 +315,25 @@ public class PagamentoService {
             }
             return totalBrutoPago.subtract(totalEstornado);
         }
+    }
+
+    @Transactional(readOnly = true)
+    public List<PagamentoPesquisaDTO> pesquisarPagamentos(PagamentoPesquisaRequestDTO filtro) {
+        return pagamentoRepository.pesquisarPagamentos(
+                filtro.getClienteId(),
+                filtro.getMesaId(),
+                filtro.getPedidoId(),
+                filtro.getFormaPagamento(),
+                filtro.getStatusPagamento(),
+                filtro.getDataInicial(),
+                filtro.getDataFinal(),
+                filtro.getCaixaId(),
+                filtro.getContaId(),
+                filtro.getNumeroMesa(),
+                filtro.getNomeCliente(),
+                filtro.getValorMinimo(),
+                filtro.getValorMaximo()
+        );
     }
 
     private String obterUsuarioResponsavelAtual() {

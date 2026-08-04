@@ -2,8 +2,12 @@ package com.paullomaggio.estevaoLanches.controllers;
 
 import com.paullomaggio.estevaoLanches.dtos.EstornarPagamentoRequestDTO;
 import com.paullomaggio.estevaoLanches.dtos.EstornoPagamentoResponseDTO;
+import com.paullomaggio.estevaoLanches.dtos.PagamentoPesquisaDTO;
+import com.paullomaggio.estevaoLanches.dtos.PagamentoPesquisaRequestDTO;
 import com.paullomaggio.estevaoLanches.dtos.PagamentoRequestDTO;
 import com.paullomaggio.estevaoLanches.dtos.PagamentoResponseDTO;
+import com.paullomaggio.estevaoLanches.enums.FormaPagamento;
+import com.paullomaggio.estevaoLanches.enums.StatusPagamento;
 import com.paullomaggio.estevaoLanches.services.EstornoPagamentoService;
 import com.paullomaggio.estevaoLanches.services.PagamentoService;
 import io.swagger.v3.oas.annotations.Operation;
@@ -16,6 +20,8 @@ import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
+import java.math.BigDecimal;
+import java.time.LocalDateTime;
 import java.util.List;
 import java.util.UUID;
 
@@ -119,5 +125,48 @@ public class PagamentoController {
                 pagamentoService.listarPorPedido(pedidoId);
 
         return ResponseEntity.ok(response);
+    }
+
+    @Operation(summary = "Pesquisa de pagamentos para a tela de Estornos",
+            description = "Retorna uma lista de pagamentos com filtros opcionais para uso na tela de estornos. " +
+                    "Todos os filtros são opcionais e a pesquisa retorna todos os registros quando nenhum filtro é fornecido.")
+    @ApiResponses(value = {
+            @ApiResponse(responseCode = "200", description = "Lista de pagamentos pesquisada com sucesso"),
+            @ApiResponse(responseCode = "401", description = "Não autenticado"),
+            @ApiResponse(responseCode = "403", description = "Sem permissão (apenas ADMIN)")
+    })
+    @GetMapping("/pesquisa")
+    public ResponseEntity<List<PagamentoPesquisaDTO>> pesquisarPagamentos(
+            @RequestParam(required = false) UUID clienteId,
+            @RequestParam(required = false) UUID mesaId,
+            @RequestParam(required = false) UUID pedidoId,
+            @RequestParam(required = false) FormaPagamento formaPagamento,
+            @RequestParam(required = false) StatusPagamento statusPagamento,
+            @RequestParam(required = false) LocalDateTime dataInicial,
+            @RequestParam(required = false) LocalDateTime dataFinal,
+            @RequestParam(required = false) UUID caixaId,
+            @RequestParam(required = false) UUID contaId,
+            @RequestParam(required = false) Integer numeroMesa,
+            @RequestParam(required = false) String nomeCliente,
+            @RequestParam(required = false) BigDecimal valorMinimo,
+            @RequestParam(required = false) BigDecimal valorMaximo
+    ) {
+        PagamentoPesquisaRequestDTO filtro = new PagamentoPesquisaRequestDTO();
+        filtro.setClienteId(clienteId);
+        filtro.setMesaId(mesaId);
+        filtro.setPedidoId(pedidoId);
+        filtro.setFormaPagamento(formaPagamento);
+        filtro.setStatusPagamento(statusPagamento);
+        filtro.setDataInicial(dataInicial);
+        filtro.setDataFinal(dataFinal);
+        filtro.setCaixaId(caixaId);
+        filtro.setContaId(contaId);
+        filtro.setNumeroMesa(numeroMesa);
+        filtro.setNomeCliente(nomeCliente);
+        filtro.setValorMinimo(valorMinimo);
+        filtro.setValorMaximo(valorMaximo);
+
+        List<PagamentoPesquisaDTO> resultado = pagamentoService.pesquisarPagamentos(filtro);
+        return ResponseEntity.ok(resultado);
     }
 }

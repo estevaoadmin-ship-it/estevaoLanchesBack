@@ -1,13 +1,19 @@
 package com.paullomaggio.estevaoLanches.services;
 
+import com.paullomaggio.estevaoLanches.dtos.PagamentoPesquisaDTO;
+import com.paullomaggio.estevaoLanches.dtos.PagamentoPesquisaRequestDTO;
 import com.paullomaggio.estevaoLanches.dtos.PagamentoRequestDTO;
 import com.paullomaggio.estevaoLanches.dtos.PagamentoResponseDTO;
 import com.paullomaggio.estevaoLanches.entities.Caixa;
+import com.paullomaggio.estevaoLanches.entities.Cliente;
+import com.paullomaggio.estevaoLanches.entities.Comanda;
 import com.paullomaggio.estevaoLanches.entities.Conta;
+import com.paullomaggio.estevaoLanches.entities.Mesa;
 import com.paullomaggio.estevaoLanches.entities.Pagamento;
 import com.paullomaggio.estevaoLanches.entities.Pedido;
 import com.paullomaggio.estevaoLanches.enums.FormaPagamento;
 import com.paullomaggio.estevaoLanches.enums.StatusCaixa;
+import com.paullomaggio.estevaoLanches.enums.StatusPagamento;
 import com.paullomaggio.estevaoLanches.exceptions.BusinessRuleException;
 import com.paullomaggio.estevaoLanches.exceptions.ResourceNotFoundException;
 import com.paullomaggio.estevaoLanches.repositories.CaixaRepository;
@@ -931,6 +937,241 @@ class PagamentoServiceTest {
             BigDecimal saldoLiquido = pagamentoService.getSaldoLiquidoPagoPorPedido(pedidoId);
 
             assertEquals(BigDecimal.ZERO, saldoLiquido);
+        }
+    }
+
+    @Nested
+    @DisplayName("🔍 Pesquisa de Pagamentos — CT-PESQ-001 a CT-PESQ-010")
+    class PesquisaDePagamentosTests {
+
+        @Mock
+        private PagamentoRepository pagamentoRepository;
+
+        private PagamentoService pagamentoService;
+
+        private UUID pagamentoId;
+        private UUID contaId;
+        private UUID pedidoId;
+        private UUID clienteId;
+        private UUID mesaId;
+        private UUID caixaId;
+
+        private Pagamento pagamentoMock;
+        private Conta contaMock;
+        private Pedido pedidoMock;
+        private Cliente clienteMock;
+        private Mesa mesaMock;
+        private Caixa caixaMock;
+
+        private final String USUARIO_TESTE = "usuario@teste.com";
+
+        @BeforeEach
+        void setUp() {
+            SecurityContextHolder.clearContext();
+
+            pagamentoRepository = mock(PagamentoRepository.class);
+            contaRepository = mock(ContaRepository.class);
+            caixaRepository = mock(CaixaRepository.class);
+            estornoPagamentoRepository = mock(EstornoPagamentoRepository.class);
+            pedidoRepository = mock(PedidoRepository.class);
+
+            pagamentoService = new PagamentoService(pagamentoRepository, contaRepository, caixaRepository, estornoPagamentoRepository, pedidoRepository);
+
+            pagamentoId = UUID.randomUUID();
+            contaId = UUID.randomUUID();
+            pedidoId = UUID.randomUUID();
+            clienteId = UUID.randomUUID();
+            mesaId = UUID.randomUUID();
+            caixaId = UUID.randomUUID();
+
+            clienteMock = new Cliente();
+            clienteMock.setId(clienteId);
+            clienteMock.setNome("João da Silva");
+
+            mesaMock = new Mesa();
+            mesaMock.setId(mesaId);
+            mesaMock.setNumero(5);
+
+            caixaMock = new Caixa();
+            caixaMock.setId(caixaId);
+            caixaMock.setStatus(StatusCaixa.ABERTO);
+
+            pedidoMock = new Pedido();
+            pedidoMock.setId(pedidoId);
+            pedidoMock.setNumeroPedido("ABC12");
+            pedidoMock.setNumeroMesa(5);
+            pedidoMock.setTotal(new BigDecimal("50.00"));
+
+            contaMock = new Conta();
+            contaMock.setId(contaId);
+            contaMock.setNumeroConta(1);
+            contaMock.setPago(true);
+            contaMock.setValorTotal(new BigDecimal("50.00"));
+            contaMock.setCliente(clienteMock);
+            contaMock.setComanda(new Comanda());
+
+            pagamentoMock = new Pagamento();
+            pagamentoMock.setId(pagamentoId);
+            pagamentoMock.setConta(contaMock);
+            pagamentoMock.setPedido(pedidoMock);
+            pagamentoMock.setCaixa(caixaMock);
+            pagamentoMock.setValorPago(new BigDecimal("50.00"));
+            pagamentoMock.setFormaPagamento(FormaPagamento.PIX);
+            pagamentoMock.setDataHora(LocalDateTime.now());
+            pagamentoMock.setUsuarioResponsavel(USUARIO_TESTE);
+        }
+
+        @Test
+        @DisplayName("CT-PESQ-001: Deve retornar lista vazia quando não há resultados")
+        void deveRetornarListaVaziaQuandoNaoHáResultados() {
+            when(pagamentoRepository.pesquisarPagamentos(null, null, null, null, null, null, null, null, null, null, null, null, null))
+                    .thenReturn(Collections.emptyList());
+
+            PagamentoPesquisaRequestDTO filtro = new PagamentoPesquisaRequestDTO();
+            List<PagamentoPesquisaDTO> resultado = pagamentoService.pesquisarPagamentos(filtro);
+
+            assertThat(resultado).isEmpty();
+            verify(pagamentoRepository, times(1)).pesquisarPagamentos(null, null, null, null, null, null, null, null, null, null, null, null, null);
+        }
+
+        @Test
+        @DisplayName("CT-PESQ-002: Deve retornar lista de pagamentos com saldo estornavel calculado")
+        void deveRetornarListaDePagamentosComSaldoEstornavel() {
+            when(pagamentoRepository.pesquisarPagamentos(null, null, null, null, null, null, null, null, null, null, null, null, null))
+                    .thenReturn(List.of(new PagamentoPesquisaDTO(pagamentoMock, new BigDecimal("50.00"))));
+
+            PagamentoPesquisaRequestDTO filtro = new PagamentoPesquisaRequestDTO();
+            List<PagamentoPesquisaDTO> resultado = pagamentoService.pesquisarPagamentos(filtro);
+
+            assertThat(resultado).hasSize(1);
+            PagamentoPesquisaDTO dto = resultado.get(0);
+            assertEquals(pagamentoId, dto.getIdPagamento());
+            assertEquals("João da Silva", dto.getCliente());
+            assertEquals(5, dto.getNumeroMesa());
+            assertEquals(pedidoId, dto.getPedidoId());
+            assertEquals("ABC12", dto.getNumeroPedido());
+            assertEquals(FormaPagamento.PIX, dto.getFormaPagamento());
+            assertEquals(new BigDecimal("50.00"), dto.getValorPago());
+            assertEquals(new BigDecimal("50.00"), dto.getSaldoEstornavel());
+            assertEquals(StatusPagamento.PAGO, dto.getStatusPagamento());
+            assertEquals(USUARIO_TESTE, dto.getUsuarioResponsavel());
+            assertEquals(caixaId, dto.getCaixaId());
+        }
+
+        @Test
+        @DisplayName("CT-PESQ-003: Deve passar todos os filtros para o repository")
+        void devePassarTodosOsFiltrosParaRepository() {
+            when(pagamentoRepository.pesquisarPagamentos(clienteId, mesaId, pedidoId, FormaPagamento.PIX, StatusPagamento.PAGO, null, null, null, null, null, null, null, null))
+                    .thenReturn(List.of(new PagamentoPesquisaDTO(pagamentoMock, new BigDecimal("50.00"))));
+
+            PagamentoPesquisaRequestDTO filtro = new PagamentoPesquisaRequestDTO();
+            filtro.setClienteId(clienteId);
+            filtro.setMesaId(mesaId);
+            filtro.setPedidoId(pedidoId);
+            filtro.setFormaPagamento(FormaPagamento.PIX);
+            filtro.setStatusPagamento(StatusPagamento.PAGO);
+
+            List<PagamentoPesquisaDTO> resultado = pagamentoService.pesquisarPagamentos(filtro);
+
+            assertThat(resultado).hasSize(1);
+            verify(pagamentoRepository, times(1)).pesquisarPagamentos(
+                    clienteId, mesaId, pedidoId, FormaPagamento.PIX, StatusPagamento.PAGO,
+                    null, null, null, null, null, null, null, null
+            );
+        }
+
+        @Test
+        @DisplayName("CT-PESQ-005: Deve retornar DTO com nomeResponsavel quando conta nao tem cliente")
+        void deveRetornarDTOComNomeResponsavelQuandoContaNaoTemCliente() {
+            contaMock.setCliente(null);
+            contaMock.setNomeResponsavel("MESA 5 - CONTA 1");
+            pagamentoMock.setConta(contaMock);
+
+            when(pagamentoRepository.pesquisarPagamentos(null, null, null, null, null, null, null, null, null, null, null, null, null))
+                    .thenReturn(List.of(new PagamentoPesquisaDTO(pagamentoMock, new BigDecimal("50.00"))));
+
+            PagamentoPesquisaRequestDTO filtro = new PagamentoPesquisaRequestDTO();
+            List<PagamentoPesquisaDTO> resultado = pagamentoService.pesquisarPagamentos(filtro);
+
+            assertThat(resultado).hasSize(1);
+            assertEquals("MESA 5 - CONTA 1", resultado.get(0).getCliente());
+        }
+
+        @Test
+        @DisplayName("CT-PESQ-006: Deve retornar status ABERTO quando conta nao esta paga")
+        void deveRetornarStatusAbertoQuandoContaNaoEstaPaga() {
+            contaMock.setPago(false);
+            pagamentoMock.setConta(contaMock);
+
+            when(pagamentoRepository.pesquisarPagamentos(null, null, null, null, null, null, null, null, null, null, null, null, null))
+                    .thenReturn(List.of(new PagamentoPesquisaDTO(pagamentoMock, new BigDecimal("50.00"))));
+
+            PagamentoPesquisaRequestDTO filtro = new PagamentoPesquisaRequestDTO();
+            List<PagamentoPesquisaDTO> resultado = pagamentoService.pesquisarPagamentos(filtro);
+
+            assertThat(resultado).hasSize(1);
+            assertEquals(StatusPagamento.ABERTO, resultado.get(0).getStatusPagamento());
+        }
+
+        @Test
+        @DisplayName("CT-PESQ-007: Deve retornar status PAGO quando conta esta paga")
+        void deveRetornarStatusPagoQuandoContaEstaPaga() {
+            contaMock.setPago(true);
+            pagamentoMock.setConta(contaMock);
+
+            when(pagamentoRepository.pesquisarPagamentos(null, null, null, null, null, null, null, null, null, null, null, null, null))
+                    .thenReturn(List.of(new PagamentoPesquisaDTO(pagamentoMock, new BigDecimal("50.00"))));
+
+            PagamentoPesquisaRequestDTO filtro = new PagamentoPesquisaRequestDTO();
+            List<PagamentoPesquisaDTO> resultado = pagamentoService.pesquisarPagamentos(filtro);
+
+            assertThat(resultado).hasSize(1);
+            assertEquals(StatusPagamento.PAGO, resultado.get(0).getStatusPagamento());
+        }
+
+        @Test
+        @DisplayName("CT-PESQ-008: Deve retornar status PAGO quando pagamento nao tem conta vinculada")
+        void deveRetornarStatusPagoQuandoPagamentoNaoTemConta() {
+            pagamentoMock.setConta(null);
+
+            when(pagamentoRepository.pesquisarPagamentos(null, null, null, null, null, null, null, null, null, null, null, null, null))
+                    .thenReturn(List.of(new PagamentoPesquisaDTO(pagamentoMock, new BigDecimal("50.00"))));
+
+            PagamentoPesquisaRequestDTO filtro = new PagamentoPesquisaRequestDTO();
+            List<PagamentoPesquisaDTO> resultado = pagamentoService.pesquisarPagamentos(filtro);
+
+            assertThat(resultado).hasSize(1);
+            assertEquals(StatusPagamento.PAGO, resultado.get(0).getStatusPagamento());
+        }
+
+        @Test
+        @DisplayName("CT-PESQ-009: Deve calcular saldoEstornavel como valorPago menos totalEstornado")
+        void deveCalcularSaldoEstornavelCorretamente() {
+            when(pagamentoRepository.pesquisarPagamentos(null, null, null, null, null, null, null, null, null, null, null, null, null))
+                    .thenReturn(List.of(new PagamentoPesquisaDTO(pagamentoMock, new BigDecimal("30.00"))));
+
+            PagamentoPesquisaRequestDTO filtro = new PagamentoPesquisaRequestDTO();
+            List<PagamentoPesquisaDTO> resultado = pagamentoService.pesquisarPagamentos(filtro);
+
+            assertThat(resultado).hasSize(1);
+            assertEquals(new BigDecimal("30.00"), resultado.get(0).getSaldoEstornavel());
+        }
+
+        @Test
+        @DisplayName("CT-PESQ-010: Deve retornar DTO sem numeroMesa quando pagamento nao tem pedido")
+        void deveRetornarDTOSemNumeroMesaQuandoPagamentoNaoTemPedido() {
+            pagamentoMock.setPedido(null);
+
+            when(pagamentoRepository.pesquisarPagamentos(null, null, null, null, null, null, null, null, null, null, null, null, null))
+                    .thenReturn(List.of(new PagamentoPesquisaDTO(pagamentoMock, new BigDecimal("50.00"))));
+
+            PagamentoPesquisaRequestDTO filtro = new PagamentoPesquisaRequestDTO();
+            List<PagamentoPesquisaDTO> resultado = pagamentoService.pesquisarPagamentos(filtro);
+
+            assertThat(resultado).hasSize(1);
+            assertNull(resultado.get(0).getNumeroMesa());
+            assertNull(resultado.get(0).getPedidoId());
+            assertNull(resultado.get(0).getNumeroPedido());
         }
     }
 }
