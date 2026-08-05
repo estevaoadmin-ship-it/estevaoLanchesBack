@@ -144,7 +144,6 @@ public class PagamentoController {
 
         if (termo != null && tipo != null) {
             switch (tipo) {
-                case CLIENTE -> filtro.setNomeCliente(termo);
                 case MESA -> {
                     try {
                         filtro.setNumeroMesa(Integer.parseInt(termo));

@@ -22,6 +22,9 @@ public class PagamentoPesquisaDTO {
     @Schema(description = "Nome do cliente", example = "João da Silva")
     private String cliente;
 
+    @Schema(description = "Número da conta", example = "2")
+    private Integer numeroConta;
+
     @Schema(description = "Número da mesa", example = "5")
     private Integer numeroMesa;
 
@@ -60,7 +63,14 @@ public class PagamentoPesquisaDTO {
                 : (pagamento.getConta() != null
                     ? pagamento.getConta().getNomeResponsavel()
                     : null);
-        this.numeroMesa = pagamento.getPedido() != null ? pagamento.getPedido().getNumeroMesa() : null;
+        this.numeroConta = pagamento.getConta() != null ? pagamento.getConta().getNumeroConta() : null;
+        this.numeroMesa = pagamento.getPedido() != null
+                ? pagamento.getPedido().getNumeroMesa()
+                : (pagamento.getConta() != null
+                    && pagamento.getConta().getComanda() != null
+                    && pagamento.getConta().getComanda().getMesa() != null
+                    ? pagamento.getConta().getComanda().getMesa().getNumero()
+                    : null);
         this.pedidoId = pagamento.getPedido() != null ? pagamento.getPedido().getId() : null;
         this.numeroPedido = pagamento.getPedido() != null ? pagamento.getPedido().getNumeroPedido() : null;
         this.formaPagamento = pagamento.getFormaPagamento();

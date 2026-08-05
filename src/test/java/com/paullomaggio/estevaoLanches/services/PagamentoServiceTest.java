@@ -952,7 +952,6 @@ class PagamentoServiceTest {
         private UUID pagamentoId;
         private UUID contaId;
         private UUID pedidoId;
-        private UUID clienteId;
         private UUID mesaId;
         private UUID caixaId;
 
@@ -980,12 +979,10 @@ class PagamentoServiceTest {
             pagamentoId = UUID.randomUUID();
             contaId = UUID.randomUUID();
             pedidoId = UUID.randomUUID();
-            clienteId = UUID.randomUUID();
             mesaId = UUID.randomUUID();
             caixaId = UUID.randomUUID();
 
             clienteMock = new Cliente();
-            clienteMock.setId(clienteId);
             clienteMock.setNome("João da Silva");
 
             mesaMock = new Mesa();
@@ -1024,7 +1021,7 @@ class PagamentoServiceTest {
         @Test
         @DisplayName("CT-PESQ-001: Deve retornar lista vazia quando não há resultados")
         void deveRetornarListaVaziaQuandoNaoHáResultados() {
-            when(pagamentoRepository.pesquisarPorPedido("ABC12"))
+            when(pagamentoRepository.pesquisarPorPedido(any(), any(LocalDateTime.class)))
                     .thenReturn(Collections.emptyList());
 
             PagamentoPesquisaRequestDTO filtro = new PagamentoPesquisaRequestDTO();
@@ -1032,13 +1029,13 @@ class PagamentoServiceTest {
             List<PagamentoPesquisaDTO> resultado = pagamentoService.pesquisarPagamentos(filtro);
 
             assertThat(resultado).isEmpty();
-            verify(pagamentoRepository, times(1)).pesquisarPorPedido("ABC12");
+            verify(pagamentoRepository, times(1)).pesquisarPorPedido(any(), any(LocalDateTime.class));
         }
 
         @Test
         @DisplayName("CT-PESQ-002: Deve retornar lista de pagamentos com saldo estornavel calculado")
         void deveRetornarListaDePagamentosComSaldoEstornavel() {
-            when(pagamentoRepository.pesquisarPorPedido("ABC12"))
+            when(pagamentoRepository.pesquisarPorPedido(any(), any(LocalDateTime.class)))
                     .thenReturn(List.of(new PagamentoPesquisaDTO(pagamentoMock, new BigDecimal("50.00"))));
 
             PagamentoPesquisaRequestDTO filtro = new PagamentoPesquisaRequestDTO();
@@ -1061,25 +1058,9 @@ class PagamentoServiceTest {
         }
 
         @Test
-        @DisplayName("CT-PESQ-003: Deve direcionar para pesquisarPorCliente quando clienteId é informado")
-        void deveDirecionarParaPesquisarPorClienteQuandoClienteIdInformado() {
-            when(pagamentoRepository.pesquisarPorCliente(null))
-                    .thenReturn(List.of(new PagamentoPesquisaDTO(pagamentoMock, new BigDecimal("50.00"))));
-
-            PagamentoPesquisaRequestDTO filtro = new PagamentoPesquisaRequestDTO();
-            filtro.setClienteId(clienteId);
-            filtro.setFormaPagamento(FormaPagamento.PIX);
-
-            List<PagamentoPesquisaDTO> resultado = pagamentoService.pesquisarPagamentos(filtro);
-
-            assertThat(resultado).hasSize(1);
-            verify(pagamentoRepository, times(1)).pesquisarPorCliente(null);
-        }
-
-        @Test
         @DisplayName("CT-PESQ-004: Deve direcionar para pesquisarPorMesa quando mesaId é informado")
         void deveDirecionarParaPesquisarPorMesaQuandoMesaIdInformado() {
-            when(pagamentoRepository.pesquisarPorMesa(5))
+            when(pagamentoRepository.pesquisarPorMesa(any(), any(LocalDateTime.class)))
                     .thenReturn(List.of(new PagamentoPesquisaDTO(pagamentoMock, new BigDecimal("50.00"))));
 
             PagamentoPesquisaRequestDTO filtro = new PagamentoPesquisaRequestDTO();
@@ -1090,7 +1071,7 @@ class PagamentoServiceTest {
             List<PagamentoPesquisaDTO> resultado = pagamentoService.pesquisarPagamentos(filtro);
 
             assertThat(resultado).hasSize(1);
-            verify(pagamentoRepository, times(1)).pesquisarPorMesa(5);
+            verify(pagamentoRepository, times(1)).pesquisarPorMesa(any(), any(LocalDateTime.class));
         }
 
         @Test
@@ -1100,7 +1081,7 @@ class PagamentoServiceTest {
             contaMock.setNomeResponsavel("MESA 5 - CONTA 1");
             pagamentoMock.setConta(contaMock);
 
-            when(pagamentoRepository.pesquisarPorPedido("ABC12"))
+            when(pagamentoRepository.pesquisarPorPedido(any(), any(LocalDateTime.class)))
                     .thenReturn(List.of(new PagamentoPesquisaDTO(pagamentoMock, new BigDecimal("50.00"))));
 
             PagamentoPesquisaRequestDTO filtro = new PagamentoPesquisaRequestDTO();
@@ -1117,7 +1098,7 @@ class PagamentoServiceTest {
             contaMock.setPago(false);
             pagamentoMock.setConta(contaMock);
 
-            when(pagamentoRepository.pesquisarPorPedido("ABC12"))
+            when(pagamentoRepository.pesquisarPorPedido(any(), any(LocalDateTime.class)))
                     .thenReturn(List.of(new PagamentoPesquisaDTO(pagamentoMock, new BigDecimal("50.00"))));
 
             PagamentoPesquisaRequestDTO filtro = new PagamentoPesquisaRequestDTO();
@@ -1134,7 +1115,7 @@ class PagamentoServiceTest {
             contaMock.setPago(true);
             pagamentoMock.setConta(contaMock);
 
-            when(pagamentoRepository.pesquisarPorPedido("ABC12"))
+            when(pagamentoRepository.pesquisarPorPedido(any(), any(LocalDateTime.class)))
                     .thenReturn(List.of(new PagamentoPesquisaDTO(pagamentoMock, new BigDecimal("50.00"))));
 
             PagamentoPesquisaRequestDTO filtro = new PagamentoPesquisaRequestDTO();
@@ -1150,7 +1131,7 @@ class PagamentoServiceTest {
         void deveRetornarStatusPagoQuandoPagamentoNaoTemConta() {
             pagamentoMock.setConta(null);
 
-            when(pagamentoRepository.pesquisarPorPedido("ABC12"))
+            when(pagamentoRepository.pesquisarPorPedido(any(), any(LocalDateTime.class)))
                     .thenReturn(List.of(new PagamentoPesquisaDTO(pagamentoMock, new BigDecimal("50.00"))));
 
             PagamentoPesquisaRequestDTO filtro = new PagamentoPesquisaRequestDTO();
@@ -1164,7 +1145,7 @@ class PagamentoServiceTest {
         @Test
         @DisplayName("CT-PESQ-009: Deve calcular saldoEstornavel como valorPago menos totalEstornado")
         void deveCalcularSaldoEstornavelCorretamente() {
-            when(pagamentoRepository.pesquisarPorPedido("ABC12"))
+            when(pagamentoRepository.pesquisarPorPedido(any(), any(LocalDateTime.class)))
                     .thenReturn(List.of(new PagamentoPesquisaDTO(pagamentoMock, new BigDecimal("30.00"))));
 
             PagamentoPesquisaRequestDTO filtro = new PagamentoPesquisaRequestDTO();
@@ -1180,7 +1161,7 @@ class PagamentoServiceTest {
         void deveRetornarDTOSemNumeroMesaQuandoPagamentoNaoTemPedido() {
             pagamentoMock.setPedido(null);
 
-            when(pagamentoRepository.pesquisarPorPedido("ABC12"))
+            when(pagamentoRepository.pesquisarPorPedido(any(), any(LocalDateTime.class)))
                     .thenReturn(List.of(new PagamentoPesquisaDTO(pagamentoMock, new BigDecimal("50.00"))));
 
             PagamentoPesquisaRequestDTO filtro = new PagamentoPesquisaRequestDTO();

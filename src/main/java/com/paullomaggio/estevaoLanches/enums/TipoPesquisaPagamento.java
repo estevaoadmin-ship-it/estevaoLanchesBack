@@ -5,7 +5,6 @@ package com.paullomaggio.estevaoLanches.enums;
  * Cada valor direciona a consulta para o método especializado correto no Repository.
  */
 public enum TipoPesquisaPagamento {
-    CLIENTE,
     MESA,
     PEDIDO
 }

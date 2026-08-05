@@ -16,9 +16,6 @@ import java.util.UUID;
 @Schema(description = "DTO de requisição para pesquisa de pagamentos na tela de Estornos")
 public class PagamentoPesquisaRequestDTO {
 
-    @Schema(description = "ID do cliente para filtro", example = "550e8400-e29b-41d4-a716-446655440000")
-    private UUID clienteId;
-
     @Schema(description = "ID da mesa para filtro", example = "550e8400-e29b-41d4-a716-446655440001")
     private UUID mesaId;
 
@@ -45,9 +42,6 @@ public class PagamentoPesquisaRequestDTO {
 
     @Schema(description = "Número da mesa para filtro (busca direta por número)", example = "5")
     private Integer numeroMesa;
-
-    @Schema(description = "Termo de busca no nome do cliente", example = "Silva")
-    private String nomeCliente;
 
     @Schema(description = "Número do pedido para filtro", example = "ABC12")
     private String numeroPedido;

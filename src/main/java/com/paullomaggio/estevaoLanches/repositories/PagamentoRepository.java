@@ -54,27 +54,7 @@ public interface PagamentoRepository extends JpaRepository<Pagamento, UUID> {
             @Param("id") UUID id
     );
 
-    @Query("""
-        SELECT new com.paullomaggio.estevaoLanches.dtos.PagamentoPesquisaDTO(
-            p,
-            COALESCE(p.valorPago, 0) - COALESCE(
-                (SELECT COALESCE(SUM(e.valorEstornado), 0)
-                 FROM EstornoPagamento e
-                 WHERE e.pagamento.id = p.id),
-                0
-            )
-        )
-        FROM Pagamento p
-        LEFT JOIN p.conta c
-        LEFT JOIN c.cliente cl
-        WHERE
-            c.pago = true
-            AND LOWER(cl.nome) LIKE LOWER(CONCAT('%', :nomeCliente, '%'))
-        ORDER BY p.dataHora DESC
-        """)
-    List<PagamentoPesquisaDTO> pesquisarPorCliente(
-            @Param("nomeCliente") String nomeCliente
-    );
+    
 
     @Query("""
         SELECT new com.paullomaggio.estevaoLanches.dtos.PagamentoPesquisaDTO(
@@ -93,10 +73,12 @@ public interface PagamentoRepository extends JpaRepository<Pagamento, UUID> {
         WHERE
             c.pago = true
             AND m.numero = :numeroMesa
+            AND p.dataHora >= :dataLimite
         ORDER BY p.dataHora DESC
         """)
     List<PagamentoPesquisaDTO> pesquisarPorMesa(
-            @Param("numeroMesa") Integer numeroMesa
+            @Param("numeroMesa") Integer numeroMesa,
+            @Param("dataLimite") LocalDateTime dataLimite
     );
 
     @Query("""
@@ -111,13 +93,16 @@ public interface PagamentoRepository extends JpaRepository<Pagamento, UUID> {
         )
         FROM Pagamento p
         LEFT JOIN p.pedido pe
+        LEFT JOIN p.conta c
+        LEFT JOIN c.pedidos cp
         WHERE
-            pe.numeroPedido = :numeroPedido
-            AND p.conta.pago = true
+            (pe.numeroPedido = :numeroPedido OR cp.numeroPedido = :numeroPedido)
+            AND p.dataHora >= :dataLimite
         ORDER BY p.dataHora DESC
         """)
     List<PagamentoPesquisaDTO> pesquisarPorPedido(
-            @Param("numeroPedido") String numeroPedido
+            @Param("numeroPedido") String numeroPedido,
+            @Param("dataLimite") LocalDateTime dataLimite
     );
 
     @Query("""

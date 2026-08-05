@@ -13,7 +13,6 @@ import com.paullomaggio.estevaoLanches.enums.StatusCaixa;
 import com.paullomaggio.estevaoLanches.enums.StatusFinanceiro;
 import com.paullomaggio.estevaoLanches.enums.StatusPagamento;
 import com.paullomaggio.estevaoLanches.enums.StatusPedido;
-import com.paullomaggio.estevaoLanches.enums.TipoPesquisaPagamento;
 import com.paullomaggio.estevaoLanches.exceptions.BusinessRuleException;
 import com.paullomaggio.estevaoLanches.exceptions.ResourceNotFoundException;
 import com.paullomaggio.estevaoLanches.repositories.CaixaRepository;
@@ -320,29 +319,12 @@ public class PagamentoService {
 
     @Transactional(readOnly = true)
     public List<PagamentoPesquisaDTO> pesquisarPagamentos(PagamentoPesquisaRequestDTO filtro) {
-        TipoPesquisaPagamento tipo = determinarTipoPesquisa(filtro);
-        return switch (tipo) {
-            case CLIENTE -> pagamentoRepository.pesquisarPorCliente(
-                    filtro.getNomeCliente()
-            );
-            case MESA -> pagamentoRepository.pesquisarPorMesa(
-                    filtro.getNumeroMesa()
-            );
-            case PEDIDO -> pagamentoRepository.pesquisarPorPedido(
-                    filtro.getNumeroPedido()
-            );
-        };
-    }
-
-    private TipoPesquisaPagamento determinarTipoPesquisa(PagamentoPesquisaRequestDTO filtro) {
-        if (filtro.getClienteId() != null || filtro.getNomeCliente() != null) {
-            return TipoPesquisaPagamento.CLIENTE;
-        }
-        if (filtro.getMesaId() != null || filtro.getNumeroMesa() != null) {
-            return TipoPesquisaPagamento.MESA;
+        LocalDateTime dataLimite = LocalDateTime.now().minusDays(30);
+        if (filtro.getNumeroMesa() != null) {
+            return pagamentoRepository.pesquisarPorMesa(filtro.getNumeroMesa(), dataLimite);
         }
         if (filtro.getNumeroPedido() != null && !filtro.getNumeroPedido().isBlank()) {
-            return TipoPesquisaPagamento.PEDIDO;
+            return pagamentoRepository.pesquisarPorPedido(filtro.getNumeroPedido(), dataLimite);
         }
         throw new IllegalArgumentException("Tipo de pesquisa inválido.");
     }
