@@ -13,6 +13,7 @@ import com.paullomaggio.estevaoLanches.enums.StatusCaixa;
 import com.paullomaggio.estevaoLanches.enums.StatusFinanceiro;
 import com.paullomaggio.estevaoLanches.enums.StatusPagamento;
 import com.paullomaggio.estevaoLanches.enums.StatusPedido;
+import com.paullomaggio.estevaoLanches.enums.TipoPesquisaPagamento;
 import com.paullomaggio.estevaoLanches.exceptions.BusinessRuleException;
 import com.paullomaggio.estevaoLanches.exceptions.ResourceNotFoundException;
 import com.paullomaggio.estevaoLanches.repositories.CaixaRepository;
@@ -319,21 +320,31 @@ public class PagamentoService {
 
     @Transactional(readOnly = true)
     public List<PagamentoPesquisaDTO> pesquisarPagamentos(PagamentoPesquisaRequestDTO filtro) {
-        return pagamentoRepository.pesquisarPagamentos(
-                filtro.getClienteId(),
-                filtro.getMesaId(),
-                filtro.getPedidoId(),
-                filtro.getFormaPagamento(),
-                filtro.getStatusPagamento(),
-                filtro.getDataInicial(),
-                filtro.getDataFinal(),
-                filtro.getCaixaId(),
-                filtro.getContaId(),
-                filtro.getNumeroMesa(),
-                filtro.getNomeCliente(),
-                filtro.getValorMinimo(),
-                filtro.getValorMaximo()
-        );
+        TipoPesquisaPagamento tipo = determinarTipoPesquisa(filtro);
+        return switch (tipo) {
+            case CLIENTE -> pagamentoRepository.pesquisarPorCliente(
+                    filtro.getNomeCliente()
+            );
+            case MESA -> pagamentoRepository.pesquisarPorMesa(
+                    filtro.getNumeroMesa()
+            );
+            case PEDIDO -> pagamentoRepository.pesquisarPorPedido(
+                    filtro.getNumeroPedido()
+            );
+        };
+    }
+
+    private TipoPesquisaPagamento determinarTipoPesquisa(PagamentoPesquisaRequestDTO filtro) {
+        if (filtro.getClienteId() != null || filtro.getNomeCliente() != null) {
+            return TipoPesquisaPagamento.CLIENTE;
+        }
+        if (filtro.getMesaId() != null || filtro.getNumeroMesa() != null) {
+            return TipoPesquisaPagamento.MESA;
+        }
+        if (filtro.getNumeroPedido() != null && !filtro.getNumeroPedido().isBlank()) {
+            return TipoPesquisaPagamento.PEDIDO;
+        }
+        throw new IllegalArgumentException("Tipo de pesquisa inválido.");
     }
 
     private String obterUsuarioResponsavelAtual() {

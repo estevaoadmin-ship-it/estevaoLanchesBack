@@ -1024,23 +1024,25 @@ class PagamentoServiceTest {
         @Test
         @DisplayName("CT-PESQ-001: Deve retornar lista vazia quando não há resultados")
         void deveRetornarListaVaziaQuandoNaoHáResultados() {
-            when(pagamentoRepository.pesquisarPagamentos(null, null, null, null, null, null, null, null, null, null, null, null, null))
+            when(pagamentoRepository.pesquisarPorPedido("ABC12"))
                     .thenReturn(Collections.emptyList());
 
             PagamentoPesquisaRequestDTO filtro = new PagamentoPesquisaRequestDTO();
+            filtro.setNumeroPedido("ABC12");
             List<PagamentoPesquisaDTO> resultado = pagamentoService.pesquisarPagamentos(filtro);
 
             assertThat(resultado).isEmpty();
-            verify(pagamentoRepository, times(1)).pesquisarPagamentos(null, null, null, null, null, null, null, null, null, null, null, null, null);
+            verify(pagamentoRepository, times(1)).pesquisarPorPedido("ABC12");
         }
 
         @Test
         @DisplayName("CT-PESQ-002: Deve retornar lista de pagamentos com saldo estornavel calculado")
         void deveRetornarListaDePagamentosComSaldoEstornavel() {
-            when(pagamentoRepository.pesquisarPagamentos(null, null, null, null, null, null, null, null, null, null, null, null, null))
+            when(pagamentoRepository.pesquisarPorPedido("ABC12"))
                     .thenReturn(List.of(new PagamentoPesquisaDTO(pagamentoMock, new BigDecimal("50.00"))));
 
             PagamentoPesquisaRequestDTO filtro = new PagamentoPesquisaRequestDTO();
+            filtro.setNumeroPedido("ABC12");
             List<PagamentoPesquisaDTO> resultado = pagamentoService.pesquisarPagamentos(filtro);
 
             assertThat(resultado).hasSize(1);
@@ -1059,25 +1061,36 @@ class PagamentoServiceTest {
         }
 
         @Test
-        @DisplayName("CT-PESQ-003: Deve passar todos os filtros para o repository")
-        void devePassarTodosOsFiltrosParaRepository() {
-            when(pagamentoRepository.pesquisarPagamentos(clienteId, mesaId, pedidoId, FormaPagamento.PIX, StatusPagamento.PAGO, null, null, null, null, null, null, null, null))
+        @DisplayName("CT-PESQ-003: Deve direcionar para pesquisarPorCliente quando clienteId é informado")
+        void deveDirecionarParaPesquisarPorClienteQuandoClienteIdInformado() {
+            when(pagamentoRepository.pesquisarPorCliente(null))
                     .thenReturn(List.of(new PagamentoPesquisaDTO(pagamentoMock, new BigDecimal("50.00"))));
 
             PagamentoPesquisaRequestDTO filtro = new PagamentoPesquisaRequestDTO();
             filtro.setClienteId(clienteId);
-            filtro.setMesaId(mesaId);
-            filtro.setPedidoId(pedidoId);
             filtro.setFormaPagamento(FormaPagamento.PIX);
-            filtro.setStatusPagamento(StatusPagamento.PAGO);
 
             List<PagamentoPesquisaDTO> resultado = pagamentoService.pesquisarPagamentos(filtro);
 
             assertThat(resultado).hasSize(1);
-            verify(pagamentoRepository, times(1)).pesquisarPagamentos(
-                    clienteId, mesaId, pedidoId, FormaPagamento.PIX, StatusPagamento.PAGO,
-                    null, null, null, null, null, null, null, null
-            );
+            verify(pagamentoRepository, times(1)).pesquisarPorCliente(null);
+        }
+
+        @Test
+        @DisplayName("CT-PESQ-004: Deve direcionar para pesquisarPorMesa quando mesaId é informado")
+        void deveDirecionarParaPesquisarPorMesaQuandoMesaIdInformado() {
+            when(pagamentoRepository.pesquisarPorMesa(5))
+                    .thenReturn(List.of(new PagamentoPesquisaDTO(pagamentoMock, new BigDecimal("50.00"))));
+
+            PagamentoPesquisaRequestDTO filtro = new PagamentoPesquisaRequestDTO();
+            filtro.setMesaId(mesaId);
+            filtro.setNumeroMesa(5);
+            filtro.setFormaPagamento(FormaPagamento.PIX);
+
+            List<PagamentoPesquisaDTO> resultado = pagamentoService.pesquisarPagamentos(filtro);
+
+            assertThat(resultado).hasSize(1);
+            verify(pagamentoRepository, times(1)).pesquisarPorMesa(5);
         }
 
         @Test
@@ -1087,10 +1100,11 @@ class PagamentoServiceTest {
             contaMock.setNomeResponsavel("MESA 5 - CONTA 1");
             pagamentoMock.setConta(contaMock);
 
-            when(pagamentoRepository.pesquisarPagamentos(null, null, null, null, null, null, null, null, null, null, null, null, null))
+            when(pagamentoRepository.pesquisarPorPedido("ABC12"))
                     .thenReturn(List.of(new PagamentoPesquisaDTO(pagamentoMock, new BigDecimal("50.00"))));
 
             PagamentoPesquisaRequestDTO filtro = new PagamentoPesquisaRequestDTO();
+            filtro.setNumeroPedido("ABC12");
             List<PagamentoPesquisaDTO> resultado = pagamentoService.pesquisarPagamentos(filtro);
 
             assertThat(resultado).hasSize(1);
@@ -1103,10 +1117,11 @@ class PagamentoServiceTest {
             contaMock.setPago(false);
             pagamentoMock.setConta(contaMock);
 
-            when(pagamentoRepository.pesquisarPagamentos(null, null, null, null, null, null, null, null, null, null, null, null, null))
+            when(pagamentoRepository.pesquisarPorPedido("ABC12"))
                     .thenReturn(List.of(new PagamentoPesquisaDTO(pagamentoMock, new BigDecimal("50.00"))));
 
             PagamentoPesquisaRequestDTO filtro = new PagamentoPesquisaRequestDTO();
+            filtro.setNumeroPedido("ABC12");
             List<PagamentoPesquisaDTO> resultado = pagamentoService.pesquisarPagamentos(filtro);
 
             assertThat(resultado).hasSize(1);
@@ -1119,10 +1134,11 @@ class PagamentoServiceTest {
             contaMock.setPago(true);
             pagamentoMock.setConta(contaMock);
 
-            when(pagamentoRepository.pesquisarPagamentos(null, null, null, null, null, null, null, null, null, null, null, null, null))
+            when(pagamentoRepository.pesquisarPorPedido("ABC12"))
                     .thenReturn(List.of(new PagamentoPesquisaDTO(pagamentoMock, new BigDecimal("50.00"))));
 
             PagamentoPesquisaRequestDTO filtro = new PagamentoPesquisaRequestDTO();
+            filtro.setNumeroPedido("ABC12");
             List<PagamentoPesquisaDTO> resultado = pagamentoService.pesquisarPagamentos(filtro);
 
             assertThat(resultado).hasSize(1);
@@ -1134,10 +1150,11 @@ class PagamentoServiceTest {
         void deveRetornarStatusPagoQuandoPagamentoNaoTemConta() {
             pagamentoMock.setConta(null);
 
-            when(pagamentoRepository.pesquisarPagamentos(null, null, null, null, null, null, null, null, null, null, null, null, null))
+            when(pagamentoRepository.pesquisarPorPedido("ABC12"))
                     .thenReturn(List.of(new PagamentoPesquisaDTO(pagamentoMock, new BigDecimal("50.00"))));
 
             PagamentoPesquisaRequestDTO filtro = new PagamentoPesquisaRequestDTO();
+            filtro.setNumeroPedido("ABC12");
             List<PagamentoPesquisaDTO> resultado = pagamentoService.pesquisarPagamentos(filtro);
 
             assertThat(resultado).hasSize(1);
@@ -1147,10 +1164,11 @@ class PagamentoServiceTest {
         @Test
         @DisplayName("CT-PESQ-009: Deve calcular saldoEstornavel como valorPago menos totalEstornado")
         void deveCalcularSaldoEstornavelCorretamente() {
-            when(pagamentoRepository.pesquisarPagamentos(null, null, null, null, null, null, null, null, null, null, null, null, null))
+            when(pagamentoRepository.pesquisarPorPedido("ABC12"))
                     .thenReturn(List.of(new PagamentoPesquisaDTO(pagamentoMock, new BigDecimal("30.00"))));
 
             PagamentoPesquisaRequestDTO filtro = new PagamentoPesquisaRequestDTO();
+            filtro.setNumeroPedido("ABC12");
             List<PagamentoPesquisaDTO> resultado = pagamentoService.pesquisarPagamentos(filtro);
 
             assertThat(resultado).hasSize(1);
@@ -1162,10 +1180,11 @@ class PagamentoServiceTest {
         void deveRetornarDTOSemNumeroMesaQuandoPagamentoNaoTemPedido() {
             pagamentoMock.setPedido(null);
 
-            when(pagamentoRepository.pesquisarPagamentos(null, null, null, null, null, null, null, null, null, null, null, null, null))
+            when(pagamentoRepository.pesquisarPorPedido("ABC12"))
                     .thenReturn(List.of(new PagamentoPesquisaDTO(pagamentoMock, new BigDecimal("50.00"))));
 
             PagamentoPesquisaRequestDTO filtro = new PagamentoPesquisaRequestDTO();
+            filtro.setNumeroPedido("ABC12");
             List<PagamentoPesquisaDTO> resultado = pagamentoService.pesquisarPagamentos(filtro);
 
             assertThat(resultado).hasSize(1);

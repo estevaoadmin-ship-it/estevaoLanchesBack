@@ -49,6 +49,9 @@ public class PagamentoPesquisaRequestDTO {
     @Schema(description = "Termo de busca no nome do cliente", example = "Silva")
     private String nomeCliente;
 
+    @Schema(description = "Número do pedido para filtro", example = "ABC12")
+    private String numeroPedido;
+
     @Schema(description = "Valor mínimo para filtro", example = "10.00")
     private BigDecimal valorMinimo;
 

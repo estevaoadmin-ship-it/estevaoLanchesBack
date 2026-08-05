@@ -7,7 +7,7 @@ import com.paullomaggio.estevaoLanches.dtos.PagamentoPesquisaRequestDTO;
 import com.paullomaggio.estevaoLanches.dtos.PagamentoRequestDTO;
 import com.paullomaggio.estevaoLanches.dtos.PagamentoResponseDTO;
 import com.paullomaggio.estevaoLanches.enums.FormaPagamento;
-import com.paullomaggio.estevaoLanches.enums.StatusPagamento;
+import com.paullomaggio.estevaoLanches.enums.TipoPesquisaPagamento;
 import com.paullomaggio.estevaoLanches.services.EstornoPagamentoService;
 import com.paullomaggio.estevaoLanches.services.PagamentoService;
 import io.swagger.v3.oas.annotations.Operation;
@@ -128,8 +128,8 @@ public class PagamentoController {
     }
 
     @Operation(summary = "Pesquisa de pagamentos para a tela de Estornos",
-            description = "Retorna uma lista de pagamentos com filtros opcionais para uso na tela de estornos. " +
-                    "Todos os filtros são opcionais e a pesquisa retorna todos os registros quando nenhum filtro é fornecido.")
+            description = "Retorna uma lista de pagamentos com filtros por termo e tipo de pesquisa. " +
+                    "Os parâmetros termo e tipo são opcionais. Quando nenhum filtro é fornecido, retorna todos os registros.")
     @ApiResponses(value = {
             @ApiResponse(responseCode = "200", description = "Lista de pagamentos pesquisada com sucesso"),
             @ApiResponse(responseCode = "401", description = "Não autenticado"),
@@ -137,34 +137,24 @@ public class PagamentoController {
     })
     @GetMapping("/pesquisa")
     public ResponseEntity<List<PagamentoPesquisaDTO>> pesquisarPagamentos(
-            @RequestParam(required = false) UUID clienteId,
-            @RequestParam(required = false) UUID mesaId,
-            @RequestParam(required = false) UUID pedidoId,
-            @RequestParam(required = false) FormaPagamento formaPagamento,
-            @RequestParam(required = false) StatusPagamento statusPagamento,
-            @RequestParam(required = false) LocalDateTime dataInicial,
-            @RequestParam(required = false) LocalDateTime dataFinal,
-            @RequestParam(required = false) UUID caixaId,
-            @RequestParam(required = false) UUID contaId,
-            @RequestParam(required = false) Integer numeroMesa,
-            @RequestParam(required = false) String nomeCliente,
-            @RequestParam(required = false) BigDecimal valorMinimo,
-            @RequestParam(required = false) BigDecimal valorMaximo
+            @RequestParam(required = false) String termo,
+            @RequestParam(required = false) TipoPesquisaPagamento tipo
     ) {
         PagamentoPesquisaRequestDTO filtro = new PagamentoPesquisaRequestDTO();
-        filtro.setClienteId(clienteId);
-        filtro.setMesaId(mesaId);
-        filtro.setPedidoId(pedidoId);
-        filtro.setFormaPagamento(formaPagamento);
-        filtro.setStatusPagamento(statusPagamento);
-        filtro.setDataInicial(dataInicial);
-        filtro.setDataFinal(dataFinal);
-        filtro.setCaixaId(caixaId);
-        filtro.setContaId(contaId);
-        filtro.setNumeroMesa(numeroMesa);
-        filtro.setNomeCliente(nomeCliente);
-        filtro.setValorMinimo(valorMinimo);
-        filtro.setValorMaximo(valorMaximo);
+
+        if (termo != null && tipo != null) {
+            switch (tipo) {
+                case CLIENTE -> filtro.setNomeCliente(termo);
+                case MESA -> {
+                    try {
+                        filtro.setNumeroMesa(Integer.parseInt(termo));
+                    } catch (NumberFormatException e) {
+                        // termo não numérico para MESA — não preencher nenhum filtro
+                    }
+                }
+                case PEDIDO -> filtro.setNumeroPedido(termo);
+            }
+        }
 
         List<PagamentoPesquisaDTO> resultado = pagamentoService.pesquisarPagamentos(filtro);
         return ResponseEntity.ok(resultado);
