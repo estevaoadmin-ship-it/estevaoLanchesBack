@@ -71,7 +71,12 @@ public interface PagamentoRepository extends JpaRepository<Pagamento, UUID> {
         LEFT JOIN c.comanda cm
         LEFT JOIN cm.mesa m
         WHERE
-            c.pago = true
+            (COALESCE(p.valorPago, 0) - COALESCE(
+                (SELECT COALESCE(SUM(e.valorEstornado), 0)
+                 FROM EstornoPagamento e
+                 WHERE e.pagamento.id = p.id),
+                0
+            )) > 0
             AND m.numero = :numeroMesa
             AND p.dataHora >= :dataLimite
         ORDER BY p.dataHora DESC
