@@ -6,6 +6,7 @@ import com.paullomaggio.estevaoLanches.entities.Caixa;
 import com.paullomaggio.estevaoLanches.entities.Conta;
 import com.paullomaggio.estevaoLanches.entities.EstornoPagamento;
 import com.paullomaggio.estevaoLanches.entities.Pagamento;
+import com.paullomaggio.estevaoLanches.entities.Pedido;
 import com.paullomaggio.estevaoLanches.enums.StatusCaixa;
 import com.paullomaggio.estevaoLanches.enums.StatusFinanceiro;
 import com.paullomaggio.estevaoLanches.exceptions.BusinessRuleException;
@@ -129,6 +130,29 @@ public class EstornoPagamentoService {
                 // Não alterar Pedido.status, Pedido.formaPagamento, Pedido.valorRecebido
             }
             // Para estorno parcial, não alterar StatusFinanceiro.PAGO
+        }
+        // REGRA PARA CONTA (MESA)
+        else if (pagamento.getConta() != null) {
+            if (saldoLiquidoPagamento.compareTo(BigDecimal.ZERO) == 0) {
+                // Estorno total - sincronizar todos os pedidos da conta
+                for (Pedido pedido : pagamento.getConta().getPedidos()) {
+                    log.info("[FORENSE-SUBCONTA] Classe: {}, Método: {}, Ação: setStatusFinanceiro, Pedido: {}, Conta: {}, statusAnterior: {}, statusNovo: {}, valorEstornado: {}, saldoLiquidoPagamento: {}, thread: {}, transactionAtiva: {}, stacktrace: {}",
+                            getClass().getSimpleName(),
+                            "estornar",
+                            pedido.getId(),
+                            pagamento.getConta().getId(),
+                            pedido.getStatusFinanceiro(),
+                            StatusFinanceiro.ESTORNADO,
+                            dto.valorEstornado(),
+                            saldoLiquidoPagamento,
+                            Thread.currentThread().getName(),
+                            org.springframework.transaction.support.TransactionSynchronizationManager.isActualTransactionActive(),
+                            stacktraceResumido());
+                    pedido.setStatusFinanceiro(StatusFinanceiro.ESTORNADO);
+                    // Não alterar Pedido.status, Pedido.formaPagamento, Pedido.valorRecebido
+                }
+            }
+            // Para estorno parcial, não alterar StatusFinanceiro.PAGO dos pedidos da conta
         }
 
         // REGRA PARA CONTA
