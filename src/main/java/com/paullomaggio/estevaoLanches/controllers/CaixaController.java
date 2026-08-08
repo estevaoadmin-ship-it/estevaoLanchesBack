@@ -13,9 +13,11 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
 import java.math.BigDecimal;
+import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
+import java.time.LocalDateTime;
 
 @RestController
 @RequestMapping("/api/caixas")
@@ -168,7 +170,7 @@ public class CaixaController {
     }
 
     @Operation(summary = "Registra um pagamento fracionado para um pedido",
-               description = "Permite registrar um pagamento parcial para um pedido, associado a uma conta fracionada.")
+                description = "Permite registrar um pagamento parcial para um pedido, associado a uma conta fracionada.")
     @ApiResponses(value = {
             @ApiResponse(responseCode = "200", description = "Pagamento fracionado processado com sucesso"),
             @ApiResponse(responseCode = "400", description = "Dados de pagamento inválidos"),
@@ -182,5 +184,20 @@ public class CaixaController {
             @RequestBody @Valid ContaPagamentoRequestDTO dto) {
         caixaService.registrarPagamentoFracionado(pedidoId, dto);
         return ResponseEntity.ok(Map.of("message", "Pagamento processado com sucesso!"));
+    }
+
+    @Operation(summary = "Consulta o histórico de caixas",
+                description = "Retorna uma lista de turnos de caixa, filtrados por período, ordenados do mais recente para o mais antigo.")
+    @ApiResponses(value = {
+            @ApiResponse(responseCode = "200", description = "Histórico de caixas retornado com sucesso"),
+            @ApiResponse(responseCode = "401", description = "Não autenticado"),
+            @ApiResponse(responseCode = "403", description = "Sem permissão (apenas ADMIN ou GARCOM)")
+    })
+    @GetMapping("/historico")
+    public ResponseEntity<List<CaixaHistoricoResponseDTO>> obterHistorico(
+            @RequestParam(required = false) LocalDateTime dataInicial,
+            @RequestParam(required = false) LocalDateTime dataFinal) {
+        List<CaixaHistoricoResponseDTO> historico = caixaService.obterHistorico(dataInicial, dataFinal);
+        return ResponseEntity.ok(historico);
     }
 }

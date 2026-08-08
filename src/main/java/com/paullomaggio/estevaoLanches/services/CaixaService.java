@@ -204,8 +204,48 @@ public class CaixaService {
         Caixa caixaAtivo = caixaRepository.findByStatus(StatusCaixa.ABERTO)
                 .orElseThrow(() -> new BusinessRuleException("Não há nenhum turno de caixa ativo aberto no momento."));
 
-        List<Pagamento> pagamentosDoCaixa = pagamentoRepository.findByCaixaId(caixaAtivo.getId());
-        List<EstornoPagamento> estornosDoCaixa = estornoPagamentoRepository.findByCaixaId(caixaAtivo.getId());
+        ResultadoFinanceiroCaixa resultado = calcularResumoFinanceiro(caixaAtivo);
+        long pedidosEmEsteira =
+                pedidoRepository.countPedidosAtivos(
+                        StatusPedido.FINALIZADO,
+                        StatusPedido.CANCELADO
+                );
+        return new CaixaResumoResponseDTO(
+                resultado.faturamentoTotal(),
+                resultado.faturamentoDinheiro(),
+                resultado.faturamentoPix(),
+                resultado.faturamentoCredito(),
+                resultado.faturamentoDebito(),
+                resultado.saldoEsperado(), // This maps to totalEsperadoGaveta in the DTO
+                pedidosEmEsteira
+        );
+    }
+
+    /**
+     * Resultado financeiro compartilhado entre resumo e histórico
+     */
+    private record ResultadoFinanceiroCaixa(
+            BigDecimal faturamentoTotal,
+            BigDecimal faturamentoDinheiro,
+            BigDecimal faturamentoPix,
+            BigDecimal faturamentoCredito,
+            BigDecimal faturamentoDebito,
+            BigDecimal totalSangrias,
+            long quantidadeSangrias,
+            BigDecimal totalSuprimentos,
+            long quantidadeSuprimentos,
+            BigDecimal saldoEsperado,
+            BigDecimal diferencaCaixa
+    ) {}
+
+    /**
+     * Calcula os dados financeiros de um caixa específico
+     * @param caixa O caixa para o qual calcular os dados financeiros
+     * @return ResultadoFinanceiroCaixa com os dados financeiros calculados
+     */
+    private ResultadoFinanceiroCaixa calcularResumoFinanceiro(Caixa caixa) {
+        List<Pagamento> pagamentosDoCaixa = pagamentoRepository.findByCaixaId(caixa.getId());
+        List<EstornoPagamento> estornosDoCaixa = estornoPagamentoRepository.findByCaixaId(caixa.getId());
 
         BigDecimal faturamentoTotal = BigDecimal.ZERO;
         BigDecimal faturamentoDinheiro = BigDecimal.ZERO;
@@ -233,15 +273,95 @@ public class CaixaService {
             }
         }
 
-        List<MovimentacaoCaixa> todasMovimentacoes = movimentacaoCaixaRepository.findByCaixaIdAndEstornadaFalse(caixaAtivo.getId());
+        List<MovimentacaoCaixa> todasMovimentacoes = movimentacaoCaixaRepository.findByCaixaIdAndEstornadaFalse(caixa.getId());
         BigDecimal suprimentos = todasMovimentacoes.stream().filter(m -> m.getTipo() == TipoMovimentacao.SUPRIMENTO).map(MovimentacaoCaixa::getValor).reduce(BigDecimal.ZERO, BigDecimal::add);
         BigDecimal sangrias = todasMovimentacoes.stream().filter(m -> m.getTipo() == TipoMovimentacao.SANGRIA).map(MovimentacaoCaixa::getValor).reduce(BigDecimal.ZERO, BigDecimal::add);
 
-        BigDecimal totalEsperadoGaveta = caixaAtivo.getValorAbertura().add(faturamentoDinheiro).add(suprimentos).subtract(sangrias);
+        BigDecimal totalEsperadoGaveta = caixa.getValorAbertura().add(faturamentoDinheiro).add(suprimentos).subtract(sangrias);
+        
+        // Calcular diferença de caixa apenas se houver valor de fechamento
+        BigDecimal diferencaCaixa = null;
+        if (caixa.getValorFechamento() != null) {
+            diferencaCaixa = caixa.getValorFechamento().subtract(totalEsperadoGaveta);
+        }
 
-        long pedidosEmEsteira = pedidoRepository.countPedidosAtivos(StatusPedido.FINALIZADO, StatusPedido.CANCELADO);
+        // Count non-voided movements properly
+        long quantidadeSangrias = 0;
+        long quantidadeSuprimentos = 0;
+        
+        for (MovimentacaoCaixa mov : todasMovimentacoes) {
+            if (mov.getTipo() == TipoMovimentacao.SANGRIA) {
+                quantidadeSangrias++;
+            } else if (mov.getTipo() == TipoMovimentacao.SUPRIMENTO) {
+                quantidadeSuprimentos++;
+            }
+        }
 
-        return new CaixaResumoResponseDTO(faturamentoTotal, faturamentoDinheiro, faturamentoPix, faturamentoCredito, faturamentoDebito, totalEsperadoGaveta, pedidosEmEsteira);
+        return new ResultadoFinanceiroCaixa(
+                faturamentoTotal,
+                faturamentoDinheiro,
+                faturamentoPix,
+                faturamentoCredito,
+                faturamentoDebito,
+                sangrias,
+                quantidadeSangrias,
+                suprimentos,
+                quantidadeSuprimentos,
+                totalEsperadoGaveta,
+                diferencaCaixa
+        );
+    }
+
+    @Transactional(readOnly = true)
+    public List<CaixaHistoricoResponseDTO> obterHistorico(LocalDateTime dataInicial, LocalDateTime dataFinal) {
+        List<Caixa> caixas;
+        
+        if (dataInicial == null && dataFinal == null) {
+            caixas = caixaRepository.findByStatusOrderByDataHoraAberturaDesc(StatusCaixa.FECHADO);
+        } else if (dataInicial != null && dataFinal == null) {
+            caixas = caixaRepository.findByDataHoraAberturaGreaterThanEqualOrderByDataHoraAberturaDesc(dataInicial);
+            // Filter to only closed caixas
+            caixas = caixas.stream().filter(c -> c.getStatus() == StatusCaixa.FECHADO).toList();
+        } else if (dataInicial == null && dataFinal != null) {
+            caixas = caixaRepository.findByDataHoraAberturaLessThanEqualOrderByDataHoraAberturaDesc(dataFinal);
+            // Filter to only closed caixas
+            caixas = caixas.stream().filter(c -> c.getStatus() == StatusCaixa.FECHADO).toList();
+        } else {
+            caixas = caixaRepository.findByDataHoraAberturaBetweenOrderByDataHoraAberturaDesc(dataInicial, dataFinal);
+            // Filter to only closed caixas
+            caixas = caixas.stream().filter(c -> c.getStatus() == StatusCaixa.FECHADO).toList();
+        }
+        
+        return caixas.stream()
+                .map(this::converterParaHistoricoResponse)
+                .toList();
+    }
+
+    private CaixaHistoricoResponseDTO converterParaHistoricoResponse(Caixa caixa) {
+        ResultadoFinanceiroCaixa resultado = calcularResumoFinanceiro(caixa);
+        
+        return new CaixaHistoricoResponseDTO(
+                caixa.getId(),
+                caixa.getStatus(),
+                caixa.getDataHoraAbertura(),
+                caixa.getDataHoraFechamento(),
+                caixa.getUsuarioAbertura() != null ? caixa.getUsuarioAbertura().getNome() : null,
+                caixa.getUsuarioFechamento() != null ? caixa.getUsuarioFechamento().getNome() : null,
+                caixa.getValorAbertura(),
+                caixa.getValorFechamento(),
+                resultado.faturamentoDinheiro(),
+                resultado.faturamentoPix(),
+                resultado.faturamentoCredito(),
+                resultado.faturamentoDebito(),
+                resultado.faturamentoTotal(),
+                resultado.totalSangrias(),
+                resultado.quantidadeSangrias(),
+                resultado.totalSuprimentos(),
+                resultado.quantidadeSuprimentos(),
+                resultado.saldoEsperado(),
+                resultado.diferencaCaixa(),
+                caixa.getJustificativaDiferenca()
+        );
     }
 
     private Caixa obterCaixaAbertoGarantido() {
