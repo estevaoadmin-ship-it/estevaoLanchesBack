@@ -372,6 +372,17 @@ public class CaixaService {
                 .map(m -> new CaixaSangriaItemDTO(m.getValor(), m.getDescricao()))
                 .toList();
         
+        // Obter os suprimentos individuais não estornados
+        List<MovimentacaoCaixa> suprimentosNaoEstornados = movimentacaoCaixaRepository.findByCaixaIdAndEstornadaFalse(caixa.getId())
+                .stream()
+                .filter(m -> m.getTipo() == TipoMovimentacao.SUPRIMENTO)
+                .toList();
+        
+        // Converter para DTOs específicos de suprimento
+        List<CaixaSuprimentoItemDTO> suprimentosDTO = suprimentosNaoEstornados.stream()
+                .map(m -> new CaixaSuprimentoItemDTO(m.getValor(), m.getDescricao()))
+                .toList();
+        
         return new CaixaHistoricoResponseDTO(
                 caixa.getId(),
                 caixa.getStatus(),
@@ -393,7 +404,8 @@ public class CaixaService {
                 resultado.saldoEsperado(),
                 resultado.diferencaCaixa(),
                 caixa.getJustificativaDiferenca(),
-                sangriasDTO
+                sangriasDTO,
+                suprimentosDTO
         );
     }
 

@@ -82,5 +82,8 @@ public record CaixaHistoricoResponseDTO(
         String observacaoFechamento,
 
         @Schema(description = "Lista de sangrias individuais do turno (não estornadas)")
-        List<CaixaSangriaItemDTO> sangrias
+        List<CaixaSangriaItemDTO> sangrias,
+
+        @Schema(description = "Lista de suprimentos individuais do turno (não estornados)")
+        List<CaixaSuprimentoItemDTO> suprimentos
 ) {}
