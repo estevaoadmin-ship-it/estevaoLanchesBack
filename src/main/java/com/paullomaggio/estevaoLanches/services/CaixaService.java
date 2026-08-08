@@ -361,6 +361,17 @@ public class CaixaService {
     private CaixaHistoricoResponseDTO converterParaHistoricoResponse(Caixa caixa) {
         ResultadoFinanceiroCaixa resultado = calcularResumoFinanceiro(caixa);
         
+        // Obter as sangrias individuais não estornadas
+        List<MovimentacaoCaixa> sangriasNaoEstornadas = movimentacaoCaixaRepository.findByCaixaIdAndEstornadaFalse(caixa.getId())
+                .stream()
+                .filter(m -> m.getTipo() == TipoMovimentacao.SANGRIA)
+                .toList();
+        
+        // Converter para DTOs específicos de sangria
+        List<CaixaSangriaItemDTO> sangriasDTO = sangriasNaoEstornadas.stream()
+                .map(m -> new CaixaSangriaItemDTO(m.getValor(), m.getDescricao()))
+                .toList();
+        
         return new CaixaHistoricoResponseDTO(
                 caixa.getId(),
                 caixa.getStatus(),
@@ -381,7 +392,8 @@ public class CaixaService {
                 resultado.quantidadeSuprimentos(),
                 resultado.saldoEsperado(),
                 resultado.diferencaCaixa(),
-                caixa.getJustificativaDiferenca()
+                caixa.getJustificativaDiferenca(),
+                sangriasDTO
         );
     }
 

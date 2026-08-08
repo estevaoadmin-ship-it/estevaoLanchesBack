@@ -5,6 +5,7 @@ import io.swagger.v3.oas.annotations.media.Schema;
 
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
+import java.util.List;
 import java.util.UUID;
 
 /**
@@ -78,5 +79,8 @@ public record CaixaHistoricoResponseDTO(
         BigDecimal diferencaCaixa,
 
         @Schema(description = "Observação / justificativa registrada no fechamento", example = "Diferença de troco")
-        String observacaoFechamento
+        String observacaoFechamento,
+
+        @Schema(description = "Lista de sangrias individuais do turno (não estornadas)")
+        List<CaixaSangriaItemDTO> sangrias
 ) {}
