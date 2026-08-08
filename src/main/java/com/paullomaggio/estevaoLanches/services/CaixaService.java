@@ -90,6 +90,12 @@ public class CaixaService {
     @Transactional
     public void lancarSangria(MovimentacaoRequestDTO dto) {
         Caixa caixaAtivo = obterCaixaAbertoGarantido();
+        
+        // Validar que o valor da sangria não excede o dinheiro físico disponível
+        BigDecimal dinheiroFisicoDisponivel = calcularDinheiroFisicoDisponivel(caixaAtivo);
+        if (dto.valor().compareTo(dinheiroFisicoDisponivel) > 0) {
+            throw new BusinessRuleException("Valor da sangria não pode ser maior que o dinheiro físico disponível no caixa.");
+        }
 
         MovimentacaoCaixa mov = new MovimentacaoCaixa();
         mov.setCaixa(caixaAtivo);
@@ -310,6 +316,21 @@ public class CaixaService {
                 totalEsperadoGaveta,
                 diferencaCaixa
         );
+    }
+
+    /**
+     * Calcula o dinheiro físico disponível no caixa para sangrias
+     * @param caixa O caixa para o qual calcular o dinheiro disponível
+     * @return BigDecimal com o valor disponível para sangria
+     */
+    private BigDecimal calcularDinheiroFisicoDisponivel(Caixa caixa) {
+        ResultadoFinanceiroCaixa resultado = calcularResumoFinanceiro(caixa);
+        
+        // Dinheiro físico disponível = valorAbertura + faturamentoDinheiro + suprimentosNaoEstornados - sangriasNaoEstornadas
+        return caixa.getValorAbertura()
+                .add(resultado.faturamentoDinheiro())
+                .add(resultado.totalSuprimentos())
+                .subtract(resultado.totalSangrias());
     }
 
     @Transactional(readOnly = true)

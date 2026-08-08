@@ -247,6 +247,35 @@ class CaixaServiceTest {
             assertThrows(BusinessRuleException.class, () -> caixaService.lancarSuprimento(dto));
             verify(movimentacaoCaixaRepository, never()).save(any());
         }
+
+        @Test
+        @DisplayName("Sangria: Deve permitir sangria quando valor for menor ou igual ao dinheiro físico disponível")
+        void devePermitirSangriaQuandoValorDentroDoLimite() {
+            MovimentacaoRequestDTO dto = new MovimentacaoRequestDTO(new BigDecimal("50.00"), "Teste sangria");
+            when(caixaRepository.findByStatus(StatusCaixa.ABERTO)).thenReturn(Optional.of(caixaAbertoPadrao));
+            when(movimentacaoCaixaRepository.findByCaixaIdAndEstornadaFalse(caixaAbertoPadrao.getId())).thenReturn(List.of());
+            
+            // Configurar o cálculo do dinheiro físico disponível para retornar 100
+            // O valor de abertura é 150, então 150 >= 50, deve permitir
+            caixaService.lancarSangria(dto);
+            
+            verify(movimentacaoCaixaRepository, times(1)).save(argThat(mov ->
+                    mov.getTipo() == TipoMovimentacao.SANGRIA &&
+                            mov.getValor().compareTo(new BigDecimal("50.00")) == 0 &&
+                            mov.getDescricao().equals("TESTE SANGRIA")
+            ));
+        }
+
+        @Test
+        @DisplayName("Sangria: Deve bloquear sangria quando valor for maior que o dinheiro físico disponível")
+        void deveBloquearSangriaQuandoValorAcimaDoLimite() {
+            MovimentacaoRequestDTO dto = new MovimentacaoRequestDTO(new BigDecimal("200.00"), "Teste sangria");
+            when(caixaRepository.findByStatus(StatusCaixa.ABERTO)).thenReturn(Optional.of(caixaAbertoPadrao));
+            
+            // Deve lançar BusinessRuleException pois 200 > 150 (valor de abertura)
+            assertThrows(BusinessRuleException.class, () -> caixaService.lancarSangria(dto));
+            verify(movimentacaoCaixaRepository, never()).save(any());
+        }
     }
 
     // =========================================================================
