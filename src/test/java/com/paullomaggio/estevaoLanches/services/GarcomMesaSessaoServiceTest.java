@@ -5,6 +5,7 @@ import com.paullomaggio.estevaoLanches.entities.*;
 import com.paullomaggio.estevaoLanches.enums.*;
 import com.paullomaggio.estevaoLanches.exceptions.ResourceNotFoundException;
 import com.paullomaggio.estevaoLanches.repositories.ComandaRepository;
+import com.paullomaggio.estevaoLanches.repositories.ItemComboRepository;
 import com.paullomaggio.estevaoLanches.repositories.MesaRepository;
 import com.paullomaggio.estevaoLanches.services.core.PedidoCoreService;
 import jakarta.persistence.EntityManager; // Adicionado
@@ -44,6 +45,9 @@ class GarcomMesaSessaoServiceTest {
 
     @Mock // Adicionado
     private EntityManager entityManager; // Adicionado
+
+    @Mock
+    private ItemComboRepository itemComboRepository;
 
     @InjectMocks
     private GarcomMesaSessaoService garcomMesaSessaoService;

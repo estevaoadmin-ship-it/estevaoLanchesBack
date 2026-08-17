@@ -15,7 +15,9 @@ import jakarta.persistence.EntityManager;
 import jakarta.persistence.PersistenceContext;
 import java.math.BigDecimal;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
+import java.util.stream.Collectors;
 
 @Service
 @RequiredArgsConstructor
@@ -26,6 +28,7 @@ public class GarcomMesaSessaoService {
     private final ComandaRepository comandaRepository;
     private final ContaRepository contaRepository;
     private final PedidoRepository pedidoRepository;
+    private final ItemComboRepository itemComboRepository;
 
     @PersistenceContext
     private EntityManager entityManager;
@@ -115,11 +118,27 @@ public class GarcomMesaSessaoService {
                 .map(conta -> {
 
                     // Coleta e achata todos os itens de todos os pedidos ativos (não cancelados) da subconta
-                    List<GarcomMesaSessaoResponseDTO.ItemSessaoDTO> itensDTO = conta.getPedidos().stream()
+                    List<ItemPedido> todosItens = conta.getPedidos().stream()
                             .filter(pedido -> pedido.getStatus() != StatusPedido.CANCELADO)
                             .flatMap(pedido -> pedido.getItens().stream())
+                            .toList();
+                    
+                    // Collect all itemPedido IDs for batch fetching of ItemCombo
+                    List<UUID> itemPedidoIds = todosItens.stream()
+                            .map(ItemPedido::getId)
+                            .toList();
+                    
+                    // Fetch all ItemCombo for these itemPedido IDs in a single query
+                    List<ItemCombo> todosItemCombo = itemPedidoIds.isEmpty()
+                            ? List.of()
+                            : itemComboRepository.findByItemPedidoIdIn(itemPedidoIds);
+                    
+                    // Group ItemCombo by itemPedidoId for efficient lookup
+                    Map<UUID, List<ItemCombo>> itemComboPorItemPedido = todosItemCombo.stream()
+                            .collect(Collectors.groupingBy(itemCombo -> itemCombo.getItemPedido().getId()));
+                    
+                    List<GarcomMesaSessaoResponseDTO.ItemSessaoDTO> itensDTO = todosItens.stream()
                             .map(item -> {
-
                                 // Mapeia os adicionais do item
                                 List<GarcomMesaSessaoResponseDTO.AdicionalDTO> adicionaisDTO = item.getAdicionais().stream()
                                         .map(a -> new GarcomMesaSessaoResponseDTO.AdicionalDTO(a.getId(), a.getNome(), a.getPreco()))
@@ -129,6 +148,14 @@ public class GarcomMesaSessaoService {
                                 BigDecimal valorUnitarioBase = item.getProduto().getPreco();
                                 // O valor total calculado do item (quantidade * precoUnitario acumulado com adicionais)
                                 BigDecimal valorTotalItem = item.getPrecoUnitario().multiply(BigDecimal.valueOf(item.getQuantidade()));
+
+                                // Get ItemCombo for this specific itemPedido
+                                List<ItemCombo> itemComboParaEsteItem = itemComboPorItemPedido.getOrDefault(item.getId(), List.of());
+                                
+                                // Convert ItemCombo entities to DTOs
+                                List<ItemComboResponseDTO> itensComboDTO = itemComboParaEsteItem.stream()
+                                        .map(ItemComboResponseDTO::new)
+                                        .toList();
 
                                 return new GarcomMesaSessaoResponseDTO.ItemSessaoDTO(
                                         item.getId(),
@@ -145,7 +172,8 @@ public class GarcomMesaSessaoService {
                                         item.getObservacaoItem(),
                                         item.getProduto().getPrecisaPreparo(),
                                         true,
-                                        adicionaisDTO
+                                        adicionaisDTO,
+                                        itensComboDTO // NEW: Add the historical ItemCombo data
                                 );
                             }).toList();
 

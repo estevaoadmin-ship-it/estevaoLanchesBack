@@ -49,7 +49,8 @@ public record GarcomMesaSessaoResponseDTO(
             String observacao,
             Boolean precisaPreparo,
             Boolean enviado,
-            List<AdicionalDTO> adicionais
+            List<AdicionalDTO> adicionais,
+            List<ItemComboResponseDTO> itensCombo
     ) {}
 
     public record AdicionalDTO(
