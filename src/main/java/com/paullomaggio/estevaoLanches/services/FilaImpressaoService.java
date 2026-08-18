@@ -1,30 +1,88 @@
 package com.paullomaggio.estevaoLanches.services;
 
+import com.paullomaggio.estevaoLanches.dtos.FilaImpressaoDTO;
+import com.paullomaggio.estevaoLanches.dtos.ItemComboResponseDTO;
+import com.paullomaggio.estevaoLanches.dtos.ItemPedidoResponseDTO;
+import com.paullomaggio.estevaoLanches.dtos.PedidoResponseDTO;
 import com.paullomaggio.estevaoLanches.entities.FilaImpressao;
 import com.paullomaggio.estevaoLanches.entities.FilaImpressao.StatusImpressao;
+import com.paullomaggio.estevaoLanches.entities.ItemCombo;
+import com.paullomaggio.estevaoLanches.entities.ItemPedido;
 import com.paullomaggio.estevaoLanches.exceptions.BusinessRuleException;
 import com.paullomaggio.estevaoLanches.repositories.FilaImpressaoRepository;
+import com.paullomaggio.estevaoLanches.repositories.ItemComboRepository;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
 import java.util.List;
+import java.util.Map;
 import java.util.NoSuchElementException;
 import java.util.UUID;
+import java.util.stream.Collectors;
 
 @Service
 public class FilaImpressaoService {
 
     private final FilaImpressaoRepository repository;
+    private final ItemComboRepository itemComboRepository;
 
-    public FilaImpressaoService(FilaImpressaoRepository repository) {
+    public FilaImpressaoService(FilaImpressaoRepository repository, ItemComboRepository itemComboRepository) {
         this.repository = repository;
+        this.itemComboRepository = itemComboRepository;
     }
 
     @Transactional(readOnly = true)
-    public List<FilaImpressao> buscarPendentes() {
-        return repository.findByStatus(StatusImpressao.PENDENTE);
+    public List<FilaImpressaoDTO> buscarPendentes() {
+        // Busca os itens pendentes com pedido e itens já fetchados devido ao JOIN FETCH no repository
+        List<FilaImpressao> filaImpressaoList = repository.findByStatus(StatusImpressao.PENDENTE);
+        
+        if (filaImpressaoList.isEmpty()) {
+            return List.of();
+        }
+        
+        // Coleta todos os IDs de ItemPedido de todos os itens de todos os pedidos
+        List<UUID> itemPedidoIds = filaImpressaoList.stream()
+                .flatMap(fila -> fila.getPedido().getItens().stream())
+                .map(ItemPedido::getId)
+                .distinct()
+                .collect(Collectors.toList());
+        
+        // Busca todos os ItemCombo para esses IDs em uma única query (evita N+1)
+        Map<UUID, List<ItemCombo>> itemComboPorItemPedidoId;
+        if (!itemPedidoIds.isEmpty()) {
+            List<ItemCombo> todosItemCombo = itemComboRepository.findByItemPedidoIdIn(itemPedidoIds);
+            itemComboPorItemPedidoId = todosItemCombo.stream()
+                    .collect(Collectors.groupingBy(itemCombo -> itemCombo.getItemPedido().getId()));
+        } else {
+            itemComboPorItemPedidoId = Map.of();
+        }
+        
+        // Converte cada FilaImpressao para FilaImpressaoDTO com dados enriquecidos
+        return filaImpressaoList.stream()
+                .map(filaImpressao -> {
+                    // Enriquece os ItemPedido do pedido com seus ItemCombo
+                    List<ItemPedidoResponseDTO> itensEnriquecidos = filaImpressao.getPedido().getItens().stream()
+                            .map(itemPedido -> {
+                                List<ItemCombo> itemCombos = itemComboPorItemPedidoId.getOrDefault(itemPedido.getId(), List.of());
+                                List<ItemComboResponseDTO> itemComboResponseDTOs = itemCombos.stream()
+                                        .map(ItemComboResponseDTO::new)
+                                        .collect(Collectors.toList());
+                                return new ItemPedidoResponseDTO(itemPedido, itemComboResponseDTOs);
+                            })
+                            .collect(Collectors.toList());
+                    
+                    // Cria o PedidoResponseDTO com os itens enriquecidos
+                    PedidoResponseDTO pedidoEnriquecido = new PedidoResponseDTO(
+                            filaImpressao.getPedido(),
+                            itensEnriquecidos
+                    );
+                    
+                    // Cria e retorna o DTO da fila de impressão
+                    return new FilaImpressaoDTO(filaImpressao, pedidoEnriquecido);
+                })
+                .collect(Collectors.toList());
     }
 
     @Transactional

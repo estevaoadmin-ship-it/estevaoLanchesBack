@@ -1,11 +1,14 @@
 package com.paullomaggio.estevaoLanches.services;
 
+import com.paullomaggio.estevaoLanches.dtos.FilaImpressaoDTO;
 import com.paullomaggio.estevaoLanches.entities.FilaImpressao;
-import com.paullomaggio.estevaoLanches.entities.FilaImpressao.StatusImpressao;
 import com.paullomaggio.estevaoLanches.entities.FilaImpressao.DestinoImpressao;
+import com.paullomaggio.estevaoLanches.entities.FilaImpressao.StatusImpressao;
+import com.paullomaggio.estevaoLanches.entities.ItemCombo;
 import com.paullomaggio.estevaoLanches.entities.Pedido;
 import com.paullomaggio.estevaoLanches.exceptions.BusinessRuleException;
 import com.paullomaggio.estevaoLanches.repositories.FilaImpressaoRepository;
+import com.paullomaggio.estevaoLanches.repositories.ItemComboRepository;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
@@ -35,6 +38,7 @@ import static org.mockito.Mockito.*;
 class FilaImpressaoServiceTest {
 
     @Mock private FilaImpressaoRepository repository;
+    @Mock private ItemComboRepository itemComboRepository;
     // Removido @InjectMocks
     private FilaImpressaoService service;
 
@@ -45,7 +49,7 @@ class FilaImpressaoServiceTest {
     @BeforeEach
     void setUp() {
         // Instanciação manual do serviço com o mock
-        service = new FilaImpressaoService(repository);
+        service = new FilaImpressaoService(repository, itemComboRepository);
 
         idValido = UUID.randomUUID();
         pedidoMock = new Pedido();
@@ -84,18 +88,21 @@ class FilaImpressaoServiceTest {
         void ct010_deveRetornarApenasRegistrosPendentes() {
             when(repository.findByStatus(StatusImpressao.PENDENTE)).thenReturn(List.of(itemFila));
 
-            List<FilaImpressao> resultado = service.buscarPendentes();
+            List<FilaImpressaoDTO> resultado = service.buscarPendentes();
 
             assertFalse(resultado.isEmpty());
             assertEquals(StatusImpressao.PENDENTE, resultado.get(0).getStatus());
             verify(repository, times(1)).findByStatus(StatusImpressao.PENDENTE);
-        }
+            verify(itemComboRepository, never()).findByItemPedidoIdIn(anyList());
+    }
+
 
         @Test
         @DisplayName("CT-011: Lista Vazia — Se não houver cupons livres, deve retornar uma coleção imutável vazia")
         void ct011_deveRetornarVazioQuandoNaoHouverPendentes() {
-            when(repository.findByStatus(StatusImpressao.PENDENTE)).thenReturn(Collections.emptyList());
-            List<FilaImpressao> resultado = service.buscarPendentes();
+        when(repository.findByStatus(StatusImpressao.PENDENTE)).thenReturn(Collections.emptyList());
+            List<FilaImpressaoDTO> resultado = service.buscarPendentes();
+            verify(itemComboRepository, never()).findByItemPedidoIdIn(anyList());
             assertTrue(resultado.isEmpty());
         }
     }

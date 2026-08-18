@@ -1,5 +1,6 @@
 package com.paullomaggio.estevaoLanches.controllers;
 
+import com.paullomaggio.estevaoLanches.dtos.FilaImpressaoDTO;
 import com.paullomaggio.estevaoLanches.entities.FilaImpressao;
 import com.paullomaggio.estevaoLanches.services.FilaImpressaoService;
 import io.swagger.v3.oas.annotations.Operation;
@@ -31,7 +32,7 @@ public class FilaImpressaoController {
             @ApiResponse(responseCode = "403", description = "Sem permissão")
     })
     @GetMapping("/pendentes")
-    public ResponseEntity<List<FilaImpressao>> listarPendentes() {
+    public ResponseEntity<List<FilaImpressaoDTO>> listarPendentes() {
         return ResponseEntity.ok(service.buscarPendentes());
     }
 
