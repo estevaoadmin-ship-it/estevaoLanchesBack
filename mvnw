@@ -20,7 +20,7 @@ done
 PRGDIR=$(dirname "$PRG")
 
 # Only set BASEDIR if not already set
-[ -z "$BASEDIR" ] && BASEDIR=$(cd "$PRGDIR/.." && pwd)
+[ -z "$BASEDIR" ] && BASEDIR=$(cd "$PRGDIR" && pwd)
 
 # Base directory for the Maven wrapper
 BASEDIR=$(cd "$BASEDIR" && pwd)
