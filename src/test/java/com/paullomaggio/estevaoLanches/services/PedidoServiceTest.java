@@ -333,7 +333,45 @@ class PedidoServiceTest {
     }
 
     @Nested @DisplayName("6. Totalização Context") class Bloco6 {
-        @Test void ct033_totalUmItem() { assertTrue(true); }
+        @Test
+         @DisplayName("CT-033: Total de um item sem adicionais")
+         void totalUmItem() {
+             // Arrange
+             Produto produto = new Produto();
+             produto.setId(produtoId);
+             produto.setNome("Produto Teste");
+             produto.setPreco(new BigDecimal("25.00"));
+             produto.setPrecisaPreparo(true);
+ 
+             ItemPedido item = new ItemPedido();
+             item.setId(UUID.randomUUID());
+             item.setProduto(produto);
+             item.setQuantidade(1);
+             item.setPrecoUnitario(new BigDecimal("25.00"));
+             item.setAdicionais(List.of());
+             item.setObservacaoItem("");
+ 
+             Pedido pedido = new Pedido();
+             pedido.setId(pedidoId);
+             pedido.setStatus(StatusPedido.EM_PREPARO);
+             pedido.setStatusFinanceiro(StatusFinanceiro.AGUARDANDO_PAGAMENTO);
+             pedido.setTipo(TipoPedido.MESA);
+             pedido.setCliente(clienteMock);
+             pedido.setConta(contaMock);
+             pedido.setItens(List.of(item));
+             item.setPedido(pedido);
+ 
+              when(pedidoRepository.findById(pedidoId)).thenReturn(Optional.of(pedido));
+              when(pedidoRepository.save(any())).thenReturn(pedido);
+
+             // Act
+             BigDecimal total = pedidoService.recalcularTotalPedido(pedidoId).total();
+ 
+             // Assert
+             assertEquals(new BigDecimal("25.00"), total);
+         }
+ 
+         @Test void ct033_totalUmItem() { assertTrue(true); }
         @Test void ct034_totalVariosItens() { assertTrue(true); }
         @Test void ct035_totalComAdicionais() { assertTrue(true); }
         @Test void ct036_totalQuantidade() { assertTrue(true); }

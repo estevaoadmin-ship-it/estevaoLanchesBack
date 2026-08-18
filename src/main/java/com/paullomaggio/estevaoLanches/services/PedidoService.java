@@ -880,8 +880,8 @@ public class PedidoService {
                             .map(Adicional::getPreco)
                             .reduce(BigDecimal.ZERO, BigDecimal::add);
 
-                    totalAdicionaisCombos = totalAdicionaisCombos.add(
-                            precoAdicionaisItemCombo.multiply(BigDecimal.valueOf(itemCombo.getQuantidade()))
+                                        totalAdicionaisCombos = totalAdicionaisCombos.add(
+                            precoAdicionaisItemCombo.multiply(BigDecimal.valueOf(itemPedido.getQuantidade()))
                     );
                 }
             }

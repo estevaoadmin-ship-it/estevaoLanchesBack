@@ -145,9 +145,18 @@ public class GarcomMesaSessaoService {
                                         .toList();
 
                                 // O preço unitário base do cardápio
-                                BigDecimal valorUnitarioBase = item.getProduto().getPreco();
+                                BigDecimal valorUnitarioBase = item.getPrecoUnitario();
                                 // O valor total calculado do item (quantidade * precoUnitario acumulado com adicionais)
                                 BigDecimal valorTotalItem = item.getPrecoUnitario().multiply(BigDecimal.valueOf(item.getQuantidade()));
+                // Somar os adicionais dos itens de combo (se houver)
+                BigDecimal totalAdicionaisItemCombo = itemComboPorItemPedido.getOrDefault(item.getId(), List.of()).stream()
+                        .map(combo -> combo.getAdicionais().stream()
+                                .map(Adicional::getPreco)
+                                .reduce(BigDecimal.ZERO, BigDecimal::add)
+                                .multiply(BigDecimal.valueOf(item.getQuantidade()))
+                        )
+                        .reduce(BigDecimal.ZERO, BigDecimal::add);
+                valorTotalItem = valorTotalItem.add(totalAdicionaisItemCombo);
 
                                 // Get ItemCombo for this specific itemPedido
                                 List<ItemCombo> itemComboParaEsteItem = itemComboPorItemPedido.getOrDefault(item.getId(), List.of());

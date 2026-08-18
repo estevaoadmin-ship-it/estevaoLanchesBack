@@ -3,6 +3,7 @@ package com.paullomaggio.estevaoLanches.services;
 import com.paullomaggio.estevaoLanches.dtos.ContaRequestDTO;
 import com.paullomaggio.estevaoLanches.dtos.ContaResponseDTO;
 import com.paullomaggio.estevaoLanches.entities.*;
+import com.paullomaggio.estevaoLanches.enums.StatusFinanceiro;
 import com.paullomaggio.estevaoLanches.exceptions.BusinessRuleException;
 import com.paullomaggio.estevaoLanches.exceptions.ResourceNotFoundException;
 import com.paullomaggio.estevaoLanches.repositories.*;
@@ -132,7 +133,9 @@ public class ContaService {
                 .orElseThrow(() -> new ResourceNotFoundException("Conta não encontrada com o ID informado para sincronização."));
 
         // Utiliza a coleção de pedidos já existente na entidade Conta
+        // Apenas pedidos com status financeiro AGUARDANDO_PAGAMENTO contribuem para o valor total da conta
         BigDecimal total = conta.getPedidos().stream()
+                .filter(pedido -> pedido.getStatusFinanceiro() == StatusFinanceiro.AGUARDANDO_PAGAMENTO)
                 .map(Pedido::getTotal)
                 .filter(Objects::nonNull)
                 .reduce(BigDecimal.ZERO, BigDecimal::add);
