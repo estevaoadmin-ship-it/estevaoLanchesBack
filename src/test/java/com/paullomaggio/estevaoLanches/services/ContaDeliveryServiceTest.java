@@ -4,6 +4,7 @@ import com.paullomaggio.estevaoLanches.dtos.RegistroDeliveryRequestDTO;
 import com.paullomaggio.estevaoLanches.entities.Cliente;
 import com.paullomaggio.estevaoLanches.entities.ContaDelivery;
 import com.paullomaggio.estevaoLanches.exceptions.BusinessRuleException;
+import com.paullomaggio.estevaoLanches.exceptions.DuplicateResourceException;
 import com.paullomaggio.estevaoLanches.repositories.ClienteRepository;
 import com.paullomaggio.estevaoLanches.repositories.ContaDeliveryRepository;
 import org.junit.jupiter.api.BeforeEach;
@@ -175,12 +176,12 @@ class ContaDeliveryServiceTest {
     class EmailValidationTests {
 
         @Test
-        @DisplayName("CT-016: Duplicidade — Deve barrar e lançar exceção se o e-mail digital já estiver em uso")
+        @DisplayName("CT-016: Duplicidade — Deve barrar e lançar DuplicateResourceException (conflito 409) se o e-mail digital já estiver em uso")
         void ct016_deveBarrarEmailDuplicado() {
             RegistroDeliveryRequestDTO dto = new RegistroDeliveryRequestDTO("X", "duplicado@mail.com", "123", "123");
             when(contaDeliveryRepository.existsByEmail("duplicado@mail.com")).thenReturn(true);
 
-            assertThrows(BusinessRuleException.class, () -> contaDeliveryService.registrarNovaConta(dto));
+            assertThrows(DuplicateResourceException.class, () -> contaDeliveryService.registrarNovaConta(dto));
             verify(contaDeliveryRepository, never()).save(any());
         }
 
@@ -300,7 +301,7 @@ class ContaDeliveryServiceTest {
             contaDeliveryService.registrarNovaConta(dto);
 
             // Segunda transação síncrona/concorrente é interceptada e bloqueada
-            assertThrows(BusinessRuleException.class, () -> contaDeliveryService.registrarNovaConta(dto));
+            assertThrows(DuplicateResourceException.class, () -> contaDeliveryService.registrarNovaConta(dto));
             verify(contaDeliveryRepository, times(1)).save(any(ContaDelivery.class));
         }
     }

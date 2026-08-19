@@ -40,6 +40,18 @@ public class GlobalExceptionHandler {
         return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(err);
     }
 
+    @ExceptionHandler(DuplicateResourceException.class)
+    public ResponseEntity<StandardError> duplicateResource(DuplicateResourceException e, HttpServletRequest request) {
+        StandardError err = new StandardError(
+                Instant.now(),
+                HttpStatus.CONFLICT.value(),
+                "Conflito de Recurso Existente",
+                e.getMessage(),
+                request.getRequestURI()
+        );
+        return ResponseEntity.status(HttpStatus.CONFLICT).body(err);
+    }
+
     // 🎯 FIX CRÍTICO: Analisa dinamicamente a causa raiz para não mascarar comandos de INSERT/UPDATE
     @ExceptionHandler({DatabaseIntegrityException.class, DataIntegrityViolationException.class})
     public ResponseEntity<StandardError> databaseIntegrity(Exception e, HttpServletRequest request) {

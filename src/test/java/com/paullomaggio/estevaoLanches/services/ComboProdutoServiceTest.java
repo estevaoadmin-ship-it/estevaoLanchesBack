@@ -2,6 +2,8 @@ package com.paullomaggio.estevaoLanches.services;
 
 import com.paullomaggio.estevaoLanches.dtos.ComboProdutoRequestDTO;
 import com.paullomaggio.estevaoLanches.dtos.ComboProdutoResponseDTO;
+import com.paullomaggio.estevaoLanches.dtos.ComboComposicaoRequestDTO;
+import com.paullomaggio.estevaoLanches.dtos.ItemComposicaoRequestDTO;
 import com.paullomaggio.estevaoLanches.entities.ComboProduto;
 import com.paullomaggio.estevaoLanches.entities.Produto;
 import com.paullomaggio.estevaoLanches.enums.StatusProduto;

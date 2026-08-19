@@ -4,6 +4,7 @@ import com.paullomaggio.estevaoLanches.dtos.RegistroDeliveryRequestDTO;
 import com.paullomaggio.estevaoLanches.entities.Cliente;
 import com.paullomaggio.estevaoLanches.entities.ContaDelivery;
 import com.paullomaggio.estevaoLanches.exceptions.BusinessRuleException;
+import com.paullomaggio.estevaoLanches.exceptions.DuplicateResourceException;
 import com.paullomaggio.estevaoLanches.repositories.ClienteRepository;
 import com.paullomaggio.estevaoLanches.repositories.ContaDeliveryRepository;
 import org.springframework.security.crypto.password.PasswordEncoder;
@@ -39,7 +40,7 @@ public class ContaDeliveryService {
         String telefoneLimpo = dto.telefone().replaceAll("\\D", "");
 
         if (contaDeliveryRepository.existsByEmail(emailLimpo)) {
-            throw new BusinessRuleException("Este endereço de e-mail já está cadastrado no sistema.");
+            throw new DuplicateResourceException("Este endereço de e-mail já está cadastrado no sistema.");
         }
 
         // 🎯 FIX B: Localiza ou cria a Ficha Comercial

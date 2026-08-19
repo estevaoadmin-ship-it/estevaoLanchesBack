@@ -3,6 +3,7 @@ package com.paullomaggio.estevaoLanches.controllers;
 import com.paullomaggio.estevaoLanches.dtos.ComboProdutoRequestDTO;
 import com.paullomaggio.estevaoLanches.dtos.ComboProdutoResponseDTO;
 import com.paullomaggio.estevaoLanches.services.ComboProdutoService;
+import com.paullomaggio.estevaoLanches.dtos.ComboComposicaoRequestDTO;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.responses.ApiResponse;
 import io.swagger.v3.oas.annotations.responses.ApiResponses;
@@ -62,6 +63,19 @@ public class ComboProdutoController {
     @DeleteMapping("/{id}")
     public ResponseEntity<Void> removerItem(@PathVariable UUID id) {
         comboProdutoService.desassociarItem(id);
+        return ResponseEntity.noContent().build();
+    }
+@Operation(summary = "Atualiza a composição de um combo", description = "Define a composição final desejada de um combo, sincronizando adições, remoções e quantidades.")
+    @ApiResponses(value = {
+            @ApiResponse(responseCode = "204", description = "Composição atualizada com sucesso"),
+            @ApiResponse(responseCode = "400", description = "Dados de composição inválidos"),
+            @ApiResponse(responseCode = "404", description = "Combo não encontrado"),
+            @ApiResponse(responseCode = "401", description = "Não autenticado"),
+            @ApiResponse(responseCode = "403", description = "Sem permissão (apenas ADMIN)")
+    })
+    @PutMapping("/{comboId}/composicao")
+    public ResponseEntity<Void> atualizarComposicao(@PathVariable UUID comboId, @Valid @RequestBody ComboComposicaoRequestDTO request) {
+        comboProdutoService.atualizarComposicaoDoCombo(comboId, request.itens());
         return ResponseEntity.noContent().build();
     }
 }
