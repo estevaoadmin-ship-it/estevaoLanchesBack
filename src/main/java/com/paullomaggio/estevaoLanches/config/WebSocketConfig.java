@@ -22,10 +22,10 @@ public class WebSocketConfig implements WebSocketMessageBrokerConfigurer {
         // Em versões modernas do Spring Framework, o uso de wildcards brutos com credenciais ativas
         // causa colisão de políticas de CORS. O OriginPatterns soluciona a comunicação com apps híbridos.
         registry.addEndpoint("/ws-tevao")
-                .setAllowedOriginPatterns("*");
+                .setAllowedOriginPatterns("https://estevao-lanches-front.vercel.app");
 
         registry.addEndpoint("/ws-tevao")
-                .setAllowedOriginPatterns("*")
+                .setAllowedOriginPatterns("https://estevao-lanches-front.vercel.app")
                 .withSockJS();
     }
 }

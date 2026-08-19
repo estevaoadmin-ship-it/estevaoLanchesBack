@@ -8,6 +8,7 @@ import org.springframework.web.filter.CorsFilter;
 
 import java.util.Arrays;
 import java.util.Collections;
+import java.util.List;
 
 @Configuration
 public class CorsConfig {
@@ -20,7 +21,7 @@ public class CorsConfig {
         config.setAllowCredentials(true);
 
         // Libera padrões de origem para aceitar o mapeamento dinâmico do Ngrok e do Capacitor (https://localhost)
-        config.setAllowedOriginPatterns(Collections.singletonList("*"));
+        config.setAllowedOriginPatterns(Collections.singletonList("https://estevao-lanches-front.vercel.app"));
 
         // Libera explicitamente todos os métodos HTTP requisitados pelo app
         config.setAllowedMethods(Arrays.asList("GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"));
