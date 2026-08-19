@@ -89,14 +89,15 @@ public class ComboProdutoService {
         // Get current associations
         List<ComboProduto> associacoesAtuais = comboProdutoRepository.findByComboId(comboId);
 
-        // Map productId -> ComboProduto for current associations
-        Map<UUID, ComboProduto> mapaAtual = new HashMap<>();
+        // Group current associations by productId
+        Map<UUID, List<ComboProduto>> currentByProduct = new HashMap<>();
         for (ComboProduto cp : associacoesAtuais) {
-            mapaAtual.put(cp.getProduto().getId(), cp);
+            currentByProduct.computeIfAbsent(cp.getProduto().getId(), k -> new ArrayList<>()).add(cp);
         }
 
         List<ComboProduto> paraManter = new ArrayList<>();
         List<ComboProduto> paraCriar = new ArrayList<>();
+        List<ComboProduto> paraRemover = new ArrayList<>();
 
         for (ItemComposicaoRequestDTO item : novosItens) {
             UUID produtoId = item.produtoId();
@@ -105,26 +106,38 @@ public class ComboProdutoService {
             Produto produto = produtoRepository.findById(produtoId)
                     .orElseThrow(() -> new ResourceNotFoundException("Produto não encontrado: " + produtoId));
 
-            ComboProduto existente = mapaAtual.get(produtoId);
-            if (existente != null) {
-                // Update quantity if different
-                if (!Objects.equals(existente.getQuantidade(), quantidade)) {
-                    existente.setQuantidade(quantidade);
-                }
-                paraManter.add(existente);
-                mapaAtual.remove(produtoId);
-            } else {
+            List<ComboProduto> currentList = currentByProduct.get(produtoId);
+            if (currentList == null || currentList.isEmpty()) {
+                // No existing association -> create new
                 ComboProduto novo = new ComboProduto();
                 novo.setCombo(combo);
                 novo.setProduto(produto);
                 novo.setQuantidade(quantidade);
                 paraCriar.add(novo);
+            } else {
+                // Keep the first association, update quantity if needed
+                ComboProduto keep = currentList.get(0);
+                if (!Objects.equals(keep.getQuantidade(), quantidade)) {
+                    keep.setQuantidade(quantidade);
+                }
+                paraManter.add(keep);
+                // Any additional associations for this productId are to be removed
+                if (currentList.size() > 1) {
+                    for (int i = 1; i < currentList.size(); i++) {
+                        paraRemover.add(currentList.get(i));
+                    }
+                }
+                // Remove processed productId from map so we know what's left
+                currentByProduct.remove(produtoId);
             }
         }
 
-        // Remaining items in mapaAtual are to be removed
-        List<ComboProduto> paraRemover = new ArrayList<>(mapaAtual.values());
+        // Any productIds remaining in currentByProduct are those not in the request -> remove all their associations
+        for (List<ComboProduto> list : currentByProduct.values()) {
+            paraRemover.addAll(list);
+        }
 
+        // Execute changes
         if (!paraRemover.isEmpty()) {
             comboProdutoRepository.deleteAll(paraRemover);
         }
