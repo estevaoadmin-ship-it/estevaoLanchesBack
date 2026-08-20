@@ -21,7 +21,7 @@ public class CorsConfig {
         config.setAllowCredentials(true);
 
         // Libera padrões de origem para aceitar o mapeamento dinâmico do Ngrok e do Capacitor (https://localhost)
-        config.setAllowedOriginPatterns(Arrays.asList("https://estevao-lanches-front.vercel.app", "https://estevao-lanches-front-mqv8gtd3m-estevaoadmin-6034s-projects.vercel.app"));
+        config.setAllowedOriginPatterns(Arrays.asList("https://estevao-lanches-front.vercel.app", "https://estevao-lanches-front-mqv8gtd3m-estevaoadmin-6034s-projects.vercel.app", "https://localhost"));
 
         // Libera explicitamente todos os métodos HTTP requisitados pelo app
         config.setAllowedMethods(Arrays.asList("GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"));

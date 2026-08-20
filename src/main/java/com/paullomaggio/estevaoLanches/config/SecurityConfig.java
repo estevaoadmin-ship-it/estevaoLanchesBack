@@ -103,7 +103,7 @@ public class SecurityConfig {
     @Bean
     public CorsConfigurationSource corsConfigurationSource() {
         CorsConfiguration configuration = new CorsConfiguration();
-        configuration.setAllowedOriginPatterns(List.of("https://estevao-lanches-front.vercel.app", "https://estevao-lanches-front-mqv8gtd3m-estevaoadmin-6034s-projects.vercel.app"));
+        configuration.setAllowedOriginPatterns(List.of("https://estevao-lanches-front.vercel.app", "https://estevao-lanches-front-mqv8gtd3m-estevaoadmin-6034s-projects.vercel.app", "https://localhost"));
         configuration.setAllowedMethods(List.of("GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"));
         configuration.setAllowedHeaders(List.of("*"));
         configuration.setExposedHeaders(List.of("Authorization"));
