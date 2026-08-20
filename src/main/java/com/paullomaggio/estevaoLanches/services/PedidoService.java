@@ -249,12 +249,14 @@ public class PedidoService {
             pedido.setFormaPagamento(dto.formaPagamento());
             pedido.setValorRecebido(dto.valorRecebido());
 
-            Pedido pedidoSalvo = pedidoRepository.save(pedido);
-
-            // NEW: Production trigger for BALCAO orders
-            if (pedidoSalvo.getTipo() == TipoPedido.BALCAO && pedidoSalvo.getStatusFinanceiro() == StatusFinanceiro.PAGO) {
-                gerarFilaImpressao(pedidoSalvo);
+            // NOVA REGRA CIRÚRGICA:
+            // Somente BALCÃO deve ser finalizado automaticamente
+            // no momento em que o pagamento é confirmado.
+            if (pedido.getTipo() == TipoPedido.BALCAO) {
+                pedido.setStatus(StatusPedido.FINALIZADO);
             }
+
+            Pedido pedidoSalvo = pedidoRepository.save(pedido);
 
             PedidoResponseDTO response = new PedidoResponseDTO(pedidoSalvo);
             messagingTemplate.convertAndSend("/topic/caixa", response);

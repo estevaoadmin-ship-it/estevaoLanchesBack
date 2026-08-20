@@ -486,8 +486,8 @@ class PedidoServiceTest {
         }
 
         @Test
-        @DisplayName("ct055_receberPagamentoBalcao_disparaProducao")
-        void ct055_receberPagamentoBalcao_disparaProducao() {
+        @DisplayName("ct055_receberPagamentoBalcao_naoDisparaProducao")
+        void ct055_receberPagamentoBalcao_naoDisparaProducao() {
             // Setup pedidoMock as a Balcão order (no associated Conta)
             pedidoMock.setConta(null);
             pedidoMock.setTipo(TipoPedido.BALCAO); // ADDED THIS LINE
@@ -531,13 +531,135 @@ class PedidoServiceTest {
             verify(pagamentoService, times(1))
                     .registrarPagamentoPedido(pedidoId, dto);
 
-            verify(filaImpressaoRepository, times(1))
+            // BALCÃO NÃO gera fila de impressão para a cozinha
+            verify(filaImpressaoRepository, never())
                     .save(any(FilaImpressao.class));
 
             assertEquals(
                     StatusFinanceiro.PAGO,
                     pedidoMock.getStatusFinanceiro()
             );
+            assertEquals(
+                    StatusPedido.FINALIZADO,
+                    pedidoMock.getStatus()
+            );
+        }
+
+        @Test
+        @DisplayName("ctA1_deveFinalizarPedidoBalcaoAoRegistrarPagamento")
+        void ctA1_deveFinalizarPedidoBalcaoAoRegistrarPagamento() {
+            pedidoMock.setConta(null);
+            pedidoMock.setTipo(TipoPedido.BALCAO);
+            pedidoMock.setStatus(StatusPedido.RECEBIDO);
+            pedidoMock.setStatusFinanceiro(StatusFinanceiro.AGUARDANDO_PAGAMENTO);
+
+            when(pedidoRepository.findByIdForUpdate(pedidoId)).thenReturn(Optional.of(pedidoMock));
+            when(pagamentoService.registrarPagamentoPedido(any(UUID.class), any(PagamentoRequestDTO.class))).thenReturn(mock(PagamentoResponseDTO.class));
+            when(pedidoRepository.save(any(Pedido.class))).thenReturn(pedidoMock);
+
+            PagamentoRequestDTO dto = new PagamentoRequestDTO(FormaPagamento.PIX, new BigDecimal("35.00"));
+
+            PedidoResponseDTO response = pedidoService.receberPagamento(pedidoId, dto);
+
+            assertEquals(StatusFinanceiro.PAGO, pedidoMock.getStatusFinanceiro());
+            assertEquals(StatusPedido.FINALIZADO, pedidoMock.getStatus());
+            assertEquals(FormaPagamento.PIX, pedidoMock.getFormaPagamento());
+            assertEquals(new BigDecimal("35.00"), pedidoMock.getValorRecebido());
+            assertNotNull(response);
+            assertEquals(StatusPedido.FINALIZADO, response.status());
+            assertEquals(StatusFinanceiro.PAGO, response.statusFinanceiro());
+            verify(pedidoRepository, times(1)).save(pedidoMock);
+        }
+
+        @Test
+        @DisplayName("ctA2_naoDeveFinalizarAutomaticamentePedidoMesaAoRegistrarPagamento")
+        void ctA2_naoDeveFinalizarAutomaticamentePedidoMesaAoRegistrarPagamento() {
+            pedidoMock.setTipo(TipoPedido.MESA);
+            pedidoMock.setStatus(StatusPedido.RECEBIDO);
+            pedidoMock.setStatusFinanceiro(StatusFinanceiro.AGUARDANDO_PAGAMENTO);
+
+            when(pedidoRepository.findByIdForUpdate(pedidoId)).thenReturn(Optional.of(pedidoMock));
+            when(pagamentoService.registrarPagamentoPedido(any(UUID.class), any(PagamentoRequestDTO.class))).thenReturn(mock(PagamentoResponseDTO.class));
+            when(pedidoRepository.save(any(Pedido.class))).thenReturn(pedidoMock);
+
+            PagamentoRequestDTO dto = new PagamentoRequestDTO(FormaPagamento.PIX, new BigDecimal("35.00"));
+
+            pedidoService.receberPagamento(pedidoId, dto);
+
+            assertEquals(StatusFinanceiro.PAGO, pedidoMock.getStatusFinanceiro());
+            assertEquals(StatusPedido.RECEBIDO, pedidoMock.getStatus()); // NÃO alterado pela nova regra
+        }
+
+        @Test
+        @DisplayName("ctA3_naoDeveFinalizarAutomaticamentePedidoDeliveryAoRegistrarPagamento")
+        void ctA3_naoDeveFinalizarAutomaticamentePedidoDeliveryAoRegistrarPagamento() {
+            pedidoMock.setTipo(TipoPedido.DELIVERY);
+            pedidoMock.setStatus(StatusPedido.RECEBIDO);
+            pedidoMock.setStatusFinanceiro(StatusFinanceiro.AGUARDANDO_PAGAMENTO);
+
+            when(pedidoRepository.findByIdForUpdate(pedidoId)).thenReturn(Optional.of(pedidoMock));
+            when(pagamentoService.registrarPagamentoPedido(any(UUID.class), any(PagamentoRequestDTO.class))).thenReturn(mock(PagamentoResponseDTO.class));
+            when(pedidoRepository.save(any(Pedido.class))).thenReturn(pedidoMock);
+
+            PagamentoRequestDTO dto = new PagamentoRequestDTO(FormaPagamento.PIX, new BigDecimal("35.00"));
+
+            pedidoService.receberPagamento(pedidoId, dto);
+
+            assertEquals(StatusFinanceiro.PAGO, pedidoMock.getStatusFinanceiro());
+            assertEquals(StatusPedido.RECEBIDO, pedidoMock.getStatus()); // NÃO alterado pela nova regra
+        }
+
+        @Test
+        @DisplayName("ctA4_naoDeveFinalizarAutomaticamentePedidoRetiradaAoRegistrarPagamento")
+        void ctA4_naoDeveFinalizarAutomaticamentePedidoRetiradaAoRegistrarPagamento() {
+            pedidoMock.setTipo(TipoPedido.RETIRADA);
+            pedidoMock.setStatus(StatusPedido.RECEBIDO);
+            pedidoMock.setStatusFinanceiro(StatusFinanceiro.AGUARDANDO_PAGAMENTO);
+
+            when(pedidoRepository.findByIdForUpdate(pedidoId)).thenReturn(Optional.of(pedidoMock));
+            when(pagamentoService.registrarPagamentoPedido(any(UUID.class), any(PagamentoRequestDTO.class))).thenReturn(mock(PagamentoResponseDTO.class));
+            when(pedidoRepository.save(any(Pedido.class))).thenReturn(pedidoMock);
+
+            PagamentoRequestDTO dto = new PagamentoRequestDTO(FormaPagamento.PIX, new BigDecimal("35.00"));
+
+            pedidoService.receberPagamento(pedidoId, dto);
+
+            assertEquals(StatusFinanceiro.PAGO, pedidoMock.getStatusFinanceiro());
+            assertEquals(StatusPedido.RECEBIDO, pedidoMock.getStatus()); // NÃO alterado pela nova regra
+        }
+
+        @Test
+        @DisplayName("ctA7_balcaoNaoGeraFilaDeImpressaoCozinha")
+        void ctA7_balcaoNaoGeraFilaDeImpressaoCozinha() {
+            pedidoMock.setConta(null);
+            pedidoMock.setTipo(TipoPedido.BALCAO);
+            pedidoMock.setStatus(StatusPedido.RECEBIDO);
+            pedidoMock.setStatusFinanceiro(StatusFinanceiro.AGUARDANDO_PAGAMENTO);
+
+            ItemPedido item = new ItemPedido();
+            item.setProduto(produtoMock); // produtoMock precisaPreparo = true no @BeforeEach
+            item.setQuantidade(1);
+            item.setPrecoUnitario(new BigDecimal("35.00"));
+            item.setPedido(pedidoMock);
+            pedidoMock.getItens().add(item);
+
+            when(pedidoRepository.findByIdForUpdate(pedidoId)).thenReturn(Optional.of(pedidoMock));
+            when(pagamentoService.registrarPagamentoPedido(any(UUID.class), any(PagamentoRequestDTO.class))).thenReturn(mock(PagamentoResponseDTO.class));
+            when(pedidoRepository.save(any(Pedido.class))).thenReturn(pedidoMock);
+
+            PagamentoRequestDTO dto = new PagamentoRequestDTO(FormaPagamento.PIX, new BigDecimal("35.00"));
+
+            PedidoResponseDTO response = pedidoService.receberPagamento(pedidoId, dto);
+
+            assertEquals(StatusFinanceiro.PAGO, pedidoMock.getStatusFinanceiro());
+            assertEquals(StatusPedido.FINALIZADO, pedidoMock.getStatus());
+
+            // BALCÃO NÃO gera fila de impressão para a cozinha, mesmo com item que precisa preparo
+            verify(filaImpressaoRepository, never()).save(any(FilaImpressao.class));
+
+            assertNotNull(response);
+            assertEquals(StatusFinanceiro.PAGO, response.statusFinanceiro());
+            assertEquals(StatusPedido.FINALIZADO, response.status());
         }
     }
 
@@ -900,6 +1022,33 @@ class PedidoServiceTest {
             when(pedidoRepository.findAll()).thenReturn(List.of(pedidoMock));
             assertFalse(pedidoService.listarPedidosAtivosMonitor().isEmpty());
         }
+        @Test
+        @DisplayName("ctA5_balcaoFinalizadoNaoApareceNoMonitor")
+        void ctA5_balcaoFinalizadoNaoApareceNoMonitor() {
+            pedidoMock.setTipo(TipoPedido.BALCAO);
+            pedidoMock.setStatus(StatusPedido.FINALIZADO);
+            pedidoMock.setStatusFinanceiro(StatusFinanceiro.PAGO);
+
+            when(pedidoRepository.findAll()).thenReturn(List.of(pedidoMock));
+
+            assertTrue(pedidoService.listarPedidosAtivosMonitor().isEmpty());
+        }
+        @Test
+        @DisplayName("ctA6_balcaoFinalizadoPagoApareceNoHistorico")
+        void ctA6_balcaoFinalizadoPagoApareceNoHistorico() {
+            pedidoMock.setTipo(TipoPedido.BALCAO);
+            pedidoMock.setStatus(StatusPedido.FINALIZADO);
+            pedidoMock.setStatusFinanceiro(StatusFinanceiro.PAGO);
+
+            when(pedidoRepository.findByClienteIdOrderByDataHoraDesc(clienteId)).thenReturn(List.of(pedidoMock));
+
+            List<PedidoResponseDTO> historico = pedidoService.listarHistoricoCliente(clienteId);
+
+            assertFalse(historico.isEmpty());
+            assertEquals(StatusPedido.FINALIZADO, historico.get(0).status());
+            assertEquals(StatusFinanceiro.PAGO, historico.get(0).statusFinanceiro());
+            assertEquals(TipoPedido.BALCAO, historico.get(0).tipo());
+        }
         @Test void ct087_itensPorComanda() {
             when(contaRepository.findByComandaId(comandaId)).thenReturn(List.of(contaMock));
             when(pedidoRepository.findByContaIdIn(any())).thenReturn(List.of(pedidoMock));
@@ -947,11 +1096,12 @@ class PedidoServiceTest {
     }
 
     @Test
-    @DisplayName("ct055_receberPagamentoBalcao_disparaProducao")
-    void ct055_receberPagamentoBalcao_disparaProducao() {
+    @DisplayName("ct055_receberPagamentoBalcao_naoDisparaProducao")
+    void ct055_receberPagamentoBalcao_naoDisparaProducao() {
         // Configura explicitamente um pedido de BALCÃO
         pedidoMock.setConta(null);
         pedidoMock.setTipo(TipoPedido.BALCAO);
+        pedidoMock.setStatus(StatusPedido.RECEBIDO);
         pedidoMock.setStatusFinanceiro(StatusFinanceiro.AGUARDANDO_PAGAMENTO);
         pedidoMock.setTotal(new BigDecimal("35.00"));
 
@@ -992,12 +1142,17 @@ class PedidoServiceTest {
         verify(pagamentoService, times(1))
                 .registrarPagamentoPedido(pedidoId, dto);
 
-        verify(filaImpressaoRepository, times(1))
+        // BALCÃO NÃO gera fila de impressão para a cozinha
+        verify(filaImpressaoRepository, never())
                 .save(any(FilaImpressao.class));
 
         assertEquals(
                 StatusFinanceiro.PAGO,
                 pedidoMock.getStatusFinanceiro()
+        );
+        assertEquals(
+                StatusPedido.FINALIZADO,
+                pedidoMock.getStatus()
         );
     }
 
