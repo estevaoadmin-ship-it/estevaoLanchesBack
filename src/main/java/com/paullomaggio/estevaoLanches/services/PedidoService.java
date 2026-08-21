@@ -700,6 +700,22 @@ public class PedidoService {
                 .orElseThrow(() -> new ResourceNotFoundException("Item de pedido não localizado."));
 
         List<Adicional> adicionais = adicionalRepository.findAllById(adicionaisIds);
+
+        BigDecimal adicionaisAtuais = item.getAdicionais().stream()
+                .map(Adicional::getPreco)
+                .reduce(BigDecimal.ZERO, BigDecimal::add);
+
+        BigDecimal novosAdicionais = adicionais.stream()
+                .map(Adicional::getPreco)
+                .reduce(BigDecimal.ZERO, BigDecimal::add);
+
+        BigDecimal novoPrecoUnitario =
+                item.getPrecoUnitario()
+                        .subtract(adicionaisAtuais)
+                        .add(novosAdicionais);
+
+        item.setPrecoUnitario(novoPrecoUnitario);
+
         item.setAdicionais(adicionais);
 
         return recalcularTotalPedido(pedido.getId());
